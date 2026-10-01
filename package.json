@@ -10,8 +10,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && vue-tsc --noEmit -p tsconfig.web.json"
   },
   "dependencies": {
+    "ant-design-vue": "^4.2.6",
     "cesium": "^1.145.0",
-    "element-plus": "^2.14.7",
     "pinia": "^4.0.3",
     "vue": "^3.5.43"
   },
