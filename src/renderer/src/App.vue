@@ -19,7 +19,6 @@ const {
   isGlobeReady,
   camera,
   levelViewActive,
-  providerStyles,
   terrainProviderId,
   terrainExaggeration,
   terrainLighting,
@@ -29,7 +28,7 @@ const {
   storeToRefs(store)
 
 const globeContainer = ref<HTMLDivElement>()
-const { switchBasemap, setProviderStyle, setLayerOpacity, flyTo, toggleLevelView, setTerrain, setTerrainExaggeration, setTerrainLighting } = useCesiumViewer(globeContainer)
+const { switchBasemap, setLayerOpacity, flyTo, toggleLevelView, setTerrain, setTerrainExaggeration, setTerrainLighting } = useCesiumViewer(globeContainer)
 const levelSwitcherVisible = computed(() => isGlobeReady.value && camera.value.height < 5000000)
 
 function handleOpenLayers(): void {
@@ -46,10 +45,6 @@ function handleSelectLayer(id: string): void {
 
 function handleOpacityChange(id: string, opacity: number): void {
   setLayerOpacity(id, opacity)
-}
-
-function handleProviderStyle(id: string, styleId: string): void {
-  setProviderStyle(id, styleId)
 }
 
 function handleTerrainChange(id: string): void {
@@ -122,7 +117,6 @@ function handleLevelViewToggle(): void {
       :error="globeError"
       :terrain-error="terrainError"
       :loading="!isGlobeReady"
-      :provider-styles="providerStyles"
       :terrain-provider-id="terrainProviderId"
       :terrain-exaggeration="terrainExaggeration"
       :terrain-lighting="terrainLighting"
@@ -132,7 +126,6 @@ function handleLevelViewToggle(): void {
       @select="handleSelectLayer"
       @opacity="handleOpacityChange"
       @retry="handleRetry"
-      @provider-style="handleProviderStyle"
       @terrain="handleTerrainChange"
       @terrain-exaggeration="handleTerrainExaggeration"
       @terrain-lighting="handleTerrainLighting"

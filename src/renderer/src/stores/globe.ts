@@ -49,6 +49,18 @@ export const providerCatalog: ProviderMeta[] = [
   { id: 'opentopomap', name: 'OpenTopoMap', description: '地形晕渲', region: 'global', coordinateSystem: 'WGS84', requiresKey: false, styles: [{ id: 'topo', name: '地形' }], defaultStyleId: 'topo' }
 ]
 
+export interface BasemapCategoryMeta {
+  id: string
+  name: string
+  providerIds: string[]
+}
+
+export const basemapCategories: BasemapCategoryMeta[] = [
+  { id: 'road', name: '道路', providerIds: ['osm'] },
+  { id: 'satellite', name: '卫星', providerIds: ['esri-imagery'] },
+  { id: 'topo', name: '地形', providerIds: ['opentopomap'] }
+]
+
 export const credentialOnlyProviders: ProviderMeta[] = [
   { id: 'amap', name: '高德', description: '大陆地图', region: 'china', coordinateSystem: 'GCJ02', requiresKey: true, requiresSecurityKey: true, styles: [{ id: 'road', name: '道路' }, { id: 'satellite', name: '卫星' }], defaultStyleId: 'road' },
   { id: 'baidu', name: '百度', description: '大陆地图', region: 'china', coordinateSystem: 'BD09', requiresKey: true, requiresSk: true, skOptional: true, styles: [{ id: 'road', name: '道路' }, { id: 'satellite', name: '卫星' }], defaultStyleId: 'road' }
