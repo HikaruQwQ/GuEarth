@@ -7,14 +7,19 @@ import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { useGlobeStore } from '@renderer/stores/globe'
 import { useDrawingStore, type DrawTool } from '@renderer/stores/drawing'
 import { useAiStore } from '@renderer/stores/ai'
+import { useClimateStore } from '@renderer/stores/climate'
 import { useCesiumViewer } from '@renderer/composables/useCesiumViewer'
 import { useDrawing } from '@renderer/composables/useDrawing'
+import { useThematicLayers } from '@renderer/composables/useThematicLayers'
 import GlobeToolbar from '@renderer/components/GlobeToolbar.vue'
 import CameraStatus from '@renderer/components/CameraStatus.vue'
 import LayerPanel from '@renderer/components/LayerPanel.vue'
 import LevelViewSwitcher from '@renderer/components/LevelViewSwitcher.vue'
 import AnnotationPanel from '@renderer/components/AnnotationPanel.vue'
 import PlaceSearchBox from '@renderer/components/PlaceSearchBox.vue'
+import WindParticles from '@renderer/components/WindParticles.vue'
+import MonthTimeline from '@renderer/components/MonthTimeline.vue'
+import ThematicLegend from '@renderer/components/ThematicLegend.vue'
 import EoqAssistant from '@renderer/components/EoqAssistant.vue'
 import AiSettingsModal from '@renderer/components/AiSettingsModal.vue'
 
@@ -39,6 +44,9 @@ const {
 const globeContainer = ref<HTMLDivElement>()
 const { viewer, switchBasemap, setLayerOpacity, flyTo, flyToPlace, toggleLevelView, setTerrain, setTerrainExaggeration, setTerrainLighting } = useCesiumViewer(globeContainer)
 const { flyToShape } = useDrawing(viewer)
+const climateStore = useClimateStore()
+const { overlays: thematicOverlays } = storeToRefs(climateStore)
+useThematicLayers(viewer)
 
 const drawingStore = useDrawingStore()
 const { activeTool, shapes, selectedShapeId } = storeToRefs(drawingStore)
@@ -234,6 +242,7 @@ function deleteSelectedShape(): void {
 <template>
   <div class="app">
     <div ref="globeContainer" class="globe" :class="{ drawing: activeTool }"></div>
+    <WindParticles v-if="thematicOverlays['wind-particles']" :viewer="viewer" />
     <GlobeToolbar
       :active-tool="activeTool"
       :shape-count="shapes.length"
@@ -245,6 +254,8 @@ function deleteSelectedShape(): void {
       @clear-shapes="handleClearShapes"
     />
     <PlaceSearchBox @select="flyToPlace" />
+    <MonthTimeline />
+    <ThematicLegend />
     <div v-if="drawHint" class="draw-hint">{{ drawHint }}</div>
     <CameraStatus :camera="camera" />
     <EoqAssistant />
