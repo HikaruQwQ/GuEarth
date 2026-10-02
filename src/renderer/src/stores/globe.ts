@@ -144,7 +144,7 @@ export const useGlobeStore = defineStore('globe', () => {
       terrainExaggeration: terrainExaggeration.value,
       terrainLighting: terrainLighting.value,
       tileCacheEnabled: tileCacheEnabled.value,
-      providerStyles: providerStyles.value,
+      providerStyles: { ...providerStyles.value },
       sceneMode: sceneMode.value
     })
   }

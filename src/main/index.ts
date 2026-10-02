@@ -45,7 +45,7 @@ let shapes: StoredShape[] = []
 const aiSettings = new AiSettingsStore()
 
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'guearth-tile', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
+  { scheme: 'guearth-tile', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } }
 ])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -182,10 +182,13 @@ function computeBaiduSn(path: string, queryString: string, sk: string): string {
 }
 
 function tileRemoteUrl(providerId: string, styleId: string, level: number, x: number, y: number): string | undefined {
-  const key = readProviderKey(providerId)
-  const subdomain = String(((x % 4) + 4) % 4)
+  if (providerId === 'osm') return `https://tile.openstreetmap.org/${level}/${x}/${y}.png`
+  if (providerId === 'esri-imagery') return `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${level}/${y}/${x}`
+  if (providerId === 'opentopomap') return `https://${['a', 'b', 'c'][((x % 3) + 3) % 3]}.tile.opentopomap.org/${level}/${x}/${y}.png`
   if (providerId === 'baidu') {
+    const key = readProviderKey(providerId)
     if (!key) return undefined
+    const subdomain = String(((x % 4) + 4) % 4)
     const [translatedX, translatedY] = baiduLngLatToTile(level, ...wgs84ToBd09(...tileCenter(level, x, y)))
     const ak = key
     const sk = readProviderKey(`${providerId}-sk`)
@@ -410,7 +413,11 @@ app.whenReady().then(() => {
   aiSettings.init(join(userDataPath, 'ai-settings.json'))
   registerIpcHandlers()
   registerAiIpcHandlers(aiSettings)
-  protocol.handle('guearth-tile', handleTileProtocol)
+  protocol.handle('guearth-tile', async (request) => {
+    const response = await handleTileProtocol(request)
+    response.headers.set('Access-Control-Allow-Origin', '*')
+    return response
+  })
   createWindow()
 
   app.on('activate', () => {
