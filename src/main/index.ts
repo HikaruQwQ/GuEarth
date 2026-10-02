@@ -25,7 +25,6 @@ const defaultSettings: PersistedSettings = {
     osm: 'standard',
     'esri-imagery': 'satellite',
     opentopomap: 'topo',
-    amap: 'road',
     baidu: 'road'
   },
   providerCredentials: {},
@@ -72,9 +71,10 @@ function readSettings(): PersistedSettings {
     }
     const legacyTerrain = parsed.terrainExaggeration === undefined
     const storedTerrainProviderId = typeof parsed.selectedTerrainProviderId === 'string' ? parsed.selectedTerrainProviderId : defaultSettings.selectedTerrainProviderId
+    const terrainProviderId = storedTerrainProviderId === 'mapbox-terrain' ? 'cesium-world-terrain' : storedTerrainProviderId
     return {
       selectedImageryProviderId: typeof parsed.selectedImageryProviderId === 'string' ? parsed.selectedImageryProviderId : defaultSettings.selectedImageryProviderId,
-      selectedTerrainProviderId: legacyTerrain && storedTerrainProviderId === 'ellipsoid' ? defaultSettings.selectedTerrainProviderId : storedTerrainProviderId,
+      selectedTerrainProviderId: legacyTerrain && terrainProviderId === 'ellipsoid' ? defaultSettings.selectedTerrainProviderId : terrainProviderId,
       terrainExaggeration: typeof parsed.terrainExaggeration === 'number' && Number.isFinite(parsed.terrainExaggeration) ? Math.min(5, Math.max(1, parsed.terrainExaggeration)) : defaultSettings.terrainExaggeration,
       terrainLighting: parsed.terrainLighting === true,
       tileCacheEnabled: parsed.tileCacheEnabled !== false,
@@ -199,10 +199,6 @@ function readProviderSk(providerId: string): string | undefined {
   }
 }
 
-function readProviderSecurityKey(providerId: string): string | undefined {
-  return readProviderSk(providerId)
-}
-
 function computeBaiduSn(path: string, queryString: string, sk: string): string {
   const plaintext = encodeURIComponent(`${path}?${queryString}${sk}`)
   return createHash('md5').update(plaintext).digest('hex')
@@ -263,15 +259,6 @@ function tileCenter(level: number, x: number, y: number): [number, number] {
   return [longitude, latitude]
 }
 
-function geoToTile(level: number, longitude: number, latitude: number): [number, number] {
-  const scale = 2 ** level
-  const clampedLatitude = Math.max(-85.05112878, Math.min(85.05112878, latitude))
-  const x = Math.max(0, Math.min(scale - 1, Math.floor((longitude + 180) / 360 * scale)))
-  const latitudeRadians = clampedLatitude / 180 * coordinatePi
-  const y = Math.max(0, Math.min(scale - 1, Math.floor((1 - Math.log(Math.tan(latitudeRadians) + 1 / Math.cos(latitudeRadians)) / coordinatePi) / 2 * scale)))
-  return [x, y]
-}
-
 const baiduMercatorBands = [75, 60, 45, 30, 15, 0]
 const baiduMercatorFactors = [
   [-0.0015702102444, 111320.7020616939, 1704480524535203, -10338987376042340, 26112667856603880, -35149669176653700, 26595700718403920, -10725012454188240, 1800819912950474, 82.5],
@@ -301,30 +288,15 @@ function baiduLngLatToTile(level: number, longitude: number, latitude: number): 
   return [Math.floor(pointX * retain / 256), Math.floor(pointY * retain / 256)]
 }
 
-function translatedTile(level: number, x: number, y: number, providerId: string): [number, number] {
-  const [longitude, latitude] = tileCenter(level, x, y)
-  if (providerId === 'amap') return geoToTile(level, ...wgs84ToGcj02(longitude, latitude))
-  if (providerId === 'baidu') return baiduLngLatToTile(level, ...wgs84ToBd09(longitude, latitude))
-  return [x, y]
-}
-
 function tileRemoteUrl(providerId: string, styleId: string, level: number, x: number, y: number): string | undefined {
   const key = readProviderKey(providerId)
   const subdomain = String(((x % 4) + 4) % 4)
-  const [translatedX, translatedY] = translatedTile(level, x, y, providerId)
-  const amapHost = subdomain === '0' ? 'webrd0' : `webrd0${subdomain}`
-  if (providerId === 'amap') {
-    const style = styleId === 'satellite' ? 6 : 7
-    const securityKey = readProviderSecurityKey(providerId)
-    const keyParams = `${key ? `&key=${encodeURIComponent(key)}` : ''}${securityKey ? `&jscode=${encodeURIComponent(securityKey)}` : ''}`
-    return `https://${amapHost}.is.autonavi.com/appmaptile?style=${style}&x=${translatedX}&y=${translatedY}&z=${level}${keyParams}`
-  }
   if (providerId === 'baidu') {
     if (!key) return undefined
+    const [translatedX, translatedY] = baiduLngLatToTile(level, ...wgs84ToBd09(...tileCenter(level, x, y)))
     const ak = key
     const sk = readProviderSk(providerId)
     if (styleId === 'satellite') {
-      const uValue = `x=${translatedX};y=${translatedY};z=${level};v=009;type=sate`
       const baseQueryString = `qt=satepc&x=${translatedX}&y=${translatedY}&z=${level}&udt=20230101&ak=${encodeURIComponent(ak)}`
       if (!sk) return `https://maponline${subdomain}.bdimg.com/tile/?${baseQueryString}`
       const sn = computeBaiduSn('/tile/', baseQueryString, sk)

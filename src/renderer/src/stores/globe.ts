@@ -83,7 +83,7 @@ export interface TerrainMeta {
 
 export const terrainCatalog: TerrainMeta[] = [
   { id: 'arcgis-terrain', name: '全球 3D 地形', description: 'ArcGIS 高程，免密钥' },
-  { id: 'mapbox-terrain', name: 'Cesium 世界地形', description: 'Cesium ion 官方高程' },
+  { id: 'cesium-world-terrain', name: 'Cesium 世界地形', description: 'Cesium ion 官方高程' },
   { id: 'ellipsoid', name: '椭球（无起伏）', description: '光滑球面，无山脉' }
 ]
 

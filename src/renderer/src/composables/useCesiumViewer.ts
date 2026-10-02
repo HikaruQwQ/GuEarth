@@ -14,14 +14,13 @@ const layerRegistry: Record<string, LayerProvider> = {
   osm: { meta: providerMeta('osm'), createImageryProvider: async () => new Cesium.UrlTemplateImageryProvider({ url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', credit: '© OpenStreetMap contributors' }) },
   'esri-imagery': { meta: providerMeta('esri-imagery'), createImageryProvider: async () => Cesium.ArcGisMapServerImageryProvider.fromUrl('https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer', { credit: '© Esri' }) },
   opentopomap: { meta: providerMeta('opentopomap'), createImageryProvider: async () => new Cesium.UrlTemplateImageryProvider({ url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', subdomains: ['a', 'b', 'c'], credit: '© OpenTopoMap contributors' }) },
-  amap: { meta: providerMeta('amap'), createImageryProvider: async (styleId) => new Cesium.UrlTemplateImageryProvider({ url: protocolTileUrl('amap', styleId), credit: '© 高德地图' }) },
   baidu: { meta: providerMeta('baidu'), createImageryProvider: async (styleId) => new Cesium.UrlTemplateImageryProvider({ url: protocolTileUrl('baidu', styleId), credit: '© 百度地图' }) }
 }
 
 const terrainRegistry: Record<string, () => Promise<Cesium.TerrainProvider>> = {
   ellipsoid: async () => new Cesium.EllipsoidTerrainProvider(),
   'arcgis-terrain': () => Cesium.ArcGISTiledElevationTerrainProvider.fromUrl('https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer'),
-  'mapbox-terrain': () => Cesium.CesiumTerrainProvider.fromUrl(Cesium.IonResource.fromAssetId(1), { requestVertexNormals: true })
+  'cesium-world-terrain': () => Cesium.CesiumTerrainProvider.fromUrl(Cesium.IonResource.fromAssetId(1), { requestVertexNormals: true })
 }
 
 const terrainName = (id: string): string => terrainCatalog.find((terrain) => terrain.id === id)?.name ?? id
