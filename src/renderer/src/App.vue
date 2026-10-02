@@ -7,9 +7,14 @@ import { useGlobeStore } from '@renderer/stores/globe'
 import { useTerrainLabStore } from '@renderer/stores/terrainLab'
 import { useMonsoonStore } from '@renderer/stores/monsoon'
 import { useAssistantStore } from '@renderer/stores/assistant'
+import { useSolarStore } from '@renderer/stores/solar'
+import { useTectonicStore } from '@renderer/stores/tectonic'
 import { useCesiumViewer } from '@renderer/composables/useCesiumViewer'
 import { useRegionTerrain } from '@renderer/composables/useRegionTerrain'
 import { useMonsoonLayer } from '@renderer/composables/useMonsoonLayer'
+import { usePressureWindLayer } from '@renderer/composables/usePressureWindLayer'
+import { useSolarLayer } from '@renderer/composables/useSolarLayer'
+import { useTectonicLayer } from '@renderer/composables/useTectonicLayer'
 import { useMarkers } from '@renderer/composables/useMarkers'
 import GlobeToolbar from '@renderer/components/GlobeToolbar.vue'
 import CameraStatus from '@renderer/components/CameraStatus.vue'
@@ -17,6 +22,8 @@ import LayerPanel from '@renderer/components/LayerPanel.vue'
 import LevelViewSwitcher from '@renderer/components/LevelViewSwitcher.vue'
 import TerrainLabPanel from '@renderer/components/TerrainLabPanel.vue'
 import MonsoonPanel from '@renderer/components/MonsoonPanel.vue'
+import SolarPanel from '@renderer/components/SolarPanel.vue'
+import TectonicPanel from '@renderer/components/TectonicPanel.vue'
 import AssistantPanel from '@renderer/components/AssistantPanel.vue'
 import type { GeoBounds } from '../../preload/types'
 
@@ -24,6 +31,8 @@ const store = useGlobeStore()
 const terrainLabStore = useTerrainLabStore()
 const monsoonStore = useMonsoonStore()
 const assistantStore = useAssistantStore()
+const solarStore = useSolarStore()
+const tectonicStore = useTectonicStore()
 const {
   isLayerPanelOpen,
   layers,
@@ -50,6 +59,9 @@ const { viewer, switchBasemap, setProviderStyle, setLayerOpacity, flyTo, setTerr
 const levelSwitcherVisible = computed(() => isGlobeReady.value && camera.value.height < 5000000)
 const regionTerrain = useRegionTerrain(viewer)
 useMonsoonLayer(viewer)
+usePressureWindLayer(viewer)
+useSolarLayer(viewer)
+useTectonicLayer(viewer)
 const markers = useMarkers(viewer)
 terrainLabStore.registerLab(regionTerrain)
 const toolbarActive = computed(() => {
@@ -57,6 +69,8 @@ const toolbarActive = computed(() => {
   if (isLayerPanelOpen.value) active.push('layers')
   if (terrainLabStore.panelOpen) active.push('terrain')
   if (monsoonStore.panelOpen) active.push('monsoon')
+  if (solarStore.panelOpen) active.push('solar')
+  if (tectonicStore.panelOpen) active.push('tectonic')
   if (assistantStore.open) active.push('assistant')
   return active
 })
@@ -194,6 +208,8 @@ function handleLevelViewToggle(): void {
       @open-layers="handleOpenLayers"
       @open-terrain-lab="terrainLabStore.setPanelOpen(true)"
       @open-monsoon="monsoonStore.setPanelOpen(true)"
+      @open-solar="solarStore.setPanelOpen(true)"
+      @open-tectonic="tectonicStore.setPanelOpen(true)"
       @open-assistant="assistantStore.setOpen(true)"
       @home="handleHome"
     />
@@ -235,6 +251,8 @@ function handleLevelViewToggle(): void {
     />
     <TerrainLabPanel />
     <MonsoonPanel />
+    <SolarPanel />
+    <TectonicPanel />
     <AssistantPanel />
   </div>
 </template>

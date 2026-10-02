@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AimOutlined, AppstoreOutlined, CloudOutlined, HomeOutlined, RobotOutlined } from '@ant-design/icons-vue'
+import { AimOutlined, AppstoreOutlined, CloudOutlined, FireOutlined, GlobalOutlined, HomeOutlined, RobotOutlined } from '@ant-design/icons-vue'
 
 defineProps<{
   active: string[]
@@ -9,6 +9,8 @@ defineEmits<{
   openLayers: []
   openTerrainLab: []
   openMonsoon: []
+  openSolar: []
+  openTectonic: []
   openAssistant: []
   home: []
 }>()
@@ -29,6 +31,16 @@ defineEmits<{
     <a-tooltip title="季风 · 洋流 · 气候（随月份联动）" placement="right">
       <a-button type="text" :class="['toolbar-btn', { active: active.includes('monsoon') }]" aria-label="季风洋流气候" @click="$emit('openMonsoon')">
         <CloudOutlined />
+      </a-button>
+    </a-tooltip>
+    <a-tooltip title="昼夜光照 · 晨昏线（日期时刻模拟）" placement="right">
+      <a-button type="text" :class="['toolbar-btn', { active: active.includes('solar') }]" aria-label="昼夜光照晨昏线" @click="$emit('openSolar')">
+        <GlobalOutlined />
+      </a-button>
+    </a-tooltip>
+    <a-tooltip title="板块构造 · 火山地震" placement="right">
+      <a-button type="text" :class="['toolbar-btn', { active: active.includes('tectonic') }]" aria-label="板块构造火山地震" @click="$emit('openTectonic')">
+        <FireOutlined />
       </a-button>
     </a-tooltip>
     <a-tooltip title="智能助手（搜索地点 / 地貌选点）" placement="right">
