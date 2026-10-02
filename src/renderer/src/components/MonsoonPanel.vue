@@ -16,7 +16,8 @@ const toggles = computed(() => [
   { key: 'monsoonCurrents' as const, label: '北印度洋洋流', value: store.showMonsoonCurrents },
   { key: 'pressureBelts' as const, label: '气压带', value: store.showPressureBelts },
   { key: 'windBelts' as const, label: '风带', value: store.showWindBelts },
-  { key: 'climateZones' as const, label: '中国气候区', value: store.showClimateZones }
+  { key: 'climateZones' as const, label: '中国气候区', value: store.showClimateZones },
+  { key: 'climateRegions' as const, label: '世界气候区', value: store.showClimateRegions }
 ])
 
 const seasonHint = computed(() => {

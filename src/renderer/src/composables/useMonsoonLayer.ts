@@ -2,6 +2,7 @@ import { onBeforeUnmount, watch, type Ref } from 'vue'
 import * as Cesium from 'cesium'
 import { useMonsoonStore } from '@renderer/stores/monsoon'
 import { monsoonWindAt, rainBandForMonth, rainBandRing } from '@renderer/utils/geo'
+import { CLIMATE_REGIONS } from '@renderer/utils/climateData'
 import type { CurrentDefinition } from '@renderer/utils/monsoonData'
 import {
   CHINA_CLIMATE_ZONES,
@@ -45,6 +46,8 @@ export function useMonsoonLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
   let rainbandEntity: Cesium.Entity | null = null
   let rainbandLabel: Cesium.Entity | null = null
   const climateEntities: Cesium.Entity[] = []
+  const climateRegionEntities: Cesium.Entity[] = []
+  let climateRegionLabels: Cesium.LabelCollection | null = null
   const particles: Particle[] = []
   const particlePolylines: Cesium.Polyline[] = []
   let lastFrame = 0
@@ -172,6 +175,35 @@ export function useMonsoonLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
     climateLabels = viewer.scene.primitives.add(labels)
   }
 
+  function buildClimateRegions(viewer: Cesium.Viewer): void {
+    const labels = new Cesium.LabelCollection()
+    for (const region of CLIMATE_REGIONS) {
+      climateRegionEntities.push(
+        viewer.entities.add({
+          polygon: {
+            hierarchy: new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray(region.ring.flat())),
+            material: Cesium.Color.fromCssColorString(region.color).withAlpha(0.22)
+          }
+        })
+      )
+      labels.add({
+        position: Cesium.Cartesian3.fromDegrees(region.labelAt[0], region.labelAt[1], 5500),
+        text: `${region.name} (${region.koppen})`,
+        font: '11px sans-serif',
+        fillColor: Cesium.Color.fromCssColorString(region.color),
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        outlineColor: Cesium.Color.WHITE.withAlpha(0.9),
+        outlineWidth: 3,
+        showBackground: true,
+        backgroundColor: Cesium.Color.WHITE.withAlpha(0.78),
+        backgroundPadding: new Cesium.Cartesian2(6, 3),
+        pixelOffset: new Cesium.Cartesian2(0, -4),
+        scale: 0.9
+      })
+    }
+    climateRegionLabels = viewer.scene.primitives.add(labels)
+  }
+
   function buildRainband(viewer: Cesium.Viewer): void {
     rainbandEntity = viewer.entities.add({
       polygon: {
@@ -205,6 +237,7 @@ export function useMonsoonLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
     buildIndianCurrents(viewer)
     buildArrows(viewer)
     buildClimateZones(viewer)
+    buildClimateRegions(viewer)
     buildRainband(viewer)
     const callback = (): void => tick()
     viewer.scene.preUpdate.addEventListener(callback)
@@ -257,6 +290,8 @@ export function useMonsoonLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
     if (summerCollection) summerCollection.show = store.showSummerWind
     if (winterCollection) winterCollection.show = store.showWinterWind
     for (const entity of climateEntities) entity.show = store.showClimateZones
+    for (const entity of climateRegionEntities) entity.show = store.showClimateRegions
+    if (climateRegionLabels) climateRegionLabels.show = store.showClimateRegions
     if (climateLabels) climateLabels.show = store.showClimateZones
     if (rainbandEntity) rainbandEntity.show = store.showRainband
     if (rainbandLabel) rainbandLabel.show = store.showRainband
@@ -274,7 +309,7 @@ export function useMonsoonLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
   })
 
   watch(
-    () => [store.showParticles, store.showRainband, store.showSummerWind, store.showWinterWind, store.showCurrents, store.showClimateZones],
+    () => [store.showParticles, store.showRainband, store.showSummerWind, store.showWinterWind, store.showCurrents, store.showClimateZones, store.showClimateRegions],
     applyVisibility
   )
 
@@ -295,6 +330,10 @@ export function useMonsoonLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
     if (rainbandEntity) viewer.entities.remove(rainbandEntity)
     if (rainbandLabel) viewer.entities.remove(rainbandLabel)
     for (const entity of climateEntities) viewer.entities.remove(entity)
+    for (const entity of climateRegionEntities) viewer.entities.remove(entity)
+    if (climateRegionLabels) viewer.scene.primitives.remove(climateRegionLabels)
+    climateRegionLabels = null
+    climateRegionEntities.length = 0
     particleCollection = null
     currentCollection = null
     indianSummerCollection = null

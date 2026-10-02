@@ -18,6 +18,7 @@ export const useMonsoonStore = defineStore('monsoon', () => {
   const showWinterWind = ref(false)
   const showCurrents = ref(true)
   const showClimateZones = ref(false)
+  const showClimateRegions = ref(false)
   const showMonsoonCurrents = ref(false)
   const showPressureBelts = ref(false)
   const showWindBelts = ref(false)
@@ -41,7 +42,7 @@ export const useMonsoonStore = defineStore('monsoon', () => {
     playing.value = !playing.value
   }
 
-  function setShow(key: 'particles' | 'rainband' | 'summerWind' | 'winterWind' | 'currents' | 'climateZones' | 'monsoonCurrents' | 'pressureBelts' | 'windBelts', value: boolean): void {
+  function setShow(key: 'particles' | 'rainband' | 'summerWind' | 'winterWind' | 'currents' | 'climateZones' | 'climateRegions' | 'monsoonCurrents' | 'pressureBelts' | 'windBelts', value: boolean): void {
     if (key === 'particles') showParticles.value = value
     else if (key === 'rainband') showRainband.value = value
     else if (key === 'summerWind') showSummerWind.value = value
@@ -50,13 +51,14 @@ export const useMonsoonStore = defineStore('monsoon', () => {
     else if (key === 'monsoonCurrents') showMonsoonCurrents.value = value
     else if (key === 'pressureBelts') showPressureBelts.value = value
     else if (key === 'windBelts') showWindBelts.value = value
+    else if (key === 'climateRegions') showClimateRegions.value = value
     else showClimateZones.value = value
   }
 
   return {
     panelOpen, playing, monthPhase, month,
     showParticles, showRainband, showSummerWind, showWinterWind, showCurrents, showClimateZones,
-    showMonsoonCurrents, showPressureBelts, showWindBelts,
+    showClimateRegions, showMonsoonCurrents, showPressureBelts, showWindBelts,
     setPanelOpen, setMonth, advancePhase, togglePlay, setShow
   }
 })
