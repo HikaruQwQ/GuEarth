@@ -2,8 +2,11 @@ import { onBeforeUnmount, watch, type Ref } from 'vue'
 import * as Cesium from 'cesium'
 import { useMonsoonStore } from '@renderer/stores/monsoon'
 import { monsoonWindAt, rainBandForMonth, rainBandRing } from '@renderer/utils/geo'
+import type { CurrentDefinition } from '@renderer/utils/monsoonData'
 import {
   CHINA_CLIMATE_ZONES,
+  INDIAN_SUMMER_CURRENTS,
+  INDIAN_WINTER_CURRENTS,
   MONSOON_BOX,
   OCEAN_CURRENTS,
   SUMMER_MONSOON_ARROWS,
@@ -31,9 +34,13 @@ export function useMonsoonLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
   const store = useMonsoonStore()
   let particleCollection: Cesium.PolylineCollection | null = null
   let currentCollection: Cesium.PolylineCollection | null = null
+  let indianSummerCollection: Cesium.PolylineCollection | null = null
+  let indianWinterCollection: Cesium.PolylineCollection | null = null
   let summerCollection: Cesium.PolylineCollection | null = null
   let winterCollection: Cesium.PolylineCollection | null = null
   let currentLabels: Cesium.LabelCollection | null = null
+  let indianSummerLabels: Cesium.LabelCollection | null = null
+  let indianWinterLabels: Cesium.LabelCollection | null = null
   let climateLabels: Cesium.LabelCollection | null = null
   let rainbandEntity: Cesium.Entity | null = null
   let rainbandLabel: Cesium.Entity | null = null
@@ -73,10 +80,8 @@ export function useMonsoonLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
     particleCollection = viewer.scene.primitives.add(collection)
   }
 
-  function buildCurrents(viewer: Cesium.Viewer): void {
-    const collection = new Cesium.PolylineCollection()
-    const labels = new Cesium.LabelCollection()
-    for (const current of OCEAN_CURRENTS) {
+  function addCurrents(collection: Cesium.PolylineCollection, labels: Cesium.LabelCollection, defs: CurrentDefinition[]): void {
+    for (const current of defs) {
       const positions = current.path.map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat, CURRENT_ALTITUDE))
       collection.add({
         positions,
@@ -97,8 +102,27 @@ export function useMonsoonLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
         scale: 0.9
       })
     }
+  }
+
+  function buildCurrents(viewer: Cesium.Viewer): void {
+    const collection = new Cesium.PolylineCollection()
+    const labels = new Cesium.LabelCollection()
+    addCurrents(collection, labels, OCEAN_CURRENTS)
     currentCollection = viewer.scene.primitives.add(collection)
     currentLabels = viewer.scene.primitives.add(labels)
+  }
+
+  function buildIndianCurrents(viewer: Cesium.Viewer): void {
+    const summer = new Cesium.PolylineCollection()
+    const summerLabels = new Cesium.LabelCollection()
+    addCurrents(summer, summerLabels, INDIAN_SUMMER_CURRENTS)
+    indianSummerCollection = viewer.scene.primitives.add(summer)
+    indianSummerLabels = viewer.scene.primitives.add(summerLabels)
+    const winter = new Cesium.PolylineCollection()
+    const winterLabels = new Cesium.LabelCollection()
+    addCurrents(winter, winterLabels, INDIAN_WINTER_CURRENTS)
+    indianWinterCollection = viewer.scene.primitives.add(winter)
+    indianWinterLabels = viewer.scene.primitives.add(winterLabels)
   }
 
   function buildArrows(viewer: Cesium.Viewer): void {
@@ -178,6 +202,7 @@ export function useMonsoonLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
     built = true
     buildParticles(viewer)
     buildCurrents(viewer)
+    buildIndianCurrents(viewer)
     buildArrows(viewer)
     buildClimateZones(viewer)
     buildRainband(viewer)
@@ -217,10 +242,18 @@ export function useMonsoonLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
     }
   }
 
+  function isIndianSummer(): boolean {
+    return store.monthPhase >= 4.5 && store.monthPhase <= 9.5
+  }
+
   function applyVisibility(): void {
     if (particleCollection) particleCollection.show = store.showParticles
     if (currentCollection) currentCollection.show = store.showCurrents
     if (currentLabels) currentLabels.show = store.showCurrents
+    if (indianSummerCollection) indianSummerCollection.show = store.showMonsoonCurrents && isIndianSummer()
+    if (indianSummerLabels) indianSummerLabels.show = store.showMonsoonCurrents && isIndianSummer()
+    if (indianWinterCollection) indianWinterCollection.show = store.showMonsoonCurrents && !isIndianSummer()
+    if (indianWinterLabels) indianWinterLabels.show = store.showMonsoonCurrents && !isIndianSummer()
     if (summerCollection) summerCollection.show = store.showSummerWind
     if (winterCollection) winterCollection.show = store.showWinterWind
     for (const entity of climateEntities) entity.show = store.showClimateZones
@@ -228,6 +261,8 @@ export function useMonsoonLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
     if (rainbandEntity) rainbandEntity.show = store.showRainband
     if (rainbandLabel) rainbandLabel.show = store.showRainband
   }
+
+  watch(() => store.monthPhase, applyVisibility)
 
   watch(viewerRef, (viewer) => {
     if (viewer && !built && store.panelOpen) build(viewer)
@@ -249,18 +284,26 @@ export function useMonsoonLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
     if (!viewer) return
     if (particleCollection) viewer.scene.primitives.remove(particleCollection)
     if (currentCollection) viewer.scene.primitives.remove(currentCollection)
+    if (indianSummerCollection) viewer.scene.primitives.remove(indianSummerCollection)
+    if (indianWinterCollection) viewer.scene.primitives.remove(indianWinterCollection)
     if (summerCollection) viewer.scene.primitives.remove(summerCollection)
     if (winterCollection) viewer.scene.primitives.remove(winterCollection)
     if (currentLabels) viewer.scene.primitives.remove(currentLabels)
+    if (indianSummerLabels) viewer.scene.primitives.remove(indianSummerLabels)
+    if (indianWinterLabels) viewer.scene.primitives.remove(indianWinterLabels)
     if (climateLabels) viewer.scene.primitives.remove(climateLabels)
     if (rainbandEntity) viewer.entities.remove(rainbandEntity)
     if (rainbandLabel) viewer.entities.remove(rainbandLabel)
     for (const entity of climateEntities) viewer.entities.remove(entity)
     particleCollection = null
     currentCollection = null
+    indianSummerCollection = null
+    indianWinterCollection = null
     summerCollection = null
     winterCollection = null
     currentLabels = null
+    indianSummerLabels = null
+    indianWinterLabels = null
     climateLabels = null
     rainbandEntity = null
     rainbandLabel = null

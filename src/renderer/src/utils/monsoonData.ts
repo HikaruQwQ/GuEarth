@@ -23,7 +23,20 @@ export const OCEAN_CURRENTS: CurrentDefinition[] = [
   { name: '厄加勒斯暖流', warm: true, labelAt: [34, -30], path: [[38, -20], [35, -26], [31, -32], [26, -38], [20, -42]] },
   { name: '东澳大利亚暖流', warm: true, labelAt: [154, -28], path: [[152, -18], [154, -24], [155, -30], [152, -36], [148, -41]] },
   { name: '莫桑比克暖流', warm: true, labelAt: [41, -18], path: [[40, -10], [41, -16], [42, -22], [43, -26]] },
-  { name: '拉布拉多寒流', warm: false, labelAt: [-55, 52], path: [[-60, 62], [-56, 56], [-52, 50], [-50, 45], [-52, 42]] }
+  { name: '拉布拉多寒流', warm: false, labelAt: [-55, 52], path: [[-60, 62], [-56, 56], [-52, 50], [-50, 45], [-52, 42]] },
+  { name: '阿拉斯加暖流', warm: true, labelAt: [-152, 55], path: [[-140, 48], [-148, 53], [-156, 57], [-162, 58]] },
+  { name: '东格陵兰寒流', warm: false, labelAt: [-30, 64], path: [[-12, 76], [-20, 70], [-30, 64], [-40, 56], [-46, 50]] },
+  { name: '西澳大利亚寒流', warm: false, labelAt: [110, -28], path: [[112, -38], [115, -32], [114, -24], [113, -16]] }
+]
+
+export const INDIAN_SUMMER_CURRENTS: CurrentDefinition[] = [
+  { name: '季风洋流', warm: true, labelAt: [72, 7], path: [[50, 4], [64, 6], [80, 6], [92, 4]] },
+  { name: '索马里寒流', warm: false, labelAt: [48, 8], path: [[40, -2], [44, 3], [48, 9], [53, 12]] }
+]
+
+export const INDIAN_WINTER_CURRENTS: CurrentDefinition[] = [
+  { name: '季风洋流', warm: false, labelAt: [76, 4], path: [[93, 2], [78, 4], [64, 3], [51, 2]] },
+  { name: '索马里暖流', warm: true, labelAt: [48, 0], path: [[53, 11], [48, 6], [44, 1], [41, -3]] }
 ]
 
 export interface WindArrow {
