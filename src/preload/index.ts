@@ -123,6 +123,8 @@ export interface PlaceSearchResult {
   error?: string
 }
 
+export type PlaceSearchProvider = 'amap' | 'baidu'
+
 const api = {
   versions: {
     electron: process.versions.electron,
@@ -148,7 +150,7 @@ const api = {
     remove: (id: string): Promise<void> => ipcRenderer.invoke('annotations:remove', id)
   },
   places: {
-    search: (keyword: string): Promise<PlaceSearchResult> => ipcRenderer.invoke('places:search', keyword)
+    search: (keyword: string, provider?: PlaceSearchProvider): Promise<PlaceSearchResult> => ipcRenderer.invoke('places:search', keyword, provider)
   },
   ai: {
     getSettings: (): Promise<AiSettings> => ipcRenderer.invoke('ai:get-settings'),

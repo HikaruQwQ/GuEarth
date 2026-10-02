@@ -8,6 +8,7 @@ import { baiduLngLatToTile, tileCenter, wgs84ToBd09 } from './geo'
 import { AiSettingsStore } from './ai/settingsStore'
 import { registerAiIpcHandlers } from './ai/agent'
 import { searchPlaces } from './ai/amap'
+import { searchBaiduPlaces } from './ai/baidu'
 
 interface PersistedSettings {
   selectedImageryProviderId: string
@@ -104,7 +105,8 @@ function credentialStatus(providerId: string): ProviderCredentialStatus {
 
 function settingsSnapshot(): GuEarthSettings {
   const providerCredentials: Record<string, ProviderCredentialStatus> = {}
-  for (const providerId of Object.keys(settings.providerCredentials)) providerCredentials[providerId] = credentialStatus(providerId)
+  const providerIds = new Set([...Object.keys(settings.providerCredentials), 'amap', 'baidu'])
+  for (const providerId of providerIds) providerCredentials[providerId] = credentialStatus(providerId)
   return { ...settings, providerCredentials }
 }
 
@@ -337,9 +339,11 @@ function registerIpcHandlers(): void {
     return status
   })
   ipcMain.handle('settings:has-provider-api-key', (_event, providerId: string): ProviderCredentialStatus => credentialStatus(safeId(providerId)))
-  ipcMain.handle('places:search', (_event, keyword: unknown) => {
+  ipcMain.handle('places:search', (_event, keyword: unknown, provider: unknown) => {
     if (typeof keyword !== 'string') throw new Error('无效的搜索关键词')
-    return searchPlaces(keyword)
+    if (provider !== undefined && provider !== 'amap' && provider !== 'baidu') throw new Error('无效的搜索源')
+    const searchProvider = provider ?? (hasProviderKey('amap') ? 'amap' : hasProviderKey('baidu') ? 'baidu' : 'amap')
+    return searchProvider === 'baidu' ? searchBaiduPlaces(keyword) : searchPlaces(keyword)
   })
   ipcMain.handle('tiles:get', (_event, key: TileKey) => readTile(key))
   ipcMain.handle('tiles:put', (_event, entry: TileCacheEntry) => writeTile(entry))
