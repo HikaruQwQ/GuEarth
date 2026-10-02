@@ -1,7 +1,7 @@
 import * as Cesium from 'cesium'
 import { registerTeachingLayer, type TeachingLayerHandle } from '../registry'
 
-const ALTITUDE = 1000
+const ALTITUDE = 12000
 const GRID_COLOR = 'rgba(90, 105, 125, 0.55)'
 const SPECIAL_LINES = [
   { lat: 0, name: '赤道（0°）', color: '#595959', dash: false },

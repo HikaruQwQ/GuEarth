@@ -38,7 +38,7 @@ export interface RouteSetSpec {
   routes: RouteDefinition[]
 }
 
-const ALTITUDE = 2000
+const ALTITUDE = 12000
 
 function disposeCollections(viewer: Cesium.Viewer, collections: Array<Cesium.Primitive | undefined>): void {
   for (const collection of collections) {
@@ -67,7 +67,8 @@ export function definePointSetLayer(spec: PointSetSpec): TeachingLayerDefinition
           color,
           outlineColor: Cesium.Color.WHITE,
           outlineWidth: 1.5,
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
         })
         labels.add({
           position,
@@ -79,7 +80,8 @@ export function definePointSetLayer(spec: PointSetSpec): TeachingLayerDefinition
           outlineWidth: 3,
           pixelOffset: new Cesium.Cartesian2(0, -10),
           scale: 0.9,
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
         })
       }
       return {
