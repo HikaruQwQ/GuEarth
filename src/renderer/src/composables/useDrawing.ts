@@ -103,7 +103,7 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
   }
 
   function isPolygonTool(next: DrawTool | null = tool): boolean {
-    return next === 'polygon' || next === 'area'
+    return next === 'polygon'
   }
 
   function removeEntity(id: string): void {

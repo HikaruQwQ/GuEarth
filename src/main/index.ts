@@ -1,9 +1,9 @@
 import { app, shell, BrowserWindow, ipcMain, net, protocol } from 'electron'
 import { join } from 'path'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs'
 import { createHash } from 'crypto'
 import icon from '../../resources/icon.png?asset'
-import type { GeoPosition, GuEarthSettings, GuEarthSettingsPatch, ProviderCredentialStatus, StoredShape, TileCacheEntry, TileCacheStats, TileKey } from '../preload'
+import type { AnnotationDocument, AnnotationEntry, GeoPosition, GuEarthSettings, GuEarthSettingsPatch, ProviderCredentialStatus, StoredShape, TileCacheEntry, TileCacheStats, TileKey } from '../preload'
 import { assertEncryptionAvailable, assertSafeId, clearProviderKey, hasProviderKey, initKeyVault, readProviderKey, writeProviderKey } from './keyVault'
 import { baiduLngLatToTile, tileCenter, wgs84ToBd09 } from './geo'
 import { AiSettingsStore } from './ai/settingsStore'
@@ -43,7 +43,7 @@ let settingsPath = ''
 let tileCachePath = ''
 let annotationsPath = ''
 let settings: PersistedSettings = { ...defaultSettings, providerCredentials: {} }
-let shapes: StoredShape[] = []
+let annotations: AnnotationDocument = { shapes: [], entries: [] }
 const aiSettings = new AiSettingsStore()
 
 protocol.registerSchemesAsPrivileged([
@@ -269,25 +269,58 @@ function normalizeShape(value: unknown): StoredShape {
   }
 }
 
-function readShapes(): StoredShape[] {
-  if (!existsSync(annotationsPath)) return []
+function normalizeAnnotations(value: unknown): AnnotationDocument {
+  if (!isRecord(value) || !Array.isArray(value.shapes) || !Array.isArray(value.entries)) throw new Error('无效的标注目录')
+  const shapes = value.shapes.map(normalizeShape)
+  const shapeIds = new Set(shapes.map((shape) => shape.id))
+  if (shapeIds.size !== shapes.length) throw new Error('重复的标注')
+  const referenced = new Set<string>()
+  const folderIds = new Set<string>()
+  function normalizeEntries(items: unknown[], depth: number): AnnotationEntry[] {
+    if (items.length > 10000) throw new Error('标注目录过大')
+    return items.map((item) => {
+      if (!isRecord(item)) throw new Error('无效的目录项')
+      const id = safeId(item.id)
+      if (item.type === 'shape') {
+        if (!shapeIds.has(id) || referenced.has(id)) throw new Error('无效的标注引用')
+        referenced.add(id)
+        return { type: 'shape', id }
+      }
+      if (item.type !== 'folder' || depth > 5 || !Array.isArray(item.children) || typeof item.name !== 'string') throw new Error('无效的文件夹')
+      if (folderIds.has(id) || shapeIds.has(id)) throw new Error('重复的文件夹')
+      folderIds.add(id)
+      const name = item.name.trim().slice(0, 80)
+      if (!name) throw new Error('文件夹名称不能为空')
+      return { type: 'folder', id, name, children: normalizeEntries(item.children, depth + 1) }
+    })
+  }
+  const entries = normalizeEntries(value.entries, 1)
+  if (referenced.size !== shapeIds.size) throw new Error('缺少标注引用')
+  return { shapes, entries }
+}
+
+function readAnnotations(): AnnotationDocument {
+  if (!existsSync(annotationsPath)) return { shapes: [], entries: [] }
   try {
     const parsed: unknown = JSON.parse(readFileSync(annotationsPath, 'utf8'))
-    if (!Array.isArray(parsed)) return []
-    return parsed.flatMap((item) => {
+    if (!Array.isArray(parsed)) return normalizeAnnotations(parsed)
+    const shapes = parsed.flatMap((item) => {
       try {
         return [normalizeShape(item)]
       } catch {
         return []
       }
     })
+    return { shapes, entries: shapes.map((shape) => ({ type: 'shape' as const, id: shape.id })) }
   } catch {
-    return []
+    return { shapes: [], entries: [] }
   }
 }
 
-function saveShapes(): void {
-  writeFileSync(annotationsPath, JSON.stringify(shapes), 'utf8')
+function saveAnnotations(): void {
+  const tempPath = `${annotationsPath}.tmp`
+  writeFileSync(tempPath, JSON.stringify(annotations), 'utf8')
+  renameSync(tempPath, annotationsPath)
 }
 
 function registerIpcHandlers(): void {
@@ -359,17 +392,10 @@ function registerIpcHandlers(): void {
     rmSync(join(tileCachePath, safeId(providerId)), { recursive: true, force: true })
   })
   ipcMain.handle('tiles:stats', () => cacheStats())
-  ipcMain.handle('annotations:list', (): StoredShape[] => shapes)
-  ipcMain.handle('annotations:save', (_event, shape: unknown): void => {
-    const stored = normalizeShape(shape)
-    const index = shapes.findIndex((item) => item.id === stored.id)
-    if (index === -1) shapes.push(stored)
-    else shapes[index] = stored
-    saveShapes()
-  })
-  ipcMain.handle('annotations:remove', (_event, id: string): void => {
-    shapes = shapes.filter((item) => item.id !== safeId(id))
-    saveShapes()
+  ipcMain.handle('annotations:load', (): AnnotationDocument => annotations)
+  ipcMain.handle('annotations:save', (_event, document: unknown): void => {
+    annotations = normalizeAnnotations(document)
+    saveAnnotations()
   })
 }
 
@@ -412,7 +438,7 @@ app.whenReady().then(() => {
   initDatasets(userDataPath)
   mkdirSync(tileCachePath, { recursive: true })
   settings = readSettings()
-  shapes = readShapes()
+  annotations = readAnnotations()
   aiSettings.init(join(userDataPath, 'ai-settings.json'))
   registerIpcHandlers()
   registerAiIpcHandlers(aiSettings)

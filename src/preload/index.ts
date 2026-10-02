@@ -59,6 +59,15 @@ export interface StoredShape {
   createdAt: number
 }
 
+export type AnnotationEntry =
+  | { type: 'folder'; id: string; name: string; children: AnnotationEntry[] }
+  | { type: 'shape'; id: string }
+
+export interface AnnotationDocument {
+  shapes: StoredShape[]
+  entries: AnnotationEntry[]
+}
+
 export type AiProtocol = 'openai' | 'anthropic'
 export type AiThinkingLevel = 'low' | 'medium' | 'high'
 
@@ -176,9 +185,8 @@ const api = {
     stats: (): Promise<TileCacheStats> => ipcRenderer.invoke('tiles:stats')
   },
   annotations: {
-    list: (): Promise<StoredShape[]> => ipcRenderer.invoke('annotations:list'),
-    save: (shape: StoredShape): Promise<void> => ipcRenderer.invoke('annotations:save', shape),
-    remove: (id: string): Promise<void> => ipcRenderer.invoke('annotations:remove', id)
+    load: (): Promise<AnnotationDocument> => ipcRenderer.invoke('annotations:load'),
+    save: (document: AnnotationDocument): Promise<void> => ipcRenderer.invoke('annotations:save', document)
   },
   places: {
     search: (keyword: string, provider?: PlaceSearchProvider): Promise<PlaceSearchResult> => ipcRenderer.invoke('places:search', keyword, provider)

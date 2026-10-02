@@ -59,7 +59,7 @@ const { overlays: thematicOverlays } = storeToRefs(climateStore)
 useThematicLayers(viewer)
 
 const drawingStore = useDrawingStore()
-const { activeTool, shapes, selectedShapeId } = storeToRefs(drawingStore)
+const { activeTool, shapes, entries, selectedShapeId, saveError } = storeToRefs(drawingStore)
 const aiStore = useAiStore()
 const isAnnotationPanelOpen = ref(false)
 const annotationDraft = ref('')
@@ -665,7 +665,10 @@ function saveSelectedAnnotation(): void {
 }
 
 function deleteSelectedShape(): void {
-  if (selectedShape.value) drawingStore.removeShape(selectedShape.value.id)
+  if (!selectedShape.value) return
+  const id = selectedShape.value.id
+  const name = selectedShape.value.annotation || '未命名标注'
+  Modal.confirm({ title: `删除标注「${name}」？`, okText: '删除', okButtonProps: { danger: true }, cancelText: '取消', onOk: () => drawingStore.removeShape(id) })
 }
 </script>
 
@@ -703,9 +706,11 @@ function deleteSelectedShape(): void {
     <AnnotationPanel
       :open="isAnnotationPanelOpen"
       :shapes="shapes"
+      :entries="entries"
       :selected-shape-id="selectedShapeId"
+      :save-error="saveError"
       @close="isAnnotationPanelOpen = false"
-      @select="drawingStore.setSelectedShapeId"
+      @edit="drawingStore.setSelectedShapeId"
       @fly="handleFlyShape"
       @remove="drawingStore.removeShape"
     />
