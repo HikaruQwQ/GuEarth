@@ -13,7 +13,7 @@ const LABEL_STYLE: Cesium.LabelGraphics.ConstructorOptions = {
   verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
   pixelOffset: new Cesium.Cartesian2(0, -12),
   heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-  disableDepthTestDistance: Number.POSITIVE_INFINITY
+  disableDepthTestDistance: 10_000
 }
 
 function toGeo(cartesian: Cesium.Cartesian3): GeoPosition {
@@ -120,7 +120,7 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
     const options: Cesium.Entity.ConstructorOptions = { id: shape.id }
     if (shape.kind === 'point') {
       options.position = surfacePosition(cartesians[0])
-      options.point = { color: SHAPE_COLOR, pixelSize: 10, outlineColor: Cesium.Color.WHITE, outlineWidth: 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY }
+      options.point = { color: SHAPE_COLOR, pixelSize: 10, outlineColor: Cesium.Color.WHITE, outlineWidth: 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: 10_000 }
     } else if (shape.kind === 'polyline') {
       options.position = surfacePosition(centroidOf(cartesians))
       options.polyline = { positions: cartesians, width: 3, material: SHAPE_COLOR, clampToGround: true }
