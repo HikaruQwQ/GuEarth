@@ -109,7 +109,7 @@ const SEARCH_FAILURE_GUIDANCE = [
   '3. 排查期间不要编造坐标，可基于你已有的地理知识给出大致位置，并告知用户搜索恢复后可再精确查询。'
 ].join('\n')
 
-let consecutiveSearchFailures = 0
+const searchFailuresBySession = new Map<string, number>()
 
 const sessions = new Map<string, AgentSession>()
 const pendingRendererTools = new Map<string, { resolve: (outcome: ToolOutcome) => void; timer: NodeJS.Timeout }>()
@@ -142,7 +142,26 @@ function withoutImage(value: unknown): unknown {
   return image === undefined ? value : rest
 }
 
+function streamError(message: string): Error {
+  const error = new Error(message)
+  error.name = 'StreamError'
+  return error
+}
+
+function streamErrorText(payload: Record<string, unknown>): string {
+  const raw = payload.error
+  if (typeof raw === 'string' && raw) return raw
+  if (typeof raw === 'object' && raw !== null) {
+    const record = raw as Record<string, unknown>
+    if (typeof record.message === 'string' && record.message) return record.message
+    if (typeof record.type === 'string' && record.type) return record.type
+  }
+  if (!Array.isArray(payload.choices) && typeof payload.message === 'string' && payload.message) return payload.message
+  return ''
+}
+
 function imageUnsupported(error: unknown): boolean {
+  if (error instanceof Error && error.name === 'StreamError') return false
   const message = error instanceof Error ? error.message : String(error)
   return /image|vision|multimodal|modal|unsupported|不支持|图片/i.test(message)
 }
@@ -326,6 +345,8 @@ async function runOpenAiTurn(options: {
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }
   if (!model.streaming) {
     const json = await fetchJson(url, { method: 'POST', headers, body: JSON.stringify(body), signal })
+    const jsonError = streamErrorText(json)
+    if (jsonError) throw streamError(`模型服务返回错误：${jsonError}`)
     const choice = Array.isArray(json.choices) && json.choices[0] && typeof json.choices[0] === 'object' ? json.choices[0] as Record<string, unknown> : {}
     const message = typeof choice.message === 'object' && choice.message !== null ? choice.message as Record<string, unknown> : {}
     const reasoning = typeof message.reasoning_content === 'string' ? message.reasoning_content : ''
@@ -349,6 +370,8 @@ async function runOpenAiTurn(options: {
   await readSse(response, (data) => {
     if (data === '[DONE]') return
     const json = safeParseJson(data)
+    const errorText = streamErrorText(json)
+    if (errorText) throw streamError(`模型服务返回错误：${errorText}`)
     const choices = json.choices
     if (!Array.isArray(choices) || !choices.length) return
     const delta = (typeof choices[0] === 'object' && choices[0] !== null ? (choices[0] as Record<string, unknown>).delta : null) as Record<string, unknown> | null
@@ -406,6 +429,8 @@ async function runAnthropicTurn(options: {
   const headers = { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }
   if (!model.streaming) {
     const json = await fetchJson(url, { method: 'POST', headers, body: JSON.stringify(body), signal })
+    const jsonError = streamErrorText(json)
+    if (jsonError) throw streamError(`模型服务返回错误：${jsonError}`)
     const blocks = Array.isArray(json.content) ? json.content.filter((block): block is Record<string, unknown> => typeof block === 'object' && block !== null) : []
     const text = blocks.filter((block) => block.type === 'text').map((block) => String(block.text ?? '')).join('')
     const thinkingBlocks = blocks.filter((block) => block.type === 'thinking').map((block) => ({ thinking: String(block.thinking ?? ''), signature: String(block.signature ?? '') }))
@@ -432,6 +457,7 @@ async function runAnthropicTurn(options: {
   await readSse(response, (data) => {
     const json = safeParseJson(data)
     const type = json.type
+    if (type === 'error') throw streamError(`模型服务返回错误：${streamErrorText(json) || '未知错误'}`)
     if (type === 'content_block_start') {
       const index = Number(json.index ?? 0)
       const block = typeof json.content_block === 'object' && json.content_block !== null ? json.content_block as Record<string, unknown> : {}
@@ -499,10 +525,11 @@ async function executeTool(sender: WebContents, sessionId: string, name: string,
       const city = typeof args.city === 'string' ? args.city : undefined
       const result = await searchPlaces(query, city)
       if (result.error) {
-        consecutiveSearchFailures += 1
-        if (consecutiveSearchFailures >= SEARCH_FAILURE_GUIDANCE_THRESHOLD) result.guidance = SEARCH_FAILURE_GUIDANCE
+        const failures = (searchFailuresBySession.get(sessionId) ?? 0) + 1
+        searchFailuresBySession.set(sessionId, failures)
+        if (failures >= SEARCH_FAILURE_GUIDANCE_THRESHOLD) result.guidance = SEARCH_FAILURE_GUIDANCE
       } else {
-        consecutiveSearchFailures = 0
+        searchFailuresBySession.delete(sessionId)
       }
       outcome = { ok: !result.error, content: clampToolResult(JSON.stringify(result)) }
     } else {
@@ -566,6 +593,10 @@ async function runAgent(options: {
     if (!model.streaming && result.text) send({ sessionId, type: 'text-delta', text: result.text })
     if (!result.toolCalls.length) {
       messages.push({ role: 'assistant', content: result.text })
+      if (!result.text.trim()) {
+        send({ sessionId, type: 'error', message: result.reasoning.trim() ? '模型只返回了思考过程，没有给出结论，请重试' : '模型没有返回内容，请重试' })
+        return
+      }
       send({ sessionId, type: 'done' })
       return
     }
@@ -621,6 +652,7 @@ export function registerAiIpcHandlers(settingsStore: AiSettingsStore): void {
   ipcMain.handle('ai:update-settings', (_event, value: unknown) => settingsStore.update(value))
   ipcMain.handle('ai:chat', (event: IpcMainInvokeEvent, sessionId: unknown, turns: unknown, tools: unknown) => {
     const request = validateChatRequest(sessionId, turns, tools)
+    searchFailuresBySession.delete(request.sessionId)
     const settings = settingsStore.snapshot()
     const searchProvider = settings.searchProviders.find((item) => item.id === settings.activeSearchProviderId)
     const provider = settings.providers.find((item) => item.id === settings.activeProviderId)
@@ -646,6 +678,7 @@ export function registerAiIpcHandlers(settingsStore: AiSettingsStore): void {
         emit(sender, { sessionId: request.sessionId, type: 'error', message: error instanceof Error ? error.message : 'AI 请求失败' })
       })
       .finally(() => {
+        searchFailuresBySession.delete(request.sessionId)
         if (sessions.get(request.sessionId)?.sender === sender) sessions.delete(request.sessionId)
       })
   })

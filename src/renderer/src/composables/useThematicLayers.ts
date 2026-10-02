@@ -2,6 +2,7 @@ import { onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import * as Cesium from 'cesium'
 import type { EarthquakeEvent, EarthquakeFeed } from '../../../preload'
 import { thematicLayerCatalog, useClimateStore, type ThematicLayerId } from '@renderer/stores/climate'
+import { useFailureStore } from '@renderer/stores/failure'
 import { beltLabel, beltLabelPosition, beltOpacity, beltRing } from '@renderer/thematic/rainBelt'
 import { summerMonsoonArrows, winterMonsoonArrows, type MonsoonArrow } from '@renderer/thematic/monsoonArrows'
 import { oceanCurrents, pathPointAt } from '@renderer/thematic/oceanCurrents'
@@ -80,6 +81,7 @@ function arrowLabelAt(arrow: MonsoonArrow): [number, number] {
 
 export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void {
   const store = useClimateStore()
+  const failureStore = useFailureStore()
   const sources = new Map<ThematicLayerId, Cesium.CustomDataSource>()
   const coriolisProgress = ref(0)
   let coriolisRaf = 0
@@ -486,9 +488,13 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     try {
       feed = await window.guEarth.datasets.getEarthquakes()
     } catch {
+      if (sources.get('plate-tectonics') === dataSource) {
+        failureStore.reportFailure({ scope: 'dataset', message: '近期地震数据获取失败，本次仅显示板块边界与火山', detail: '网络恢复后点击重试即可补上地震点', retryable: true })
+      }
       return
     }
     if (sources.get('plate-tectonics') !== dataSource) return
+    failureStore.clearFailure('dataset')
     for (const event of feed.events) {
       const style = quakeStyle(event.magnitude)
       dataSource.entities.add({
@@ -629,6 +635,14 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
   }
 
   watch(() => store.overlays, syncOverlays, { deep: true })
+  failureStore.registerRetry('dataset', async () => {
+    const dataSource = sources.get('plate-tectonics')
+    if (!dataSource) {
+      failureStore.clearFailure('dataset')
+      return
+    }
+    await addEarthquakeEntities(dataSource)
+  })
   watch(() => Math.round(store.month * 4) / 4, (month) => refreshPressureBeltGeometry(month))
   watch(viewer, (previous) => {
     if (previous && !previous.isDestroyed()) {

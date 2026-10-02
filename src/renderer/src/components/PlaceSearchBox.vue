@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, h, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { Button } from 'ant-design-vue'
 import { DownOutlined, LoadingOutlined, SearchOutlined } from '@ant-design/icons-vue'
 import { useGlobeStore } from '@renderer/stores/globe'
+import { useFailureStore } from '@renderer/stores/failure'
 import type { PlaceSearchProvider, PlaceSuggestion } from '../../../preload'
 
 interface PlaceOption {
@@ -19,10 +21,12 @@ const emit = defineEmits<{
 const keyword = ref('')
 const options = ref<PlaceOption[]>([])
 const store = useGlobeStore()
+const failureStore = useFailureStore()
 const searchInput = ref<{ focus: () => void }>()
 const preferredProvider = ref<PlaceSearchProvider>('amap')
 const providerMenuOpen = ref(false)
 const suggestionsOpen = ref(false)
+let lastQuery = ''
 const providerDefinitions: Array<{ id: PlaceSearchProvider; name: string }> = [
   { id: 'amap', name: '高德' },
   { id: 'baidu', name: '百度' }
@@ -39,13 +43,25 @@ function regionText(place: PlaceSuggestion): string {
   return [region, place.address].filter((part) => part).join(' · ')
 }
 
-function statusOption(text: string, isError: boolean): PlaceOption {
+function statusOption(text: string, isError: boolean, retry?: () => void): PlaceOption {
   return {
     value: `status:${text}`,
     key: `status:${text}`,
     disabled: true,
-    label: h('div', { class: isError ? 'guearth-place-status guearth-place-status-error' : 'guearth-place-status' }, text)
+    label: h('div', { class: isError ? 'guearth-place-status guearth-place-status-error' : 'guearth-place-status' }, [
+      h('span', text),
+      retry ? h(Button, { type: 'text', size: 'small', class: 'guearth-place-retry', onClick: retry }, () => '重试') : null
+    ])
   }
+}
+
+function providerName(id?: PlaceSearchProvider): string {
+  return providerDefinitions.find((item) => item.id === id)?.name ?? ''
+}
+
+function retryLast(): void {
+  const query = lastQuery.trim()
+  if (query) void search(query)
 }
 
 function placeOption(place: PlaceSuggestion, index: number): PlaceOption {
@@ -62,6 +78,7 @@ function placeOption(place: PlaceSuggestion, index: number): PlaceOption {
 
 async function search(text: string): Promise<void> {
   const seq = ++requestSeq
+  lastQuery = text
   if (!window.guEarth?.places) {
     options.value = [statusOption('搜索服务不可用', true)]
     return
@@ -80,12 +97,14 @@ async function search(text: string): Promise<void> {
   try {
     result = await window.guEarth.places.search(text, provider.value.id)
   } catch {
-    if (seq === requestSeq) options.value = [statusOption('搜索失败，请稍后重试', true)]
+    if (seq === requestSeq) options.value = [statusOption('搜索失败，请稍后重试', true, retryLast)]
     return
   }
   if (seq !== requestSeq) return
-  if (result.error) options.value = [statusOption(result.error, true)]
-  else if (!result.places.length) options.value = [statusOption(result.note ?? '没有找到匹配的地点', false)]
+  if (result.superseded) return
+  if (result.fellBackFrom) failureStore.reportDegrade(`${providerName(result.fellBackFrom)}不可用，已改用${providerName(result.source)}`)
+  if (result.error) options.value = [statusOption(result.error, true, retryLast)]
+  else if (!result.places.length) options.value = [statusOption(result.note ?? '没有找到匹配的地点，可换个说法或切换搜索源', false)]
   else options.value = result.places.map((place, index) => placeOption(place, index))
 }
 
@@ -268,9 +287,18 @@ async function handleProviderSelect({ key }: { key: string | number }): Promise<
 }
 
 .guearth-place-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: rgba(0, 0, 0, 0.45);
   font-size: 12px;
   line-height: 20px;
+}
+
+.guearth-place-retry {
+  height: 20px;
+  padding: 0 4px;
+  font-size: 12px;
 }
 
 .guearth-place-status-error {

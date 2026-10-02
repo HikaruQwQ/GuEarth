@@ -147,6 +147,9 @@ export interface PlaceSearchResult {
   places: PlaceSuggestion[]
   note?: string
   error?: string
+  source?: PlaceSearchProvider
+  fellBackFrom?: PlaceSearchProvider
+  superseded?: boolean
 }
 
 export interface EarthquakeEvent {

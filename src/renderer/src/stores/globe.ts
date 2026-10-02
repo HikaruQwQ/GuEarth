@@ -1,5 +1,6 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
+import { useFailureStore } from './failure'
 
 export type LayerKind = 'basemap' | 'overlay'
 export type ProviderRegion = 'global' | 'china'
@@ -112,9 +113,13 @@ export const useGlobeStore = defineStore('globe', () => {
   const tileCacheEnabled = ref(true)
   const providerCredentials = ref<Record<string, { configured: boolean; updatedAt: number | null }>>({})
   const isLayerPanelOpen = ref(false)
+  const failureStore = useFailureStore()
   const isGlobeReady = ref(false)
-  const globeError = ref('')
-  const terrainError = ref('')
+  const globeLoadTimedOut = ref(false)
+  const globeLoadStage = ref('')
+  const activeTerrainId = ref('')
+  const globeError = computed(() => failureStore.notices.basemap?.message ?? '')
+  const terrainError = computed(() => failureStore.notices.terrain?.message ?? '')
   const camera = ref<CameraReadout>({ longitude: 105, latitude: 35, height: 15000000, heading: 0, pitch: 0 })
   const sceneMode = ref<SceneMode>('3D')
   const levelViewActive = ref(false)
@@ -131,8 +136,9 @@ export const useGlobeStore = defineStore('globe', () => {
       providerStyles.value = Object.fromEntries(providerCatalog.map((provider) => [provider.id, styleFor(provider.id, settings.providerStyles?.[provider.id] ?? provider.defaultStyleId)]))
       providerCredentials.value = settings.providerCredentials
       sceneMode.value = settings.sceneMode ?? '3D'
+      failureStore.clearFailure('settings')
     } catch {
-      globeError.value = '设置读取失败'
+      failureStore.reportFailure({ scope: 'settings', message: '设置读取失败，已使用默认设置', retryable: true })
     }
   }
 
@@ -150,9 +156,31 @@ export const useGlobeStore = defineStore('globe', () => {
   }
 
   function setLayerPanelOpen(value: boolean): void { isLayerPanelOpen.value = value }
-  function setGlobeReady(value: boolean): void { isGlobeReady.value = value; if (value) globeError.value = '' }
-  function setGlobeError(message: string): void { globeError.value = message }
-  function setTerrainError(message: string): void { terrainError.value = message }
+  function setGlobeReady(value: boolean): void {
+    isGlobeReady.value = value
+    if (value) {
+      globeLoadTimedOut.value = false
+      globeLoadStage.value = ''
+      failureStore.clearFailure('basemap')
+    }
+  }
+  function setGlobeLoadTimedOut(value: boolean): void { globeLoadTimedOut.value = value }
+  function setGlobeLoadStage(value: string): void { globeLoadStage.value = value }
+  function setActiveTerrainId(id: string): void { activeTerrainId.value = id }
+  function setGlobeError(message: string, detail?: string): void {
+    if (!message) {
+      failureStore.clearFailure('basemap')
+      return
+    }
+    failureStore.reportFailure({ scope: 'basemap', message, detail, retryable: true })
+  }
+  function setTerrainError(message: string, detail?: string): void {
+    if (!message) {
+      failureStore.clearFailure('terrain')
+      return
+    }
+    failureStore.reportFailure({ scope: 'terrain', message, detail, retryable: true })
+  }
   function setCameraReadout(value: CameraReadout): void { camera.value = value }
   function selectBasemap(id: string): void { selectedLayerId.value = id; void persistSettings() }
   function setLayerOpacity(id: string, opacity: number): void { layers.value = layers.value.map((layer) => (layer.id === id ? { ...layer, opacity } : layer)) }
@@ -172,8 +200,8 @@ export const useGlobeStore = defineStore('globe', () => {
 
   return {
     layers, selectedLayerId, providerStyles, terrainProviderId, terrainExaggeration, terrainLighting, tileCacheEnabled,
-    providerCredentials, isLayerPanelOpen, isGlobeReady, globeError, terrainError, camera, sceneMode, levelViewActive, hydrateSettings,
-    setLayerPanelOpen, setGlobeReady, setGlobeError, setTerrainError, setCameraReadout, selectBasemap, setLayerOpacity,
+    providerCredentials, isLayerPanelOpen, isGlobeReady, globeLoadTimedOut, globeLoadStage, activeTerrainId, globeError, terrainError, camera, sceneMode, levelViewActive, hydrateSettings,
+    setLayerPanelOpen, setGlobeReady, setGlobeLoadTimedOut, setGlobeLoadStage, setActiveTerrainId, setGlobeError, setTerrainError, setCameraReadout, selectBasemap, setLayerOpacity,
     setProviderStyle, setTerrainProvider, setTerrainExaggeration, setTerrainLighting, setTileCacheEnabled, setCredentialStatus, setSceneMode, setLevelViewActive
   }
 })

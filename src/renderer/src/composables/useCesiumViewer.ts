@@ -2,6 +2,7 @@ import { onBeforeUnmount, onMounted, shallowRef, watch, type Ref } from 'vue'
 import * as Cesium from 'cesium'
 import { useGlobeStore, providerCatalog, terrainCatalog, type ProviderMeta } from '@renderer/stores/globe'
 import { useSolarStore } from '@renderer/stores/solar'
+import { useFailureStore } from '@renderer/stores/failure'
 import type { PlaceSuggestion } from '../../../preload'
 import { createPolarCaps } from './polarCaps'
 
@@ -27,6 +28,15 @@ const terrainRegistry: Record<string, () => Promise<Cesium.TerrainProvider>> = {
 }
 
 const terrainName = (id: string): string => terrainCatalog.find((terrain) => terrain.id === id)?.name ?? id
+const providerName = (id: string): string => layerRegistry[id]?.meta.name ?? id
+
+const GLOBE_LOAD_TIMEOUT_MS = 20_000
+const TILE_RECOVERY_GRACE_MS = 3_000
+const TERRAIN_RESOLVE_BUDGET_MS = 4_000
+
+type LayerLoadResult =
+  | { ok: true }
+  | { ok: false; reason: 'key' | 'create' | 'cancelled' | 'inflight'; message: string; detail: string }
 
 const DEPTH_TEST_FREE_HEIGHT_FACTOR = 1.3
 const MIN_DEPTH_TEST_FREE_DISTANCE = 10_000
@@ -40,9 +50,16 @@ function normalizeHeading(radians: number): number {
 export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
   const viewer = shallowRef<Cesium.Viewer>()
   const imageryLayers = new Map<string, Cesium.ImageryLayer>()
+  const layersInFlight = new Set<string>()
   const store = useGlobeStore()
   const solarStore = useSolarStore()
+  const failureStore = useFailureStore()
   let generation = 0
+  let terrainRequestSeq = 0
+  let activeBasemapId = ''
+  let lastTileErrorAt = 0
+  let loadTimeoutTimer: number | undefined
+  let tileProgressListener: ((pending: number) => void) | undefined
   let selectedPlaceMarker: Cesium.Entity | undefined
   let polarCaps: Cesium.Primitive | undefined
 
@@ -81,77 +98,225 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
 
   function layerMeta(id: string) { return store.layers.find((layer) => layer.id === id) }
 
-  async function addLayer(id: string, expectedGeneration: number): Promise<boolean> {
+  function handleTileError(id: string, name: string, error: unknown): void {
+    if (id !== store.selectedLayerId) return
+    lastTileErrorAt = Date.now()
+    const detail = typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
+      ? error.message
+      : `${name}瓦片请求失败`
+    store.setGlobeError('地图数据加载失败，正在使用已缓存的部分', detail)
+  }
+
+  async function addLayer(id: string, expectedGeneration: number): Promise<LayerLoadResult> {
     const provider = layerRegistry[id]
-    if (!viewer.value || !provider || imageryLayers.has(id)) return false
+    if (!viewer.value || !provider) return { ok: false, reason: 'cancelled', message: '', detail: '' }
+    if (imageryLayers.has(id)) return { ok: true }
+    if (layersInFlight.has(id)) return { ok: false, reason: 'inflight', message: '', detail: '' }
     if (provider.meta.requiresKey && !store.providerCredentials[id]?.configured) {
-      if (id === store.selectedLayerId) store.setGlobeError(`${provider.meta.name} 需要 API Key`)
-      return false
+      return { ok: false, reason: 'key', message: `${provider.meta.name}需要 API Key`, detail: '请在「图层管理 → 供应商密钥」中配置后重试' }
     }
+    layersInFlight.add(id)
     try {
       const imageryProvider = await provider.createImageryProvider(store.providerStyles[id] ?? provider.meta.defaultStyleId)
-      imageryProvider.errorEvent.addEventListener((error) => {
-        if (id !== store.selectedLayerId) return
-        const message = typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
-          ? error.message
-          : `${provider.meta.name} 瓦片请求失败`
-        store.setGlobeError(message)
-      })
+      imageryProvider.errorEvent.addEventListener((error) => handleTileError(id, provider.meta.name, error))
       const currentViewer = viewer.value
-      if (!currentViewer || currentViewer.isDestroyed() || expectedGeneration !== generation) return false
+      if (!currentViewer || currentViewer.isDestroyed() || expectedGeneration !== generation) return { ok: false, reason: 'cancelled', message: '', detail: '' }
       const layer = currentViewer.imageryLayers.addImageryProvider(imageryProvider)
       layer.show = id === store.selectedLayerId
       layer.alpha = layerMeta(id)?.opacity ?? 1
       imageryLayers.set(id, layer)
-      return true
+      return { ok: true }
     } catch (error) {
-      if (id === store.selectedLayerId) store.setGlobeError(error instanceof Error ? error.message : `${provider.meta.name} 加载失败`)
-      return false
+      return { ok: false, reason: 'create', message: `${provider.meta.name}加载失败`, detail: error instanceof Error ? error.message : '' }
+    } finally {
+      layersInFlight.delete(id)
     }
   }
 
-  function revealBasemap(id: string): void { imageryLayers.forEach((layer, layerId) => { layer.show = layerId === id }) }
+  function revealBasemap(id: string): void {
+    imageryLayers.forEach((layer, layerId) => { layer.show = layerId === id })
+    activeBasemapId = id
+    failureStore.clearFailure('basemap')
+  }
 
   function switchBasemap(id: string): void {
     const provider = layerRegistry[id]
     if (!provider || !viewer.value || viewer.value.isDestroyed()) return
-    if (provider.meta.requiresKey && !store.providerCredentials[id]?.configured) {
-      store.setGlobeError(`${provider.meta.name} 需要 API Key`)
+    const previousId = activeBasemapId
+    store.selectBasemap(id)
+    if (imageryLayers.has(id)) {
+      revealBasemap(id)
       return
     }
-    store.selectBasemap(id)
-    if (imageryLayers.has(id)) { revealBasemap(id); return }
-    void addLayer(id, generation).then((loaded) => { if (loaded && store.selectedLayerId === id) revealBasemap(id) })
+    void addLayer(id, generation).then((result) => {
+      if (store.selectedLayerId !== id) return
+      if (result.ok) {
+        revealBasemap(id)
+        return
+      }
+      if (result.reason === 'cancelled' || result.reason === 'inflight') return
+      if (previousId && previousId !== id && imageryLayers.has(previousId)) {
+        store.selectBasemap(previousId)
+        revealBasemap(previousId)
+        failureStore.reportDegrade(`${result.message}，已回到 ${providerName(previousId)}`)
+        return
+      }
+      store.setGlobeError(result.message, result.detail)
+    })
   }
 
   function setProviderStyle(id: string, styleId: string): void {
     const provider = layerRegistry[id]
     if (!provider || !provider.meta.styles.some((style) => style.id === styleId)) return
+    const previousStyleId = store.providerStyles[id] ?? provider.meta.defaultStyleId
+    if (previousStyleId === styleId) return
     store.setProviderStyle(id, styleId)
     const layer = imageryLayers.get(id)
-    if (layer && viewer.value && !viewer.value.isDestroyed()) {
-      generation += 1
-      const expectedGeneration = generation
-      viewer.value.imageryLayers.remove(layer, true)
-      imageryLayers.delete(id)
-      if (id === store.selectedLayerId) void addLayer(id, expectedGeneration).then((loaded) => { if (loaded && expectedGeneration === generation) revealBasemap(id) })
-    }
+    if (!layer || !viewer.value || viewer.value.isDestroyed()) return
+    generation += 1
+    const expectedGeneration = generation
+    viewer.value.imageryLayers.remove(layer, true)
+    imageryLayers.delete(id)
+    void addLayer(id, expectedGeneration).then((result) => {
+      if (result.ok) {
+        if (id === store.selectedLayerId) revealBasemap(id)
+        return
+      }
+      if (result.reason === 'cancelled' || result.reason === 'inflight') return
+      store.setProviderStyle(id, previousStyleId)
+      void addLayer(id, generation).then((restored) => {
+        if (restored.ok && id === store.selectedLayerId) revealBasemap(id)
+      })
+      store.setGlobeError(`${provider.meta.name}样式切换失败`, result.detail || result.message)
+    })
   }
 
   async function setTerrain(id: string, expectedGeneration: number): Promise<void> {
     const create = terrainRegistry[id] ?? terrainRegistry.ellipsoid
+    terrainRequestSeq += 1
+    const requestSeq = terrainRequestSeq
     try {
       const terrain = await create()
-      if (!viewer.value || viewer.value.isDestroyed() || expectedGeneration !== generation) return
+      if (!viewer.value || viewer.value.isDestroyed() || expectedGeneration !== generation || requestSeq !== terrainRequestSeq) return
       applyTerrain(terrain)
+      store.setActiveTerrainId(id)
       store.setTerrainError('')
     } catch (error) {
-      store.setTerrainError(error instanceof Error ? error.message : `${terrainName(id)} 加载失败`)
-      if (id !== 'ellipsoid') {
-        const fallback = await terrainRegistry.ellipsoid()
-        if (viewer.value && !viewer.value.isDestroyed() && expectedGeneration === generation) applyTerrain(fallback)
+      if (requestSeq !== terrainRequestSeq) return
+      const detail = error instanceof Error ? error.message : ''
+      if (id === 'ellipsoid') {
+        store.setTerrainError('地形不可用，且无法降级为平滑球面', detail)
+        return
+      }
+      const fallback = await terrainRegistry.ellipsoid()
+      if (!viewer.value || viewer.value.isDestroyed() || expectedGeneration !== generation || requestSeq !== terrainRequestSeq) return
+      applyTerrain(fallback)
+      store.setTerrainError('')
+      store.setActiveTerrainId('ellipsoid')
+      failureStore.reportDegrade(`${terrainName(id)}不可用，已降级为平滑球面`)
+    }
+  }
+
+  function clearLoadTimeout(): void {
+    if (loadTimeoutTimer !== undefined) {
+      window.clearTimeout(loadTimeoutTimer)
+      loadTimeoutTimer = undefined
+    }
+    store.setGlobeLoadTimedOut(false)
+  }
+
+  function evaluateGlobeReady(): void {
+    const currentViewer = viewer.value
+    if (!currentViewer || currentViewer.isDestroyed()) return
+    if (store.isGlobeReady) return
+    if (!currentViewer.scene.globe.show) return
+    if (imageryLayers.size === 0) return
+    clearLoadTimeout()
+    store.setGlobeReady(true)
+  }
+
+  async function resolveInitialTerrain(id: string): Promise<{ provider: Cesium.TerrainProvider; id: string }> {
+    const create = terrainRegistry[id] ?? terrainRegistry.ellipsoid
+    let settled = false
+    const timeout = new Promise<{ provider: Cesium.TerrainProvider; id: string }>((resolve) => {
+      window.setTimeout(() => {
+        if (settled) return
+        settled = true
+        failureStore.reportDegrade(`${terrainName(id)}加载超时，已降级为平滑球面`)
+        void terrainRegistry.ellipsoid().then((provider) => resolve({ provider, id: 'ellipsoid' }))
+      }, TERRAIN_RESOLVE_BUDGET_MS)
+    })
+    try {
+      const attempt = create().then((provider) => ({ provider, id }))
+      const resolved = await Promise.race([attempt, timeout])
+      settled = true
+      return resolved
+    } catch {
+      settled = true
+      failureStore.reportDegrade(`${terrainName(id)}不可用，已降级为平滑球面`)
+      return { provider: await terrainRegistry.ellipsoid(), id: 'ellipsoid' }
+    }
+  }
+
+  function startLoadTimeout(): void {
+    clearLoadTimeout()
+    loadTimeoutTimer = window.setTimeout(() => {
+      loadTimeoutTimer = undefined
+      evaluateGlobeReady()
+      if (store.isGlobeReady) return
+      store.setGlobeLoadTimedOut(true)
+    }, GLOBE_LOAD_TIMEOUT_MS)
+  }
+
+  function detachTileProgress(): void {
+    const currentViewer = viewer.value
+    if (tileProgressListener && currentViewer && !currentViewer.isDestroyed()) currentViewer.scene.globe.tileLoadProgressEvent.removeEventListener(tileProgressListener)
+    tileProgressListener = undefined
+  }
+
+  function attachTileProgress(): void {
+    const currentViewer = viewer.value
+    if (!currentViewer || currentViewer.isDestroyed()) return
+    detachTileProgress()
+    const listener = (pending: number): void => {
+      if (pending > 0) return
+      if (!store.isGlobeReady) {
+        evaluateGlobeReady()
+        return
+      }
+      if (lastTileErrorAt && Date.now() - lastTileErrorAt > TILE_RECOVERY_GRACE_MS) {
+        lastTileErrorAt = 0
+        store.setGlobeError('')
       }
     }
+    tileProgressListener = listener
+    currentViewer.scene.globe.tileLoadProgressEvent.addEventListener(listener)
+  }
+
+  async function retryBasemap(): Promise<void> {
+    const currentViewer = viewer.value
+    if (!currentViewer || currentViewer.isDestroyed()) return
+    const id = store.selectedLayerId
+    store.setGlobeError('')
+    store.setGlobeLoadStage('正在重新加载地图…')
+    startLoadTimeout()
+    const existing = imageryLayers.get(id)
+    if (existing) {
+      currentViewer.imageryLayers.remove(existing, true)
+      imageryLayers.delete(id)
+    }
+    const result = await addLayer(id, generation)
+    if (result.ok) {
+      revealBasemap(id)
+      return
+    }
+    if (result.reason === 'cancelled' || result.reason === 'inflight') return
+    store.setGlobeError(result.message, result.detail)
+  }
+
+  async function retryTerrain(): Promise<void> {
+    store.setTerrainError('')
+    await setTerrain(store.terrainProviderId, generation)
   }
 
   function applyTerrainRendering(): void {
@@ -251,10 +416,21 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
   onMounted(() => {
     void (async () => {
       if (!container.value) return
+      store.setGlobeLoadStage('正在读取设置…')
+      failureStore.registerRetry('settings', async () => {
+        store.setGlobeLoadStage('正在重新读取设置…')
+        await store.hydrateSettings()
+        if (store.selectedLayerId !== activeBasemapId) switchBasemap(store.selectedLayerId)
+        await setTerrain(store.terrainProviderId, generation)
+      })
       await store.hydrateSettings()
       try {
         generation += 1
+        store.setGlobeLoadStage('正在初始化地球…')
+        const terrainPromise = resolveInitialTerrain(store.terrainProviderId)
         viewer.value = new Cesium.Viewer(container.value, { baseLayer: false, baseLayerPicker: false, terrainProvider: new Cesium.EllipsoidTerrainProvider(), geocoder: false, animation: false, timeline: false, sceneModePicker: false, navigationHelpButton: false, fullscreenButton: false, homeButton: false, infoBox: false, selectionIndicator: false, contextOptions: { webgl: { preserveDrawingBuffer: true } } })
+        viewer.value.scene.globe.show = false
+        store.setGlobeLoadStage('正在准备地形数据…')
         viewer.value.camera.setView({ destination: Cesium.Cartesian3.fromDegrees(105, 35, 15000000) })
         const initialMode = store.sceneMode === '2D' ? Cesium.SceneMode.SCENE2D : Cesium.SceneMode.SCENE3D
         viewer.value.scene.mode = initialMode
@@ -263,27 +439,48 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
         viewer.value.scene.preUpdate.addEventListener(updateDepthTestDistance)
         viewer.value.camera.moveEnd.addEventListener(updateCameraState)
         updateCameraState()
+        attachTileProgress()
+        startLoadTimeout()
+        failureStore.registerRetry('basemap', retryBasemap)
+        failureStore.registerRetry('terrain', retryTerrain)
+        void (async () => {
+          const terrainSetup = await terrainPromise
+          const current = viewer.value
+          if (!current || current.isDestroyed()) return
+          applyTerrain(terrainSetup.provider)
+          store.setActiveTerrainId(terrainSetup.id)
+          current.scene.globe.show = true
+          store.setGlobeLoadStage('正在加载地图瓦片…')
+        })()
         const initialLayerId = store.selectedLayerId
-        void addLayer(initialLayerId, generation).then(async (loaded) => {
-          if (loaded) {
-            store.setGlobeReady(true)
+        void (async () => {
+          const result = await addLayer(initialLayerId, generation)
+          if (result.ok) {
+            revealBasemap(initialLayerId)
             return
           }
+          if (result.reason === 'cancelled' || result.reason === 'inflight') return
           if (initialLayerId !== 'osm') {
-            store.selectBasemap('osm')
-            const fallbackLoaded = await addLayer('osm', generation)
-            if (fallbackLoaded) store.setGlobeReady(true)
+            const fallback = await addLayer('osm', generation)
+            if (fallback.ok) {
+              store.selectBasemap('osm')
+              revealBasemap('osm')
+              failureStore.reportDegrade(`${result.message}，已切换到 OpenStreetMap`)
+              return
+            }
           }
-        })
-        void setTerrain(store.terrainProviderId, generation)
+          store.setGlobeError(result.message, result.detail)
+        })()
       } catch (error) {
-        store.setGlobeError(error instanceof Error ? error.message : '地球初始化失败')
+        store.setGlobeError('地球初始化失败', error instanceof Error ? error.message : '')
       }
     })()
   })
 
   onBeforeUnmount(() => {
     generation += 1
+    clearLoadTimeout()
+    detachTileProgress()
     const currentViewer = viewer.value
     if (!currentViewer || currentViewer.isDestroyed()) return
     currentViewer.camera.moveEnd.removeEventListener(updateCameraState)

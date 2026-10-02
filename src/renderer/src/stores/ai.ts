@@ -51,6 +51,9 @@ let eventListenerBound = false
 let messageSeq = 0
 let sessionSeq = 0
 let activeSessionId = ''
+let idleTimer: ReturnType<typeof setTimeout> | undefined
+
+const STREAM_IDLE_TIMEOUT_MS = 120_000
 
 const rendererTools = new Map<string, RendererTool>()
 
@@ -80,8 +83,29 @@ export const useAiStore = defineStore('ai', () => {
     return undefined
   }
 
+  function clearIdleWatchdog(): void {
+    if (idleTimer !== undefined) {
+      clearTimeout(idleTimer)
+      idleTimer = undefined
+    }
+  }
+
+  function armIdleWatchdog(): void {
+    clearIdleWatchdog()
+    idleTimer = setTimeout(() => {
+      idleTimer = undefined
+      const assistant = currentAssistant()
+      if (assistant && assistant.status === 'streaming') {
+        assistant.status = 'error'
+        assistant.error = '模型响应超时，请重试'
+      }
+      isStreaming.value = false
+    }, STREAM_IDLE_TIMEOUT_MS)
+  }
+
   function handleEvent(event: AiChatEvent): void {
     if (event.sessionId !== activeSessionId) return
+    if (isStreaming.value) armIdleWatchdog()
     if (event.type === 'reasoning-delta' || event.type === 'text-delta') {
       const assistant = currentAssistant()
       if (!assistant || assistant.status !== 'streaming') return
@@ -139,6 +163,7 @@ export const useAiStore = defineStore('ai', () => {
     if (event.type === 'done') {
       const assistant = currentAssistant()
       if (assistant && assistant.status === 'streaming') assistant.status = 'done'
+      clearIdleWatchdog()
       isStreaming.value = false
       return
     }
@@ -155,6 +180,7 @@ export const useAiStore = defineStore('ai', () => {
           }
         }
       }
+      clearIdleWatchdog()
       isStreaming.value = false
     }
   }
@@ -218,6 +244,7 @@ export const useAiStore = defineStore('ai', () => {
     activeSessionId = `s${sessionSeq}`
     const sessionId = activeSessionId
     isStreaming.value = true
+    armIdleWatchdog()
     const turns = messages.value
       .filter((message) => message.status !== 'streaming' && !message.error)
       .filter((message) => message.content.trim() !== '' || message.role === 'user')
@@ -230,8 +257,26 @@ export const useAiStore = defineStore('ai', () => {
         assistant.status = 'error'
         assistant.error = stripIpcErrorPrefix(error instanceof Error ? error.message : 'AI 请求失败')
       }
+      clearIdleWatchdog()
       isStreaming.value = false
     }
+  }
+
+  async function retryLast(): Promise<void> {
+    if (isStreaming.value) return
+    let errorIndex = -1
+    for (let index = messages.value.length - 1; index >= 0; index -= 1) {
+      const message = messages.value[index]
+      if (message.role === 'assistant' && message.status === 'error') {
+        errorIndex = index
+        break
+      }
+    }
+    if (errorIndex < 1) return
+    const question = messages.value[errorIndex - 1]
+    if (question.role !== 'user') return
+    messages.value = messages.value.slice(0, errorIndex - 1)
+    await send(question.content)
   }
 
   async function stop(): Promise<void> {
@@ -255,7 +300,7 @@ export const useAiStore = defineStore('ai', () => {
 
   return {
     settings, messages, isStreaming, isPanelOpen, isSettingsOpen, hydrated,
-    hydrate, registerTool, saveSettings, send, stop, clearConversation, setPanelOpen, setSettingsOpen,
+    hydrate, registerTool, saveSettings, send, stop, retryLast, clearConversation, setPanelOpen, setSettingsOpen,
     activeModelVisionEnabled
   }
 })

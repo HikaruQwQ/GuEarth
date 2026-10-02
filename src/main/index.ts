@@ -1,15 +1,16 @@
 import { app, shell, BrowserWindow, ipcMain, net, protocol } from 'electron'
 import { join } from 'path'
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'fs'
 import { createHash } from 'crypto'
 import icon from '../../resources/icon.png?asset'
-import type { AnnotationDocument, AnnotationEntry, GeoPosition, GuEarthSettings, GuEarthSettingsPatch, ProviderCredentialStatus, StoredShape, TileCacheEntry, TileCacheStats, TileKey } from '../preload'
+import type { AnnotationDocument, AnnotationEntry, GeoPosition, GuEarthSettings, GuEarthSettingsPatch, PlaceSearchProvider, ProviderCredentialStatus, StoredShape, TileCacheEntry, TileCacheStats, TileKey } from '../preload'
 import { assertEncryptionAvailable, assertSafeId, clearProviderKey, hasProviderKey, initKeyVault, readProviderKey, writeProviderKey } from './keyVault'
 import { baiduLngLatToTile, tileCenter, wgs84ToBd09 } from './geo'
 import { AiSettingsStore } from './ai/settingsStore'
 import { registerAiIpcHandlers } from './ai/agent'
 import { searchPlaces } from './ai/amap'
 import { searchBaiduPlaces } from './ai/baidu'
+import { beginPlacesRequest } from './ai/searchThrottle'
 import { initDatasets, loadEarthquakeFeed } from './datasets'
 
 interface PersistedSettings {
@@ -38,6 +39,8 @@ const defaultSettings: PersistedSettings = {
   providerCredentials: {},
   sceneMode: '3D'
 }
+
+const TILE_TTL_MS = 86_400_000
 
 let settingsPath = ''
 let tileCachePath = ''
@@ -133,7 +136,7 @@ function toArrayBuffer(data: Buffer): ArrayBuffer {
   return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
 }
 
-function readTile(key: TileKey): TileCacheEntry | null {
+function readTile(key: TileKey, allowExpired = false): TileCacheEntry | null {
   const dataPath = tileDataPath(key)
   const metaPath = tileMetaPath(key)
   if (!existsSync(dataPath) || !existsSync(metaPath)) return null
@@ -141,24 +144,31 @@ function readTile(key: TileKey): TileCacheEntry | null {
     const metadata: unknown = JSON.parse(readFileSync(metaPath, 'utf8'))
     if (!isRecord(metadata) || typeof metadata.contentType !== 'string') return null
     const expiresAt = typeof metadata.expiresAt === 'number' ? metadata.expiresAt : null
-    if (expiresAt !== null && expiresAt <= Date.now()) {
-      unlinkSync(dataPath)
-      unlinkSync(metaPath)
-      return null
-    }
+    if (expiresAt !== null && expiresAt <= Date.now() && !allowExpired) return null
     return { ...key, data: toArrayBuffer(readFileSync(dataPath)), contentType: metadata.contentType, expiresAt }
   } catch {
     return null
   }
 }
 
+function cachedTileResponse(key: TileKey, allowExpired: boolean): Response | null {
+  if (!settings.tileCacheEnabled) return null
+  const cached = readTile(key, allowExpired)
+  if (!cached) return null
+  const expired = cached.expiresAt !== null && cached.expiresAt <= Date.now()
+  return new Response(cached.data, { headers: { 'content-type': cached.contentType, 'x-guearth-cache': expired ? 'stale' : 'hit' } })
+}
+
 function writeTile(entry: TileCacheEntry): void {
   const key: TileKey = { providerId: entry.providerId, styleId: entry.styleId, level: entry.level, x: entry.x, y: entry.y }
   const basePath = tileBasePath(key)
-  mkdirSync(join(tileCachePath, safeId(key.providerId), safeId(key.styleId), pathPart(key.level), pathPart(key.x)), { recursive: true })
-  const data = Buffer.from(entry.data)
-  writeFileSync(`${basePath}.bin`, data)
-  writeFileSync(`${basePath}.json`, JSON.stringify({ contentType: entry.contentType, expiresAt: entry.expiresAt }), 'utf8')
+  try {
+    mkdirSync(join(tileCachePath, safeId(key.providerId), safeId(key.styleId), pathPart(key.level), pathPart(key.x)), { recursive: true })
+    writeFileSync(`${basePath}.bin`, Buffer.from(entry.data))
+    writeFileSync(`${basePath}.json`, JSON.stringify({ contentType: entry.contentType, expiresAt: entry.expiresAt }), 'utf8')
+  } catch {
+    void 0
+  }
 }
 
 function collectFiles(path: string): string[] {
@@ -171,9 +181,13 @@ function collectFiles(path: string): string[] {
 
 function cacheStats(): TileCacheStats {
   return collectFiles(tileCachePath).reduce<TileCacheStats>((result, path) => {
-    if (path.endsWith('.bin')) {
+    if (!path.endsWith('.bin')) return result
+    try {
+      const size = statSync(path).size
       result.files += 1
-      result.bytes += statSync(path).size
+      result.bytes += size
+    } catch {
+      void 0
     }
     return result
   }, { files: 0, bytes: 0 })
@@ -220,10 +234,8 @@ async function handleTileProtocol(request: Request): Promise<Response> {
   if (!Number.isInteger(coordinates[0]) || coordinates[0] < 0 || !Number.isInteger(coordinates[1]) || !Number.isInteger(coordinates[2])) return new Response('Bad tile path', { status: 400 })
   const [level, x, y] = coordinates
   const key = { providerId, styleId, level, x, y }
-  if (settings.tileCacheEnabled) {
-    const cached = readTile(key)
-    if (cached) return new Response(cached.data, { headers: { 'content-type': cached.contentType, 'x-guearth-cache': 'hit' } })
-  }
+  const cached = cachedTileResponse(key, false)
+  if (cached) return cached
   const remoteUrl = tileRemoteUrl(providerId, styleId, level, x, y)
   if (!remoteUrl) return new Response('Unknown provider', { status: 404 })
   try {
@@ -233,14 +245,20 @@ async function handleTileProtocol(request: Request): Promise<Response> {
         'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8'
       }
     })
-    if (!response.ok) return new Response(`Tile request failed: ${response.status}`, { status: response.status })
+    if (!response.ok) {
+      if (response.status === 429 || response.status >= 500) {
+        const stale = cachedTileResponse(key, true)
+        if (stale) return stale
+      }
+      return new Response(`Tile request failed: ${response.status}`, { status: response.status })
+    }
     const data = await response.arrayBuffer()
     const contentType = response.headers.get('content-type') ?? 'image/png'
-    if (settings.tileCacheEnabled) void writeTile({ ...key, data, contentType, expiresAt: Date.now() + 86400000 })
+    if (settings.tileCacheEnabled) writeTile({ ...key, data, contentType, expiresAt: Date.now() + TILE_TTL_MS })
     return new Response(data, { headers: { 'content-type': contentType, 'x-guearth-cache': 'miss' } })
   } catch {
-    const cached = readTile(key)
-    if (cached) return new Response(cached.data, { headers: { 'content-type': cached.contentType, 'x-guearth-cache': 'stale' } })
+    const stale = cachedTileResponse(key, true)
+    if (stale) return stale
     return new Response('Tile unavailable', { status: 502 })
   }
 }
@@ -374,11 +392,18 @@ function registerIpcHandlers(): void {
     return status
   })
   ipcMain.handle('settings:has-provider-api-key', (_event, providerId: string): ProviderCredentialStatus => credentialStatus(safeId(providerId)))
-  ipcMain.handle('places:search', (_event, keyword: unknown, provider: unknown) => {
+  ipcMain.handle('places:search', async (_event, keyword: unknown, provider: unknown) => {
     if (typeof keyword !== 'string') throw new Error('无效的搜索关键词')
     if (provider !== undefined && provider !== 'amap' && provider !== 'baidu') throw new Error('无效的搜索源')
-    const searchProvider = provider ?? (hasProviderKey('amap') ? 'amap' : hasProviderKey('baidu') ? 'baidu' : 'amap')
-    return searchProvider === 'baidu' ? searchBaiduPlaces(keyword) : searchPlaces(keyword)
+    const preferred: PlaceSearchProvider = provider ?? (hasProviderKey('amap') ? 'amap' : hasProviderKey('baidu') ? 'baidu' : 'amap')
+    const requestId = beginPlacesRequest()
+    const primary = preferred === 'baidu' ? await searchBaiduPlaces(keyword, requestId) : await searchPlaces(keyword, undefined, requestId)
+    if (primary.superseded || !primary.error) return { ...primary, source: preferred }
+    const alternative: PlaceSearchProvider = preferred === 'baidu' ? 'amap' : 'baidu'
+    if (!hasProviderKey(alternative)) return { ...primary, source: preferred }
+    const fallback = alternative === 'baidu' ? await searchBaiduPlaces(keyword) : await searchPlaces(keyword)
+    if (fallback.error || fallback.superseded) return { ...primary, source: preferred }
+    return { ...fallback, source: alternative, fellBackFrom: preferred }
   })
   ipcMain.handle('datasets:earthquakes', () => loadEarthquakeFeed())
   ipcMain.handle('tiles:get', (_event, key: TileKey) => readTile(key))

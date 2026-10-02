@@ -26,6 +26,7 @@ const props = defineProps<{
   terrainError: string
   loading: boolean
   terrainProviderId: string
+  activeTerrainId: string
   terrainExaggeration: number
   terrainLighting: boolean
   tileCacheEnabled: boolean
@@ -62,6 +63,8 @@ const basemapOptions = computed<BasemapOption[]>(() => basemapCategories.map((ca
 }))
 
 const settingsCategoryId = ref('')
+const activeTerrainName = computed(() => terrainCatalog.find((terrain) => terrain.id === props.activeTerrainId)?.name ?? '')
+const terrainDegraded = computed(() => Boolean(props.activeTerrainId) && props.activeTerrainId !== props.terrainProviderId)
 const settingsCategory = computed(() => basemapOptions.value.find((option) => option.id === settingsCategoryId.value))
 const settingsOpacity = computed(() => Math.round((settingsCategory.value?.activeLayer?.opacity ?? 1) * 100))
 
@@ -158,6 +161,7 @@ function clearCredential(): void {
         <a-select :value="terrainProviderId" class="full-select" @change="(value: string) => emit('terrain', value)">
           <a-select-option v-for="option in terrainCatalog" :key="option.id" :value="option.id" :title="option.description">{{ option.name }}</a-select-option>
         </a-select>
+        <div v-if="terrainDegraded" class="terrain-active-hint">当前实际使用「{{ activeTerrainName }}」</div>
         <div class="terrain-slider-head"><span>垂直夸张</span><span>{{ terrainExaggeration }}×</span></div>
         <a-slider
           :value="terrainExaggeration"

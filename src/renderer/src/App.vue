@@ -2,9 +2,11 @@
 import { ref, computed, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Modal } from 'ant-design-vue'
+import { ReloadOutlined } from '@ant-design/icons-vue'
 import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { useGlobeStore } from '@renderer/stores/globe'
+import { useFailureStore } from '@renderer/stores/failure'
 import { useDrawingStore, type DrawTool, type GeoPosition } from '@renderer/stores/drawing'
 import { useAiStore } from '@renderer/stores/ai'
 import { thematicLayerCatalog, useClimateStore } from '@renderer/stores/climate'
@@ -30,6 +32,7 @@ import ThematicInfoCard from '@renderer/components/ThematicInfoCard.vue'
 import TeachingLab from '@renderer/components/TeachingLab.vue'
 import EoqAssistant from '@renderer/components/EoqAssistant.vue'
 import AiSettingsModal from '@renderer/components/AiSettingsModal.vue'
+import FailureBanner from '@renderer/components/FailureBanner.vue'
 
 const store = useGlobeStore()
 const {
@@ -39,6 +42,9 @@ const {
   globeError,
   terrainError,
   isGlobeReady,
+  globeLoadTimedOut,
+  globeLoadStage,
+  activeTerrainId,
   camera,
   levelViewActive,
   terrainProviderId,
@@ -61,10 +67,12 @@ useThematicLayers(viewer)
 const drawingStore = useDrawingStore()
 const { activeTool, shapes, entries, selectedShapeId, saveError } = storeToRefs(drawingStore)
 const aiStore = useAiStore()
+const failureStore = useFailureStore()
 const isAnnotationPanelOpen = ref(false)
 const annotationDraft = ref('')
 const selectedShape = computed(() => shapes.value.find((shape) => shape.id === selectedShapeId.value) ?? null)
 const levelSwitcherVisible = computed(() => isGlobeReady.value && camera.value.height < 5000000)
+const showGlobeLoading = computed(() => !isGlobeReady.value && !globeError.value)
 const isLabOpen = ref(false)
 const labActive = computed(() => climateStore.hasActiveOverlay || solarStore.active || activeTool.value === 'timezone')
 const drawHint = computed(() => {
@@ -610,7 +618,7 @@ async function handleCredentialSave(id: string, apiKey: string, securityKey?: st
       store.setCredentialStatus(`${id}-sk`, securityStatus)
     }
   } catch {
-    store.setGlobeError('密钥保存失败')
+    failureStore.reportFailure({ scope: 'settings', message: '密钥保存失败', detail: '系统安全存储不可用', retryable: false })
   }
 }
 
@@ -621,7 +629,7 @@ async function handleCredentialClear(id: string): Promise<void> {
     const securityStatus = await window.guEarth.settings.clearProviderApiKey(`${id}-sk`)
     store.setCredentialStatus(`${id}-sk`, securityStatus)
   } catch {
-    store.setGlobeError('密钥清除失败')
+    failureStore.reportFailure({ scope: 'settings', message: '密钥清除失败', retryable: false })
   }
 }
 
@@ -630,7 +638,9 @@ function handleHome(): void {
 }
 
 function handleRetry(): void {
-  location.reload()
+  for (const notice of failureStore.active) {
+    if (notice.retryable) void failureStore.retry(notice.scope)
+  }
 }
 
 function handleLevelViewToggle(): void {
@@ -675,6 +685,13 @@ function deleteSelectedShape(): void {
 <template>
   <div class="app">
     <div ref="globeContainer" class="globe" :class="{ drawing: activeTool }"></div>
+    <div v-if="showGlobeLoading" class="globe-loading">
+      <a-spin :spinning="!globeLoadTimedOut" size="small" />
+      <span class="globe-loading-text">{{ globeLoadTimedOut ? '地图加载较慢，请检查网络' : '正在加载地图…' }}</span>
+      <span v-if="globeLoadStage" class="globe-loading-stage">{{ globeLoadStage }}</span>
+      <a-button v-if="globeLoadTimedOut" type="text" size="small" @click="handleRetry"><ReloadOutlined />重试</a-button>
+    </div>
+    <FailureBanner />
     <WindParticles v-if="thematicOverlays['wind-particles']" :viewer="viewer" />
     <FrontalCyclone v-if="thematicOverlays['frontal-cyclone']" :viewer="viewer" />
     <GlobeToolbar
@@ -730,6 +747,7 @@ function deleteSelectedShape(): void {
       :terrain-error="terrainError"
       :loading="!isGlobeReady"
       :terrain-provider-id="terrainProviderId"
+      :active-terrain-id="activeTerrainId"
       :terrain-exaggeration="terrainExaggeration"
       :terrain-lighting="terrainLighting"
       :tile-cache-enabled="tileCacheEnabled"
@@ -763,6 +781,36 @@ function deleteSelectedShape(): void {
 
 .globe.drawing :deep(canvas) {
   cursor: crosshair;
+}
+
+.globe-loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 1003;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 20px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(5, 5, 5, 0.06);
+  border-radius: 8px;
+  transform: translate(-50%, -50%);
+}
+
+.globe-loading-text {
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 13px;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.globe-loading-stage {
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
 }
 
 .draw-hint {

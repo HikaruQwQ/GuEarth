@@ -2,6 +2,7 @@ import { createHash } from 'crypto'
 import { net } from 'electron'
 import { gcj02ToWgs84 } from '../geo'
 import { readProviderKey } from '../keyVault'
+import { createSearchThrottle, delay, isPlacesRequestSuperseded } from './searchThrottle'
 
 export interface AmapPlace {
   name: string
@@ -20,6 +21,7 @@ export interface AmapSearchResult {
   note?: string
   error?: string
   guidance?: string
+  superseded?: boolean
 }
 
 interface AmapPoi {
@@ -79,7 +81,7 @@ function parsePois(body: unknown): AmapPoisResponse {
 
 async function requestPois(url: string): Promise<AmapPoisResponse> {
   try {
-    const response = await net.fetch(url, { headers: { Accept: 'application/json' } })
+    const response = await net.fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(SEARCH_REQUEST_TIMEOUT_MS) })
     if (!response.ok) {
       return {
         pois: [],
@@ -89,7 +91,7 @@ async function requestPois(url: string): Promise<AmapPoisResponse> {
     }
     return parsePois(await response.json())
   } catch {
-    return { pois: [], error: '高德地点搜索网络请求失败，请稍后重试', retryable: true }
+    return { pois: [], error: '高德地点搜索请求超时或网络异常，请稍后重试', retryable: true }
   }
 }
 
@@ -109,27 +111,14 @@ function requestUrl(base: string, params: Record<string, string>, securityKey?: 
 const SEARCH_MIN_INTERVAL_MS = 1_000
 const SEARCH_MAX_RETRIES = 2
 const SEARCH_RETRY_DELAY_MS = 2_000
-let searchQueueTail: Promise<unknown> = Promise.resolve()
-let lastSearchStartedAt = 0
+const SEARCH_REQUEST_TIMEOUT_MS = 10_000
+const amapThrottle = createSearchThrottle(SEARCH_MIN_INTERVAL_MS)
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-function enqueueSpacedSearch<T>(task: () => Promise<T>): Promise<T> {
-  const run = searchQueueTail.then(async () => {
-    const wait = lastSearchStartedAt + SEARCH_MIN_INTERVAL_MS - Date.now()
-    if (wait > 0) await delay(wait)
-    lastSearchStartedAt = Date.now()
-    return task()
-  })
-  searchQueueTail = run.catch(() => undefined)
-  return run
-}
-
-export async function searchPlaces(query: string, city?: string): Promise<AmapSearchResult> {
+export async function searchPlaces(query: string, city?: string, requestId?: number): Promise<AmapSearchResult> {
   const keywords = query.trim().slice(0, 90)
   if (!keywords) return { query, places: [], error: '缺少搜索关键词' }
+  const isSuperseded = (): boolean => isPlacesRequestSuperseded(requestId)
+  if (isSuperseded()) return { query, places: [], superseded: true }
   const key = readProviderKey('amap')
   const securityKey = readProviderKey('amap-sk')
   if (!key) {
@@ -142,13 +131,17 @@ export async function searchPlaces(query: string, city?: string): Promise<AmapSe
   const params: Record<string, string> = { key, keywords, offset: '8', page: '1', extensions: 'base' }
   if (city?.trim()) params.city = city.trim().slice(0, 40)
   const url = requestUrl('https://restapi.amap.com/v3/place/text', params, securityKey)
-  let result = await enqueueSpacedSearch(() => requestPois(url))
+  const first = await amapThrottle.run(() => requestPois(url), isSuperseded)
+  if (!first) return { query, places: [], superseded: true }
+  let result = first
   for (let attempt = 1; result.error !== undefined && result.retryable === true && attempt <= SEARCH_MAX_RETRIES; attempt += 1) {
     await delay(SEARCH_RETRY_DELAY_MS * attempt)
-    result = await enqueueSpacedSearch(() => requestPois(url))
+    const next = await amapThrottle.run(() => requestPois(url), isSuperseded)
+    if (!next) return { query, places: [], superseded: true }
+    result = next
   }
   if (result.error) return { query, places: [], error: result.error }
   const places = toPlaces(result.pois).slice(0, 8)
-  if (places.length === 0) return { query, places: [], note: '没有找到匹配的地点，可尝试更常见的名称' }
+  if (places.length === 0) return { query, places: [], note: '没有找到匹配的地点，可换个说法或切换搜索源' }
   return { query, places }
 }

@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from
 import { storeToRefs } from 'pinia'
 import MarkdownIt from 'markdown-it'
 import { Bubble, Sender } from 'ant-design-x-vue'
-import { ClearOutlined, CloseCircleOutlined, CloseOutlined, CompassOutlined, LeftOutlined, RightOutlined, SettingOutlined } from '@ant-design/icons-vue'
+import { ClearOutlined, CloseCircleOutlined, CloseOutlined, CompassOutlined, LeftOutlined, ReloadOutlined, RightOutlined, SettingOutlined } from '@ant-design/icons-vue'
 import { useAiStore, type ChatMessage, type ReasoningPart, type ToolStep } from '@renderer/stores/ai'
 import WebSearchStep from './WebSearchStep.vue'
 
@@ -263,7 +263,11 @@ watch(
             </a-collapse>
           </template>
           <span v-if="message.status === 'streaming' && message.parts.length === 0" class="shimmer-text pending-line">思考中…</span>
-          <a-alert v-if="message.status === 'error'" type="error" show-icon :message="message.error" class="answer-error" />
+          <a-alert v-if="message.status === 'error'" type="error" show-icon :message="message.error" class="answer-error">
+            <template #action>
+              <a-button type="text" size="small" :disabled="isStreaming" @click="void store.retryLast()"><ReloadOutlined />重试</a-button>
+            </template>
+          </a-alert>
         </div>
       </template>
     </div>

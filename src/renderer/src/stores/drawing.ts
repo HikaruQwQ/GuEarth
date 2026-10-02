@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { AnnotationDocument, AnnotationEntry } from '../../../preload'
+import { useFailureStore } from './failure'
 
 export type ShapeKind = 'point' | 'polyline' | 'polygon'
 export type DrawTool = 'point' | 'line' | 'polygon' | 'timezone'
@@ -65,6 +66,7 @@ function containsEntry(entry: AnnotationEntry, id: string): boolean {
 }
 
 export const useDrawingStore = defineStore('drawing', () => {
+  const failureStore = useFailureStore()
   const shapes = ref<DrawnShape[]>([])
   const entries = ref<AnnotationEntry[]>([])
   const activeTool = ref<DrawTool | null>(null)
@@ -88,9 +90,14 @@ export const useDrawingStore = defineStore('drawing', () => {
 
   async function load(): Promise<void> {
     if (!apiAvailable()) return
-    const document = await window.guEarth.annotations.load()
-    shapes.value = document.shapes
-    entries.value = document.entries
+    try {
+      const document = await window.guEarth.annotations.load()
+      shapes.value = document.shapes
+      entries.value = document.entries
+      failureStore.clearFailure('annotations')
+    } catch {
+      failureStore.reportFailure({ scope: 'annotations', message: '标注读取失败，暂时无法显示已保存的标注', retryable: true })
+    }
   }
 
   function setActiveTool(tool: DrawTool | null): void {
@@ -187,6 +194,8 @@ export const useDrawingStore = defineStore('drawing', () => {
     persist()
     return true
   }
+
+  failureStore.registerRetry('annotations', load)
 
   return { shapes, entries, activeTool, selectedShapeId, saveError, load, setActiveTool, setSelectedShapeId, addShape, updateAnnotation, removeShape, clearAll, addFolder, renameFolder, removeFolder, moveEntry }
 })
