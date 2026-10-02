@@ -19,6 +19,7 @@ export interface AmapSearchResult {
   places: AmapPlace[]
   note?: string
   error?: string
+  guidance?: string
 }
 
 interface AmapPoi {
@@ -56,26 +57,39 @@ function toPlaces(pois: AmapPoi[]): AmapPlace[] {
   })
 }
 
-function parsePois(body: unknown): { pois: AmapPoi[]; error?: string } {
+interface AmapPoisResponse {
+  pois: AmapPoi[]
+  error?: string
+  retryable?: boolean
+}
+
+function parsePois(body: unknown): AmapPoisResponse {
   if (typeof body !== 'object' || body === null) return { pois: [], error: '高德返回了无效响应' }
   const result = body as { status?: unknown; info?: unknown; infocode?: unknown; pois?: unknown }
   if (result.status !== '1') {
     if (result.infocode === '10009') return { pois: [], error: '高德 Key 的平台类型不匹配，请在高德控制台配置「Web 服务」类型的 Key (10009)' }
     const info = typeof result.info === 'string' ? result.info : '未知错误'
     const code = typeof result.infocode === 'string' ? ` (${result.infocode})` : ''
-    return { pois: [], error: `高德地点搜索失败：${info}${code}` }
+    const retryable = !/DAILY/i.test(info) && /QPS|FREQUENT/i.test(info)
+    return { pois: [], error: `高德地点搜索失败：${info}${code}`, retryable }
   }
   if (!Array.isArray(result.pois)) return { pois: [], error: '高德返回了无效地点数据' }
   return { pois: result.pois.filter((poi): poi is AmapPoi => typeof poi === 'object' && poi !== null) }
 }
 
-async function requestPois(url: string): Promise<{ pois: AmapPoi[]; error?: string }> {
+async function requestPois(url: string): Promise<AmapPoisResponse> {
   try {
     const response = await net.fetch(url, { headers: { Accept: 'application/json' } })
-    if (!response.ok) return { pois: [], error: `高德地点搜索请求失败 (HTTP ${response.status})` }
+    if (!response.ok) {
+      return {
+        pois: [],
+        error: `高德地点搜索请求失败 (HTTP ${response.status})`,
+        retryable: response.status === 429 || response.status >= 500
+      }
+    }
     return parsePois(await response.json())
   } catch {
-    return { pois: [], error: '高德地点搜索网络请求失败，请稍后重试' }
+    return { pois: [], error: '高德地点搜索网络请求失败，请稍后重试', retryable: true }
   }
 }
 
@@ -92,6 +106,27 @@ function requestUrl(base: string, params: Record<string, string>, securityKey?: 
   return `${base}?${query.join('&')}`
 }
 
+const SEARCH_MIN_INTERVAL_MS = 1_000
+const SEARCH_MAX_RETRIES = 2
+const SEARCH_RETRY_DELAY_MS = 2_000
+let searchQueueTail: Promise<unknown> = Promise.resolve()
+let lastSearchStartedAt = 0
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function enqueueSpacedSearch<T>(task: () => Promise<T>): Promise<T> {
+  const run = searchQueueTail.then(async () => {
+    const wait = lastSearchStartedAt + SEARCH_MIN_INTERVAL_MS - Date.now()
+    if (wait > 0) await delay(wait)
+    lastSearchStartedAt = Date.now()
+    return task()
+  })
+  searchQueueTail = run.catch(() => undefined)
+  return run
+}
+
 export async function searchPlaces(query: string, city?: string): Promise<AmapSearchResult> {
   const keywords = query.trim().slice(0, 90)
   if (!keywords) return { query, places: [], error: '缺少搜索关键词' }
@@ -106,7 +141,12 @@ export async function searchPlaces(query: string, city?: string): Promise<AmapSe
   }
   const params: Record<string, string> = { key, keywords, offset: '8', page: '1', extensions: 'base' }
   if (city?.trim()) params.city = city.trim().slice(0, 40)
-  const result = await requestPois(requestUrl('https://restapi.amap.com/v3/place/text', params, securityKey))
+  const url = requestUrl('https://restapi.amap.com/v3/place/text', params, securityKey)
+  let result = await enqueueSpacedSearch(() => requestPois(url))
+  for (let attempt = 1; result.error !== undefined && result.retryable === true && attempt <= SEARCH_MAX_RETRIES; attempt += 1) {
+    await delay(SEARCH_RETRY_DELAY_MS * attempt)
+    result = await enqueueSpacedSearch(() => requestPois(url))
+  }
   if (result.error) return { query, places: [], error: result.error }
   const places = toPlaces(result.pois).slice(0, 8)
   if (places.length === 0) return { query, places: [], note: '没有找到匹配的地点，可尝试更常见的名称' }

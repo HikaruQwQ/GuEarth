@@ -18,14 +18,14 @@ const SYSTEM_PROMPT = [
   '- 用户询问地貌类型（流水侵蚀、风蚀、冰川、喀斯特等）时：先讲解典型地貌特征与成因，给出 2-4 个典型案例地点，用 search_place 查询后逐个 fly_to 展示，可用 query_terrain 查询海拔辅助讲解。',
   '- fly_to 的 height 为视点高度（米）：大区域全景 300000-1500000，城市 30000-80000，地貌细节 8000-30000，山峰可更低。',
   '- search_place 只对中国境内地名效果好；境外地点可直接使用你自己的地理知识给出 WGS-84 坐标并 fly_to。',
-  '- 需要在地图上标注地点时：add_marker 添加命名标记点（返回 id）；draw_shape 绘制线或多边形，省略 name 时自动标注长度或面积，适合测距、测面、展示边界与路线。',
+  '- 需要在地图上标注地点时：add_marker 添加命名标记点（单个传 name/longitude/latitude，多个地点用 markers 数组批量添加，单次最多 20 个，返回各标记 id）；draw_shape 绘制线或多边形，省略 name 时自动标注长度或面积，适合测距、测面、展示边界与路线。',
   '- 添加标记或绘图后，用 fly_to 飞往该处向用户展示；讲解时可引用工具返回的 measurement 数值。',
-  '- 用户要删除标记或图形时：先用 list_shapes 查看现有标注（含 id 与名称），再调用 remove_shape 按 id 或名称删除。',
+  '- 用户要删除标记或图形时：先用 list_shapes 查看现有标注（含 id 与名称），再调用 remove_shape 按 id 或名称删除；多个标注时用 ids/names 数组一次性批量删除，不要逐个调用。',
   '- 用户让你看当前画面（“看看这里”“这是不是某种地貌”“我在看哪里”）时：先调用 capture_view 获取当前视角截图与地理范围，再结合画面、地形与地理知识判断；截图以图片形式提供，若当前模型不支持图像输入，则依据返回的 camera 与 extent 文本作答。',
   '- 用户问昼夜、晨昏线、极昼极夜、昼夜长短、正午太阳高度、时差或地方时类问题时：先调用 set_sim_time 设置日期与时刻（北京时间）开启昼夜光照，再用 fly_to（高度 8000000-15000000）展示晨昏线，夏至与冬至对比极圈效果最佳；比较昼夜长短或太阳高度随纬度差异时，用 query_solar 查询多个纬度（如 0、23.5、40、66.5、80）后归纳规律；讲解地方时与时差时给出“地方时 = UTC + 经度÷15”的计算示例。',
   '- 用户问气压带风带、气候类型成因、锋面气旋、洋流等大气与水圈运动问题时：用 set_layer 开启对应图层（pressure-belts 气压带与风带、koppen-zones 世界气候类型、frontal-cyclone 锋面气旋、ocean-currents 世界洋流）；讲气压带风带季节移动时用 month 参数先设 1 月再设 7 月对比位置（如副热带高压与赤道低压随太阳直射点移动），并提醒用户可直接点击图层要素查看成因；讲气候成因时按“受哪个气压带/风带控制（终年或交替）、海陆位置、地形”的框架归纳。',
   '- 用户点击了地图上的专题要素并询问其成因时：回答中直接使用该要素信息，按成因、分布规律、对地理环境影响的顺序讲解。',
-  '- 工具返回 error 字段时，向用户说明原因（例如需要在图层面板配置高德密钥），不要编造坐标。',
+  '- 工具返回 error 字段时，向用户说明原因（例如需要在图层面板配置高德密钥），不要编造坐标；search_place 返回 guidance 字段时，停止重试搜索，按 guidance 的步骤向用户说明排查方法。',
   '不要在回答中输出 markdown 标题或表格，使用简洁的分段与短列表。'
 ].join('\n')
 
@@ -83,6 +83,16 @@ interface AgentSession {
 const MAX_TOOL_ROUNDS = 8
 const TOOL_RESULT_LIMIT = 24_000
 const RENDERER_TOOL_TIMEOUT_MS = 60_000
+const SEARCH_FAILURE_GUIDANCE_THRESHOLD = 3
+
+const SEARCH_FAILURE_GUIDANCE = [
+  '已连续多次搜索失败，请立即停止继续调用 search_place，改为向用户说明情况并引导排查：',
+  '1. 请用户打开「图层管理 → 供应商密钥」，确认已保存高德 Key 且类型为「Web 服务」；',
+  '2. 若错误信息含 QPS/CUQPS 字样，多为免费密钥每秒或每日调用额度超限，软件已自动间隔重试仍未恢复：请用户等待约一分钟后再试；若提示超出日限额则需次日再试或更换密钥；',
+  '3. 排查期间不要编造坐标，可基于你已有的地理知识给出大致位置，并告知用户搜索恢复后可再精确查询。'
+].join('\n')
+
+let consecutiveSearchFailures = 0
 
 const sessions = new Map<string, AgentSession>()
 const pendingRendererTools = new Map<string, { resolve: (outcome: ToolOutcome) => void; timer: NodeJS.Timeout }>()
@@ -467,6 +477,12 @@ async function executeTool(sender: WebContents, sessionId: string, name: string,
       const query = typeof args.query === 'string' ? args.query : ''
       const city = typeof args.city === 'string' ? args.city : undefined
       const result = await searchPlaces(query, city)
+      if (result.error) {
+        consecutiveSearchFailures += 1
+        if (consecutiveSearchFailures >= SEARCH_FAILURE_GUIDANCE_THRESHOLD) result.guidance = SEARCH_FAILURE_GUIDANCE
+      } else {
+        consecutiveSearchFailures = 0
+      }
       outcome = { ok: !result.error, content: clampToolResult(JSON.stringify(result)) }
     } else {
       outcome = await dispatchRendererTool(sender, sessionId, callId, name, args)
@@ -546,6 +562,7 @@ function summarizeToolResult(content: string): string {
   if (parsed.screenshot) return '已截图'
   if (Array.isArray(parsed.shapes)) return `${parsed.shapes.length} 个标注`
   if (typeof parsed.removed === 'number') return `已删除 ${parsed.removed} 个标注`
+  if (typeof parsed.added === 'number') return `已添加标记 ${parsed.added} 个${typeof parsed.skipped === 'number' ? `（${parsed.skipped} 个无效跳过）` : ''}`
   if (typeof parsed.name === 'string' && parsed.name) return parsed.kind === 'point' ? `已添加标记「${parsed.name}」` : `已绘制「${parsed.name}」`
   if (typeof parsed.measurement === 'string' && parsed.measurement) return parsed.measurement
   if (typeof parsed.height === 'number') return `海拔 ${Math.round(parsed.height)} m`

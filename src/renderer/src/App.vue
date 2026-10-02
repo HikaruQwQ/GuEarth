@@ -142,6 +142,8 @@ aiStore.registerTool({
   })
 })
 
+const MAX_MARKER_BATCH = 20
+
 function parsePositions(raw: unknown, minCount: number): GeoPosition[] | null {
   if (!Array.isArray(raw)) return null
   const positions: GeoPosition[] = []
@@ -157,28 +159,54 @@ function parsePositions(raw: unknown, minCount: number): GeoPosition[] | null {
   return positions.length >= minCount && positions.length <= 500 ? positions : null
 }
 
+function collectStrings(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((item) => (typeof item === 'string' && item.trim() ? [item.trim()] : []))
+}
+
 aiStore.registerTool({
   definition: {
     name: 'add_marker',
-    description: '在地图上添加一个带名称的标记点，持久保存并可在标注面板中管理。返回标记 id，可用于后续删除。',
+    description: '在地图上添加带名称的标记点，持久保存并可在标注面板中管理。单个标记传 name/longitude/latitude；多个标记传 markers 数组一次批量添加（单次最多 20 个）。返回标记 id，可用于后续删除。',
     parameters: {
       type: 'object',
       properties: {
         name: { type: 'string', description: '标记名称，将显示在地图上（如“珠穆朗玛峰”）' },
         longitude: { type: 'number', description: '经度（WGS-84，-180 到 180）' },
-        latitude: { type: 'number', description: '纬度（WGS-84，-90 到 90）' }
-      },
-      required: ['name', 'longitude', 'latitude']
+        latitude: { type: 'number', description: '纬度（WGS-84，-90 到 90）' },
+        markers: {
+          type: 'array',
+          description: '批量添加：标记对象数组，单项含 name、longitude、latitude；与单个 name/longitude/latitude 二选一',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: '标记名称' },
+              longitude: { type: 'number', description: '经度（WGS-84）' },
+              latitude: { type: 'number', description: '纬度（WGS-84）' }
+            },
+            required: ['name', 'longitude', 'latitude']
+          }
+        }
+      }
     }
   },
   execute: async (args) => {
-    const name = typeof args.name === 'string' ? args.name.trim().slice(0, 200) : ''
-    if (!name) return { error: '标记名称不能为空' }
-    const positions = parsePositions([args], 1)
-    if (!positions) return { error: '坐标无效，需要 WGS-84 经纬度' }
-    const id = crypto.randomUUID()
-    drawingStore.addShape({ id, kind: 'point', positions, annotation: name, createdAt: Date.now() })
-    return { status: 'ok', id, kind: 'point', name, longitude: positions[0].longitude, latitude: positions[0].latitude }
+    const entries: unknown[] = Array.isArray(args.markers) ? args.markers : [args]
+    if (entries.length > MAX_MARKER_BATCH) return { error: `单次最多添加 ${MAX_MARKER_BATCH} 个标记，请分批调用` }
+    const added: { id: string; name: string; longitude: number; latitude: number }[] = []
+    let skipped = 0
+    for (const entry of entries) {
+      const record = typeof entry === 'object' && entry !== null ? entry as Record<string, unknown> : {}
+      const name = typeof record.name === 'string' ? record.name.trim().slice(0, 200) : ''
+      const positions = parsePositions([record], 1)
+      if (!name || !positions) { skipped += 1; continue }
+      const id = crypto.randomUUID()
+      drawingStore.addShape({ id, kind: 'point', positions, annotation: name, createdAt: Date.now() })
+      added.push({ id, name, longitude: positions[0].longitude, latitude: positions[0].latitude })
+    }
+    if (!added.length) return { error: '没有有效标记：需要名称与 WGS-84 经纬度坐标' }
+    if (entries.length === 1) return { status: 'ok', id: added[0].id, kind: 'point', name: added[0].name, longitude: added[0].longitude, latitude: added[0].latitude }
+    return { status: 'ok', added: added.length, skipped: skipped || undefined, markers: added }
   }
 })
 
@@ -244,28 +272,47 @@ aiStore.registerTool({
 aiStore.registerTool({
   definition: {
     name: 'remove_shape',
-    description: '删除地图上的标注：优先按 id 精确删除（id 来自 add_marker/draw_shape 返回值或 list_shapes），否则按名称精确匹配删除（同名标注全部删除）。',
+    description: '删除地图上的标注：按 id 精确删除（id 来自 add_marker/draw_shape 返回值或 list_shapes）或按名称精确匹配删除（同名标注全部删除）；ids/names 数组为批量形式，可与单个 id/name 混用。',
     parameters: {
       type: 'object',
       properties: {
         id: { type: 'string', description: '标注 id' },
-        name: { type: 'string', description: '标注名称（精确匹配）' }
+        ids: { type: 'array', description: '批量删除：标注 id 数组', items: { type: 'string' } },
+        name: { type: 'string', description: '标注名称（精确匹配）' },
+        names: { type: 'array', description: '批量删除：标注名称数组（精确匹配，同名全部删除）', items: { type: 'string' } }
       }
     }
   },
   execute: async (args) => {
-    const id = typeof args.id === 'string' ? args.id : ''
-    if (id) {
-      if (!shapes.value.some((shape) => shape.id === id)) return { error: `未找到 id 为 ${id} 的标注，可先调用 list_shapes 查看` }
+    const ids = new Set(collectStrings(args.ids))
+    if (typeof args.id === 'string' && args.id.trim()) ids.add(args.id.trim())
+    const names = new Set(collectStrings(args.names))
+    if (typeof args.name === 'string' && args.name.trim()) names.add(args.name.trim())
+    if (!ids.size && !names.size) return { error: '需要提供 id/ids 或 name/names' }
+    const missingIds: string[] = []
+    const missingNames: string[] = []
+    let removed = 0
+    for (const id of ids) {
+      if (!shapes.value.some((shape) => shape.id === id)) { missingIds.push(id); continue }
       drawingStore.removeShape(id)
-      return { status: 'ok', removed: 1 }
+      removed += 1
     }
-    const name = typeof args.name === 'string' ? args.name.trim() : ''
-    if (!name) return { error: '需要提供 id 或 name' }
-    const matched = shapes.value.filter((shape) => shape.annotation === name)
-    if (!matched.length) return { error: `未找到名为「${name}」的标注，可先调用 list_shapes 查看` }
-    for (const shape of matched) drawingStore.removeShape(shape.id)
-    return { status: 'ok', removed: matched.length }
+    for (const name of names) {
+      const matched = shapes.value.filter((shape) => shape.annotation === name)
+      if (!matched.length) { missingNames.push(name); continue }
+      for (const shape of matched) drawingStore.removeShape(shape.id)
+      removed += matched.length
+    }
+    if (!removed) {
+      const target = missingIds[0] ?? missingNames[0]
+      return { error: `未找到标注「${target}」，可先调用 list_shapes 查看` }
+    }
+    return {
+      status: 'ok',
+      removed,
+      missingIds: missingIds.length ? missingIds : undefined,
+      missingNames: missingNames.length ? missingNames : undefined
+    }
   }
 })
 
