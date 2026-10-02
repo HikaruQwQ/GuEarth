@@ -1,0 +1,60 @@
+import { computed, ref } from 'vue'
+import { defineStore } from 'pinia'
+import { summerFactor, winterFactor } from '@renderer/thematic/windField'
+
+export type ThematicLayerId = 'wind-particles' | 'rain-belt' | 'summer-monsoon' | 'winter-monsoon' | 'ocean-currents' | 'climate-zones'
+
+export interface ThematicLayerMeta {
+  id: ThematicLayerId
+  name: string
+  description: string
+}
+
+export const thematicLayerCatalog: ThematicLayerMeta[] = [
+  { id: 'wind-particles', name: '季风粒子动画', description: '示意风场随月份演变' },
+  { id: 'rain-belt', name: '降水雨带', description: '东部雨带随月份推进' },
+  { id: 'summer-monsoon', name: '夏季风风向', description: '偏南气流路径' },
+  { id: 'winter-monsoon', name: '冬季风风向', description: '偏北气流路径' },
+  { id: 'ocean-currents', name: '世界洋流', description: '暖流与寒流分布' },
+  { id: 'climate-zones', name: '中国气候区', description: '五大气候区示意' }
+]
+
+const MONTHS_PER_SECOND = 0.5
+const MONTH_MAX = 13
+
+export const useClimateStore = defineStore('climate', () => {
+  const month = ref(7)
+  const isPlaying = ref(false)
+  const overlays = ref<Record<ThematicLayerId, boolean>>({
+    'wind-particles': false,
+    'rain-belt': false,
+    'summer-monsoon': false,
+    'winter-monsoon': false,
+    'ocean-currents': false,
+    'climate-zones': false
+  })
+
+  const summerStrength = computed(() => summerFactor(month.value))
+  const winterStrength = computed(() => winterFactor(month.value))
+  const hasActiveOverlay = computed(() => Object.values(overlays.value).some(Boolean))
+
+  function setOverlay(id: ThematicLayerId, enabled: boolean): void {
+    overlays.value[id] = enabled
+  }
+
+  function setMonth(value: number): void {
+    month.value = Math.min(12, Math.max(1, Math.round(value)))
+  }
+
+  function togglePlaying(): void {
+    isPlaying.value = !isPlaying.value
+  }
+
+  function advance(dtSeconds: number): void {
+    if (!isPlaying.value) return
+    const next = month.value + dtSeconds * MONTHS_PER_SECOND
+    month.value = next >= MONTH_MAX ? next - 12 : next
+  }
+
+  return { month, isPlaying, overlays, summerStrength, winterStrength, hasActiveOverlay, setOverlay, setMonth, togglePlaying, advance }
+})
