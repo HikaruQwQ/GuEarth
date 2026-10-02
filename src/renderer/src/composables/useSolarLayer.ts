@@ -48,7 +48,7 @@ export function useSolarLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
         color: Cesium.Color.fromCssColorString('#faad14'),
         outlineColor: Cesium.Color.WHITE,
         outlineWidth: 2,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
       },
       label: {
         text: '太阳直射点',
@@ -57,7 +57,8 @@ export function useSolarLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
         style: Cesium.LabelStyle.FILL_AND_OUTLINE,
         outlineColor: Cesium.Color.WHITE,
         outlineWidth: 3,
-        pixelOffset: new Cesium.Cartesian2(0, -14)
+        pixelOffset: new Cesium.Cartesian2(0, -14),
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
       }
     })
     applyClock(viewer)

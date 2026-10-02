@@ -14,24 +14,13 @@ const layerRegistry: Record<string, LayerProvider> = {
   osm: { meta: providerMeta('osm'), createImageryProvider: async () => new Cesium.UrlTemplateImageryProvider({ url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', credit: '© OpenStreetMap contributors' }) },
   'esri-imagery': { meta: providerMeta('esri-imagery'), createImageryProvider: async () => Cesium.ArcGisMapServerImageryProvider.fromUrl('https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer', { credit: '© Esri' }) },
   opentopomap: { meta: providerMeta('opentopomap'), createImageryProvider: async () => new Cesium.UrlTemplateImageryProvider({ url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', subdomains: ['a', 'b', 'c'], credit: '© OpenTopoMap contributors' }) },
-  amap: { meta: providerMeta('amap'), createImageryProvider: async (styleId) => new Cesium.UrlTemplateImageryProvider({ url: protocolTileUrl('amap', styleId), credit: '© 高德地图' }) },
-  baidu: { meta: providerMeta('baidu'), createImageryProvider: async (styleId) => new Cesium.UrlTemplateImageryProvider({ url: protocolTileUrl('baidu', styleId), credit: '© 百度地图' }) },
-  tianditu: {
-    meta: providerMeta('tianditu'),
-    createImageryProvider: async (styleId) => new Cesium.UrlTemplateImageryProvider({
-      url: protocolTileUrl('tianditu', styleId),
-      credit: '© 天地图',
-      tilingScheme: new Cesium.WebMercatorTilingScheme(),
-      minimumLevel: 0,
-      maximumLevel: 18
-    })
-  }
+  baidu: { meta: providerMeta('baidu'), createImageryProvider: async (styleId) => new Cesium.UrlTemplateImageryProvider({ url: protocolTileUrl('baidu', styleId), credit: '© 百度地图' }) }
 }
 
 const terrainRegistry: Record<string, () => Promise<Cesium.TerrainProvider>> = {
   ellipsoid: async () => new Cesium.EllipsoidTerrainProvider(),
   'arcgis-terrain': () => Cesium.ArcGISTiledElevationTerrainProvider.fromUrl('https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer'),
-  'mapbox-terrain': () => Cesium.CesiumTerrainProvider.fromUrl(Cesium.IonResource.fromAssetId(1), { requestVertexNormals: true })
+  'cesium-world-terrain': () => Cesium.CesiumTerrainProvider.fromUrl(Cesium.IonResource.fromAssetId(1), { requestVertexNormals: true })
 }
 
 const terrainName = (id: string): string => terrainCatalog.find((terrain) => terrain.id === id)?.name ?? id
@@ -39,10 +28,6 @@ const terrainName = (id: string): string => terrainCatalog.find((terrain) => ter
 function normalizeHeading(radians: number): number {
   const degrees = Cesium.Math.toDegrees(radians) % 360
   return degrees < 0 ? degrees + 360 : degrees
-}
-
-function isMainland(longitude: number, latitude: number): boolean {
-  return longitude >= 73.5 && longitude <= 135.1 && latitude >= 18 && latitude <= 53.6
 }
 
 export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
@@ -92,14 +77,13 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
 
   function revealBasemap(id: string): void { imageryLayers.forEach((layer, layerId) => { layer.show = layerId === id }) }
 
-  function switchBasemap(id: string, userInitiated = true): void {
+  function switchBasemap(id: string): void {
     const provider = layerRegistry[id]
     if (!provider || !viewer.value || viewer.value.isDestroyed()) return
     if (provider.meta.requiresKey && !store.providerCredentials[id]?.configured) {
       store.setGlobeError(`${provider.meta.name} 需要 API Key`)
       return
     }
-    if (userInitiated && store.selectionMode === 'auto') store.setSelectionMode('manual')
     store.selectBasemap(id)
     if (imageryLayers.has(id)) { revealBasemap(id); return }
     void addLayer(id, generation).then((loaded) => { if (loaded && store.selectedLayerId === id) revealBasemap(id) })
@@ -141,12 +125,6 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     currentViewer.scene.verticalExaggeration = store.terrainExaggeration
     currentViewer.scene.globe.enableLighting = store.terrainLighting
     currentViewer.scene.globe.depthTestAgainstTerrain = true
-  }
-
-  function syncAutoProvider(): void {
-    if (store.selectionMode !== 'auto') return
-    const target = isMainland(store.camera.longitude, store.camera.latitude) ? store.chinaProviderId : store.globalProviderId
-    if (target !== store.selectedLayerId) switchBasemap(target, false)
   }
 
   function toggleLevelView(): void {
@@ -204,9 +182,6 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
         viewer.value.scene.mode = initialMode
         applyTerrainRendering()
         viewer.value.camera.moveEnd.addEventListener(updateCameraState)
-        viewer.value.camera.moveEnd.addEventListener(syncAutoProvider)
-        viewer.value.camera.percentageChanged = 0.02
-        viewer.value.camera.changed.addEventListener(updateCameraState)
         updateCameraState()
         const initialLayerId = store.selectedLayerId
         void addLayer(initialLayerId, generation).then(async (loaded) => {
@@ -232,8 +207,6 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     const currentViewer = viewer.value
     if (!currentViewer || currentViewer.isDestroyed()) return
     currentViewer.camera.moveEnd.removeEventListener(updateCameraState)
-    currentViewer.camera.moveEnd.removeEventListener(syncAutoProvider)
-    currentViewer.camera.changed.removeEventListener(updateCameraState)
     currentViewer.destroy()
     viewer.value = undefined
     imageryLayers.clear()

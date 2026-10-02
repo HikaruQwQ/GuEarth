@@ -42,7 +42,7 @@ src/renderer/   Vue app: globe view, layer registry, drawing tools, EOQ assistan
 - EOQ agent loop: renderer chat → main-process LLM call → model tool calls (flyTo / queryTerrain
   / addLayer / explainLandform) dispatched to renderer globe APIs → results fed back → streamed
   answer. Globe tools are registered renderer-side; new capabilities = new tool definitions.
-- Map providers (Tianditu WMTS, OSM, Mapbox, ArcGIS) implement a unified `LayerProvider`
+- Map providers (OSM, Mapbox, ArcGIS) implement a unified `LayerProvider`
   interface; terrain providers are pluggable for future offline terrain packs.
 
 ## Roadmap

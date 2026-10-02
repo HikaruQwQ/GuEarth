@@ -46,10 +46,6 @@ const {
   isGlobeReady,
   camera,
   levelViewActive,
-  selectionMode,
-  chinaProviderId,
-  globalProviderId,
-  providerStyles,
   terrainProviderId,
   terrainExaggeration,
   terrainLighting,
@@ -59,7 +55,7 @@ const {
   storeToRefs(store)
 
 const globeContainer = ref<HTMLDivElement>()
-const { viewer, switchBasemap, setProviderStyle, setLayerOpacity, flyTo, setTerrain, toggleLevelView, setTerrainExaggeration, setTerrainLighting } = useCesiumViewer(globeContainer)
+const { viewer, switchBasemap, setLayerOpacity, flyTo, toggleLevelView, setTerrain, setTerrainExaggeration, setTerrainLighting } = useCesiumViewer(globeContainer)
 const levelSwitcherVisible = computed(() => isGlobeReady.value && camera.value.height < 5000000)
 const regionTerrain = useRegionTerrain(viewer)
 useMonsoonLayer(viewer)
@@ -68,6 +64,7 @@ useSolarLayer(viewer)
 useTectonicLayer(viewer)
 useDrawLayer(viewer)
 drawStore.registerFly(flyTo)
+tectonicStore.registerFly(flyTo)
 const markers = useMarkers(viewer)
 terrainLabStore.registerLab(regionTerrain)
 const toolbarActive = computed(() => {
@@ -130,32 +127,6 @@ function handleOpacityChange(id: string, opacity: number): void {
   setLayerOpacity(id, opacity)
 }
 
-function handleProviderStyle(id: string, styleId: string): void {
-  setProviderStyle(id, styleId)
-}
-
-function isMainland(longitude: number, latitude: number): boolean {
-  return longitude >= 73.5 && longitude <= 135.1 && latitude >= 18 && latitude <= 53.6
-}
-
-function handleModeChange(value: 'manual' | 'auto'): void {
-  store.setSelectionMode(value)
-  if (value === 'auto') {
-    const providerId = isMainland(camera.value.longitude, camera.value.latitude) ? chinaProviderId.value : globalProviderId.value
-    switchBasemap(providerId, false)
-  }
-}
-
-function handleRegionProvider(region: 'china' | 'global', id: string): void {
-  const china = region === 'china' ? id : chinaProviderId.value
-  const global = region === 'global' ? id : globalProviderId.value
-  store.setRegionProviders(china, global)
-  if (selectionMode.value === 'auto') {
-    const inMainland = isMainland(camera.value.longitude, camera.value.latitude)
-    if ((region === 'china' && inMainland) || (region === 'global' && !inMainland)) switchBasemap(id, false)
-  }
-}
-
 function handleTerrainChange(id: string): void {
   setTerrain(id)
 }
@@ -180,9 +151,6 @@ async function handleCredentialSave(id: string, apiKey: string, securityKey?: st
       const securityStatus = await window.guEarth.settings.setProviderApiKey(`${id}-sk`, securityKey)
       store.setCredentialStatus(`${id}-sk`, securityStatus)
     }
-    const inMainland = isMainland(camera.value.longitude, camera.value.latitude)
-    const target = inMainland ? chinaProviderId.value : globalProviderId.value
-    if (selectionMode.value === 'auto' && target === id) switchBasemap(id, false)
   } catch {
     store.setGlobeError('密钥保存失败')
   }
@@ -239,10 +207,6 @@ function handleLevelViewToggle(): void {
       :error="globeError"
       :terrain-error="terrainError"
       :loading="!isGlobeReady"
-      :selection-mode="selectionMode"
-      :china-provider-id="chinaProviderId"
-      :global-provider-id="globalProviderId"
-      :provider-styles="providerStyles"
       :terrain-provider-id="terrainProviderId"
       :terrain-exaggeration="terrainExaggeration"
       :terrain-lighting="terrainLighting"
@@ -252,9 +216,6 @@ function handleLevelViewToggle(): void {
       @select="handleSelectLayer"
       @opacity="handleOpacityChange"
       @retry="handleRetry"
-      @mode="handleModeChange"
-      @region-provider="handleRegionProvider"
-      @provider-style="handleProviderStyle"
       @terrain="handleTerrainChange"
       @terrain-exaggeration="handleTerrainExaggeration"
       @terrain-lighting="handleTerrainLighting"

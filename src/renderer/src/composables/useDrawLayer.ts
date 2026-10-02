@@ -52,7 +52,7 @@ export function useDrawLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
         color: Cesium.Color.fromCssColorString(DRAW_COLOR),
         outlineColor: Cesium.Color.WHITE,
         outlineWidth: 1.5,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
       })
     }
     draftPoints.show = store.mode !== 'none' && store.draftPoints.length > 0
@@ -66,7 +66,7 @@ export function useDrawLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
       entities.push(
         viewer.entities.add({
           position: Cesium.Cartesian3.fromDegrees(lon, lat),
-          point: { pixelSize: 10, color, outlineColor: Cesium.Color.WHITE, outlineWidth: 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+          point: { pixelSize: 10, color, outlineColor: Cesium.Color.WHITE, outlineWidth: 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
           label: {
             text: annotation.name,
             font: '12px sans-serif',
@@ -226,6 +226,12 @@ export function useDrawLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
 
   watch(viewerRef, (viewer) => {
     if (viewer && !built) build(viewer)
+  })
+
+  watch(() => store.panelOpen, (open) => {
+    if (open) return
+    store.setMode('none')
+    store.resetDraft()
   })
 
   watch(() => [store.mode, [...store.draftPoints]], syncDraftPoints)

@@ -3,7 +3,6 @@ import { defineStore } from 'pinia'
 
 export type LayerKind = 'basemap' | 'overlay'
 export type ProviderRegion = 'global' | 'china'
-export type SelectionMode = 'manual' | 'auto'
 
 export interface ProviderStyle {
   id: string
@@ -47,8 +46,19 @@ export type SceneMode = '2D' | '3D'
 export const providerCatalog: ProviderMeta[] = [
   { id: 'osm', name: 'OpenStreetMap', description: '道路与地名', region: 'global', coordinateSystem: 'WGS84', requiresKey: false, styles: [{ id: 'standard', name: '标准' }], defaultStyleId: 'standard' },
   { id: 'esri-imagery', name: 'Esri', description: '卫星影像', region: 'global', coordinateSystem: 'WGS84', requiresKey: false, styles: [{ id: 'satellite', name: '卫星' }], defaultStyleId: 'satellite' },
-  { id: 'opentopomap', name: 'OpenTopoMap', description: '地形晕渲', region: 'global', coordinateSystem: 'WGS84', requiresKey: false, styles: [{ id: 'topo', name: '地形' }], defaultStyleId: 'topo' },
-  { id: 'tianditu', name: '天地图', description: '大陆地图', region: 'china', coordinateSystem: 'WGS84', requiresKey: true, styles: [{ id: 'road', name: '道路' }, { id: 'satellite', name: '卫星' }], defaultStyleId: 'road' }
+  { id: 'opentopomap', name: 'OpenTopoMap', description: '地形晕渲', region: 'global', coordinateSystem: 'WGS84', requiresKey: false, styles: [{ id: 'topo', name: '地形' }], defaultStyleId: 'topo' }
+]
+
+export interface BasemapCategoryMeta {
+  id: string
+  name: string
+  providerIds: string[]
+}
+
+export const basemapCategories: BasemapCategoryMeta[] = [
+  { id: 'road', name: '道路', providerIds: ['osm'] },
+  { id: 'satellite', name: '卫星', providerIds: ['esri-imagery'] },
+  { id: 'topo', name: '地形', providerIds: ['opentopomap'] }
 ]
 
 export const credentialOnlyProviders: ProviderMeta[] = [
@@ -73,7 +83,7 @@ export interface TerrainMeta {
 
 export const terrainCatalog: TerrainMeta[] = [
   { id: 'arcgis-terrain', name: '全球 3D 地形', description: 'ArcGIS 高程，免密钥' },
-  { id: 'mapbox-terrain', name: 'Cesium 世界地形', description: 'Cesium ion 官方高程' },
+  { id: 'cesium-world-terrain', name: 'Cesium 世界地形', description: 'Cesium ion 官方高程' },
   { id: 'ellipsoid', name: '椭球（无起伏）', description: '光滑球面，无山脉' }
 ]
 
@@ -81,10 +91,6 @@ const terrainProviderIds = new Set(terrainCatalog.map((terrain) => terrain.id))
 
 function providerFor(id: string): ProviderMeta | undefined {
   return providerCatalog.find((provider) => provider.id === id) || credentialOnlyProviders.find((provider) => provider.id === id)
-}
-
-function providerInRegion(id: string, region: ProviderRegion): boolean {
-  return providerFor(id)?.region === region
 }
 
 function styleFor(providerId: string, styleId: string): string {
@@ -99,9 +105,6 @@ function apiAvailable(): boolean {
 export const useGlobeStore = defineStore('globe', () => {
   const layers = ref<LayerMeta[]>(defaultLayers.map((layer) => ({ ...layer })))
   const selectedLayerId = ref('osm')
-  const selectionMode = ref<SelectionMode>('manual')
-  const chinaProviderId = ref('tianditu')
-  const globalProviderId = ref('osm')
   const providerStyles = ref<Record<string, string>>(Object.fromEntries(providerCatalog.map((provider) => [provider.id, provider.defaultStyleId])))
   const terrainProviderId = ref('arcgis-terrain')
   const terrainExaggeration = ref(2)
@@ -125,9 +128,6 @@ export const useGlobeStore = defineStore('globe', () => {
       terrainExaggeration.value = Math.min(5, Math.max(1, settings.terrainExaggeration))
       terrainLighting.value = settings.terrainLighting
       tileCacheEnabled.value = settings.tileCacheEnabled
-      selectionMode.value = settings.selectionMode
-      chinaProviderId.value = providerInRegion(settings.chinaProviderId, 'china') ? settings.chinaProviderId : 'tianditu'
-      globalProviderId.value = providerInRegion(settings.globalProviderId, 'global') ? settings.globalProviderId : 'osm'
       providerStyles.value = Object.fromEntries(providerCatalog.map((provider) => [provider.id, styleFor(provider.id, settings.providerStyles?.[provider.id] ?? provider.defaultStyleId)]))
       providerCredentials.value = settings.providerCredentials
       sceneMode.value = settings.sceneMode ?? '3D'
@@ -144,9 +144,6 @@ export const useGlobeStore = defineStore('globe', () => {
       terrainExaggeration: terrainExaggeration.value,
       terrainLighting: terrainLighting.value,
       tileCacheEnabled: tileCacheEnabled.value,
-      selectionMode: selectionMode.value,
-      chinaProviderId: chinaProviderId.value,
-      globalProviderId: globalProviderId.value,
       providerStyles: providerStyles.value,
       sceneMode: sceneMode.value
     })
@@ -159,12 +156,6 @@ export const useGlobeStore = defineStore('globe', () => {
   function setCameraReadout(value: CameraReadout): void { camera.value = value }
   function selectBasemap(id: string): void { selectedLayerId.value = id; void persistSettings() }
   function setLayerOpacity(id: string, opacity: number): void { layers.value = layers.value.map((layer) => (layer.id === id ? { ...layer, opacity } : layer)) }
-  function setSelectionMode(value: SelectionMode): void { selectionMode.value = value; void persistSettings() }
-  function setRegionProviders(china: string, global: string): void {
-    if (providerInRegion(china, 'china')) chinaProviderId.value = china
-    if (providerInRegion(global, 'global')) globalProviderId.value = global
-    void persistSettings()
-  }
   function setProviderStyle(providerId: string, styleId: string): void {
     const normalized = styleFor(providerId, styleId)
     if (!providerFor(providerId)) return
@@ -180,9 +171,9 @@ export const useGlobeStore = defineStore('globe', () => {
   function setLevelViewActive(value: boolean): void { levelViewActive.value = value }
 
   return {
-    layers, selectedLayerId, selectionMode, chinaProviderId, globalProviderId, providerStyles, terrainProviderId, terrainExaggeration, terrainLighting, tileCacheEnabled,
+    layers, selectedLayerId, providerStyles, terrainProviderId, terrainExaggeration, terrainLighting, tileCacheEnabled,
     providerCredentials, isLayerPanelOpen, isGlobeReady, globeError, terrainError, camera, sceneMode, levelViewActive, hydrateSettings,
     setLayerPanelOpen, setGlobeReady, setGlobeError, setTerrainError, setCameraReadout, selectBasemap, setLayerOpacity,
-    setSelectionMode, setRegionProviders, setProviderStyle, setTerrainProvider, setTerrainExaggeration, setTerrainLighting, setTileCacheEnabled, setCredentialStatus, setSceneMode, setLevelViewActive
+    setProviderStyle, setTerrainProvider, setTerrainExaggeration, setTerrainLighting, setTileCacheEnabled, setCredentialStatus, setSceneMode, setLevelViewActive
   }
 })

@@ -11,7 +11,6 @@ import {
 } from '@renderer/utils/tectonicData'
 
 const BOUNDARY_ALTITUDE = 2000
-const POINT_ALTITUDE = 0
 
 export function useTectonicLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
   const store = useTectonicStore()
@@ -49,14 +48,14 @@ export function useTectonicLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
     volcanoCollection = points
     volcanoLabels = labels
     for (const volcano of MAJOR_VOLCANOES) {
-      const position = Cesium.Cartesian3.fromDegrees(volcano.lon, volcano.lat, POINT_ALTITUDE)
+      const position = Cesium.Cartesian3.fromDegrees(volcano.lon, volcano.lat)
       points.add({
         position,
         pixelSize: 9,
         color: Cesium.Color.fromCssColorString('#fa8c16'),
         outlineColor: Cesium.Color.WHITE,
         outlineWidth: 1.5,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
       })
       labels.add({
         position,
@@ -67,7 +66,8 @@ export function useTectonicLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
         outlineColor: Cesium.Color.WHITE.withAlpha(0.9),
         outlineWidth: 3,
         pixelOffset: new Cesium.Cartesian2(0, -10),
-        scale: 0.9
+        scale: 0.9,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
       })
     }
   }
@@ -79,14 +79,14 @@ export function useTectonicLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
     quakeCollection = points
     quakeLabels = labels
     for (const quake of NOTABLE_EARTHQUAKES) {
-      const position = Cesium.Cartesian3.fromDegrees(quake.lon, quake.lat, POINT_ALTITUDE)
+      const position = Cesium.Cartesian3.fromDegrees(quake.lon, quake.lat)
       points.add({
         position,
         pixelSize: earthquakePixelSize(quake.magnitude),
         color: Cesium.Color.fromCssColorString('#d4380d').withAlpha(0.75),
         outlineColor: Cesium.Color.WHITE,
         outlineWidth: 1.5,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
       })
       labels.add({
         position,
@@ -97,7 +97,8 @@ export function useTectonicLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
         outlineColor: Cesium.Color.WHITE.withAlpha(0.9),
         outlineWidth: 3,
         pixelOffset: new Cesium.Cartesian2(0, 14),
-        scale: 0.9
+        scale: 0.9,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
       })
     }
   }

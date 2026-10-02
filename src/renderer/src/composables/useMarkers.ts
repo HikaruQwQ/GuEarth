@@ -21,7 +21,7 @@ export function useMarkers(viewerRef: Ref<Cesium.Viewer | undefined>) {
         color: Cesium.Color.fromCssColorString('#fa541c'),
         outlineColor: Cesium.Color.WHITE,
         outlineWidth: 2,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
       },
       label: {
         text: name,
@@ -31,7 +31,7 @@ export function useMarkers(viewerRef: Ref<Cesium.Viewer | undefined>) {
         backgroundColor: Cesium.Color.WHITE.withAlpha(0.85),
         backgroundPadding: new Cesium.Cartesian2(6, 4),
         pixelOffset: new Cesium.Cartesian2(0, -20),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
       }
     })
   }
