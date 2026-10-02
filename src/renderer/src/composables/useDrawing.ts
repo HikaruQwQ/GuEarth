@@ -82,6 +82,10 @@ function measurementFor(kind: DrawnShape['kind'], cartesians: Cesium.Cartesian3[
   return ''
 }
 
+export function measureShape(shape: DrawnShape): string {
+  return measurementFor(shape.kind, shape.positions.map(toCartesian))
+}
+
 export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
   const store = useDrawingStore()
   const entities = new Map<string, Cesium.Entity>()

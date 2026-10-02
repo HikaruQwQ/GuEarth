@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import MarkdownIt from 'markdown-it'
-import { Bubble, Prompts, Sender } from 'ant-design-x-vue'
-import { ClearOutlined, CloseCircleOutlined, CloseOutlined, CompassOutlined, SettingOutlined } from '@ant-design/icons-vue'
+import { Bubble, Sender } from 'ant-design-x-vue'
+import { ClearOutlined, CloseCircleOutlined, CloseOutlined, CompassOutlined, LeftOutlined, RightOutlined, SettingOutlined } from '@ant-design/icons-vue'
 import { useAiStore, type ChatMessage, type ToolStep } from '@renderer/stores/ai'
 
 const store = useAiStore()
@@ -13,16 +13,59 @@ const draft = ref('')
 const listRef = ref<HTMLDivElement>()
 
 const suggestions = [
-  { key: 'erosion', label: '找典型流水侵蚀地貌', description: '讲解成因并带我去看' },
-  { key: 'place', label: '珠穆朗玛峰在哪', description: '定位地名并飞行' },
-  { key: 'terrain', label: '黄土高原海拔多高', description: '查询地形高程' }
+  { label: '找典型流水侵蚀地貌', description: '讲解成因并带我去看', prompt: '找典型流水侵蚀地貌并讲解成因' },
+  { label: '珠穆朗玛峰在哪', description: '定位地名并飞行', prompt: '帮我找珠穆朗玛峰在哪' },
+  { label: '黄土高原海拔多高', description: '查询地形高程', prompt: '黄土高原的平均海拔是多少？' },
+  { label: '带我去马里亚纳海沟', description: '看看地球最深处', prompt: '带我去马里亚纳海沟看看' },
+  { label: '帮我标记秦岭位置', description: '在地球上添加标记', prompt: '帮我标记秦岭的位置' },
+  { label: '珠峰和乔戈里峰谁高', description: '对比两座高峰高程', prompt: '珠穆朗玛峰和乔戈里峰哪个更高？' },
+  { label: '七彩丹霞怎么形成的', description: '地貌成因解读', prompt: '张掖七彩丹霞是怎么形成的？' },
+  { label: '截取当前视角画面', description: '保存地球截图', prompt: '帮我截取当前视角的画面' }
 ]
+
+const ROTATE_INTERVAL_MS = 4000
+
+const suggestionIndex = ref(0)
+const rotatePaused = ref(false)
+let rotateTimer: number | undefined
+const currentSuggestion = computed(() => suggestions[suggestionIndex.value])
+
+function startRotate(): void {
+  if (rotateTimer !== undefined) window.clearInterval(rotateTimer)
+  rotateTimer = window.setInterval(() => {
+    if (rotatePaused.value) return
+    suggestionIndex.value = (suggestionIndex.value + 1) % suggestions.length
+  }, ROTATE_INTERVAL_MS)
+}
+
+function stopRotate(): void {
+  if (rotateTimer === undefined) return
+  window.clearInterval(rotateTimer)
+  rotateTimer = undefined
+}
+
+function stepSuggestion(delta: number): void {
+  suggestionIndex.value = (suggestionIndex.value + delta + suggestions.length) % suggestions.length
+  startRotate()
+}
+
+function submitCurrentSuggestion(): void {
+  submit(currentSuggestion.value.prompt)
+}
+
+onMounted(startRotate)
+onUnmounted(stopRotate)
 
 const toolLabels: Record<string, string> = {
   search_place: '地点检索',
   fly_to: '视角飞行',
   query_terrain: '地形高程查询',
-  get_camera: '获取当前视角'
+  get_camera: '获取当前视角',
+  add_marker: '添加标记',
+  draw_shape: '绘制图形',
+  list_shapes: '标注列表',
+  remove_shape: '删除标注',
+  capture_view: '视角截图'
 }
 
 function toolLabel(name: string): string {
@@ -93,13 +136,6 @@ function handleCancel(): void {
   void store.stop()
 }
 
-function handleSuggestion(payload: { data?: { label?: unknown; key?: unknown } }): void {
-  const label = typeof payload.data?.label === 'string' ? payload.data.label : ''
-  const key = typeof payload.data?.key === 'string' ? payload.data.key : ''
-  const text = key === 'place' ? '帮我找珠穆朗玛峰在哪' : label
-  if (text) submit(text)
-}
-
 watch(
   () => messages.value.map((message) => `${message.content.length}:${message.reasoning.length}:${message.toolSteps.length}:${message.status}`).join(','),
   async () => {
@@ -150,9 +186,17 @@ watch(
 
     <div v-if="messages.length === 0" class="empty-state">
       <CompassOutlined class="empty-icon" />
-      <p class="empty-text">我是地理教学助手 EOQ，可以帮你找地名、看地貌、讲成因。</p>
-      <p class="empty-hint">地点检索依赖高德 Key 与安全密钥（图层管理 → 供应商密钥），AI 回答依赖下方设置的模型。</p>
-      <Prompts :items="suggestions" vertical @item-click="handleSuggestion" />
+      <p class="empty-text">我是地理教学助手，我可以帮你找地方、看地貌、讲成因。</p>
+      <div class="suggestion-carousel" @mouseenter="rotatePaused = true" @mouseleave="rotatePaused = false">
+        <a-button type="text" shape="circle" size="small" class="suggestion-arrow" aria-label="上一个建议" @click="stepSuggestion(-1)"><LeftOutlined /></a-button>
+        <Transition name="suggestion-fade" mode="out-in">
+          <button :key="suggestionIndex" type="button" class="suggestion-card" @click="submitCurrentSuggestion">
+            <span class="suggestion-label">{{ currentSuggestion.label }}</span>
+            <span class="suggestion-desc">{{ currentSuggestion.description }}</span>
+          </button>
+        </Transition>
+        <a-button type="text" shape="circle" size="small" class="suggestion-arrow" aria-label="下一个建议" @click="stepSuggestion(1)"><RightOutlined /></a-button>
+      </div>
     </div>
 
     <div v-else ref="listRef" class="chat-list">
@@ -185,13 +229,13 @@ watch(
               <template #header>
                 <span v-if="step.status === 'running'" class="shimmer-text">{{ toolLabel(step.name) }}</span>
                 <span v-else-if="step.status === 'ok'" class="tool-header">
-                  <span>{{ toolLabel(step.name) }}</span>
-                  <span v-if="step.summary" class="tool-summary">{{ step.summary }}</span>
+                  <span class="tool-name">{{ toolLabel(step.name) }}</span>
+                  <span v-if="step.summary" class="tool-summary" :title="step.summary">{{ step.summary }}</span>
                 </span>
                 <span v-else class="tool-header">
                   <CloseCircleOutlined class="tool-icon-error" />
-                  <span>{{ toolLabel(step.name) }}</span>
-                  <span v-if="step.summary" class="tool-summary tool-summary-error">{{ step.summary }}</span>
+                  <span class="tool-name">{{ toolLabel(step.name) }}</span>
+                  <span v-if="step.summary" class="tool-summary tool-summary-error" :title="step.summary">{{ step.summary }}</span>
                 </span>
               </template>
               <div class="tool-io">
@@ -217,6 +261,7 @@ watch(
       @submit="submit"
       @cancel="handleCancel"
     />
+    <p class="ai-disclaimer" title="内容由 AI 生成，咕咕地球不为其生成的内容负责，请谨慎甄别">内容由 AI 生成，咕咕地球不为其生成的内容负责，请谨慎甄别</p>
   </a-drawer>
 </template>
 
@@ -227,17 +272,27 @@ h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28p
 .empty-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:16px 8px}
 .empty-icon{font-size:38px;color:rgba(0,0,0,.25)}
 .empty-text{margin:0;color:rgba(0,0,0,.65);font-size:14px;line-height:22px;text-align:center}
+.suggestion-carousel{display:flex;align-items:center;gap:2px;width:100%;max-width:340px}
+.suggestion-arrow{flex-shrink:0;color:rgba(0,0,0,.45)}
+.suggestion-card{flex:1;min-width:0;display:flex;align-items:baseline;justify-content:center;gap:8px;padding:9px 12px;background:#fff;border:1px solid rgba(5,5,5,.12);border-radius:8px;cursor:pointer;font-family:inherit;white-space:nowrap;overflow:hidden;transition:border-color .2s ease,box-shadow .2s ease}
+.suggestion-card:hover{border-color:#1677ff;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.suggestion-label{flex-shrink:0;color:rgba(0,0,0,.88);font-size:14px;font-weight:600;line-height:22px}
+.suggestion-desc{min-width:0;overflow:hidden;text-overflow:ellipsis;color:rgba(0,0,0,.45);font-size:12px;line-height:20px}
+.suggestion-fade-enter-active,.suggestion-fade-leave-active{transition:opacity .2s ease}
+.suggestion-fade-enter-from,.suggestion-fade-leave-to{opacity:0}
 .empty-hint{margin:0 0 8px;color:rgba(0,0,0,.45);font-size:12px;line-height:20px;text-align:center}
 .chat-list{flex:1;display:flex;flex-direction:column;gap:12px;overflow-y:auto;padding-right:4px}
 .assistant-block{display:flex;flex-direction:column;gap:8px;min-width:0}
 .reasoning-collapse,.tool-collapse{margin:-4px 0}
 .reasoning-collapse :deep(.ant-collapse-header),.tool-collapse :deep(.ant-collapse-header){padding:4px 0;color:rgba(0,0,0,.45);font-size:12px;line-height:20px}
 .reasoning-collapse :deep(.ant-collapse-content-box),.tool-collapse :deep(.ant-collapse-content-box){padding:4px 0 8px}
+.tool-collapse :deep(.ant-collapse-header-text){flex:1;min-width:0;overflow:hidden}
 .collapsed-title{color:rgba(0,0,0,.45)}
 .reasoning-text{color:rgba(0,0,0,.45);font-size:12px;line-height:20px;white-space:pre-wrap;word-break:break-word;max-height:180px;overflow-y:auto}
-.tool-header{display:inline-flex;align-items:center;gap:6px;min-width:0}
-.tool-icon-error{color:#ff4d4f}
-.tool-summary{color:rgba(0,0,0,.45);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tool-header{display:flex;align-items:center;gap:6px;min-width:0}
+.tool-name{flex-shrink:0;white-space:nowrap}
+.tool-icon-error{flex-shrink:0;color:#ff4d4f}
+.tool-summary{min-width:0;color:rgba(0,0,0,.45);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tool-summary-error{color:#ff4d4f}
 .tool-io{display:flex;flex-direction:column;gap:2px}
 .tool-io-label{color:rgba(0,0,0,.45);font-size:12px;line-height:20px}
@@ -264,6 +319,7 @@ h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28p
 .answer-text :deep(hr){margin:12px 0;border:0;border-top:1px solid rgba(5,5,5,.06)}
 .answer-text :deep(img){max-width:100%;border-radius:6px}
 .pending-line{margin:2px 0}
+.ai-disclaimer{margin:-6px 4px 0;color:rgba(0,0,0,.45);font-size:12px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .answer-error{margin-top:4px}
 .shimmer-text{
   display:inline-block;
@@ -274,7 +330,7 @@ h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28p
   -webkit-background-clip:text;
   background-clip:text;
   color:transparent;
-  animation:eoq-shimmer 1.5s linear infinite;
+  animation:eoq-shimmer 3s linear infinite;
 }
 @keyframes eoq-shimmer{
   0%{background-position:200% 0}
@@ -282,5 +338,6 @@ h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28p
 }
 @media (prefers-reduced-motion:reduce){
   .shimmer-text{animation:none;background:none;-webkit-background-clip:border-box;background-clip:border-box;color:rgba(0,0,0,.45)}
+  .suggestion-fade-enter-active,.suggestion-fade-leave-active{transition:none}
 }
 </style>
