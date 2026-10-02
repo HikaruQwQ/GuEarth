@@ -4,7 +4,7 @@ import { storeToRefs } from 'pinia'
 import MarkdownIt from 'markdown-it'
 import { Bubble, Sender } from 'ant-design-x-vue'
 import { ClearOutlined, CloseCircleOutlined, CloseOutlined, CompassOutlined, LeftOutlined, RightOutlined, SettingOutlined } from '@ant-design/icons-vue'
-import { useAiStore, type ChatMessage, type ToolStep } from '@renderer/stores/ai'
+import { useAiStore, type ChatMessage, type ReasoningPart, type ToolStep } from '@renderer/stores/ai'
 
 const store = useAiStore()
 const { messages, isStreaming, isPanelOpen, isSettingsOpen } = storeToRefs(store)
@@ -78,8 +78,8 @@ function renderMarkdown(text: string): string {
   return md.render(text)
 }
 
-function reasoningDurationText(message: ChatMessage): string {
-  const seconds = message.reasoningMs / 1000
+function reasoningDurationText(part: ReasoningPart): string {
+  const seconds = part.ms / 1000
   return seconds < 1 ? '已思考 <1s' : `已思考 ${Math.round(seconds)}s`
 }
 
@@ -87,27 +87,25 @@ const reasonTouched = reactive(new Set<string>())
 const reasonOpen = reactive(new Set<string>())
 const openTools = reactive(new Set<string>())
 
-function reasoningActive(message: ChatMessage): string[] {
-  if (reasonTouched.has(message.id)) return reasonOpen.has(message.id) ? ['reasoning'] : []
-  return message.status === 'streaming' ? ['reasoning'] : []
+function isReasoningLive(message: ChatMessage, part: ReasoningPart): boolean {
+  return message.status === 'streaming' && message.parts[message.parts.length - 1] === part
 }
 
-function toggleReasoning(message: ChatMessage, keys: string | string[]): void {
-  reasonTouched.add(message.id)
-  if ((Array.isArray(keys) ? keys : [keys]).includes('reasoning')) reasonOpen.add(message.id)
-  else reasonOpen.delete(message.id)
+function reasoningActive(message: ChatMessage, part: ReasoningPart): string[] {
+  if (reasonTouched.has(part.id)) return reasonOpen.has(part.id) ? ['reasoning'] : []
+  return isReasoningLive(message, part) ? ['reasoning'] : []
 }
 
-function openToolKeys(message: ChatMessage): string[] {
-  return message.toolSteps.filter((step) => openTools.has(step.callId)).map((step) => step.callId)
+function toggleReasoning(part: ReasoningPart, keys: string | string[]): void {
+  reasonTouched.add(part.id)
+  if ((Array.isArray(keys) ? keys : [keys]).includes('reasoning')) reasonOpen.add(part.id)
+  else reasonOpen.delete(part.id)
 }
 
-function onToolChange(message: ChatMessage, keys: string | string[]): void {
+function onToolChange(step: ToolStep, keys: string | string[]): void {
   const open = Array.isArray(keys) ? keys : keys ? [keys] : []
-  for (const step of message.toolSteps) {
-    if (open.includes(step.callId)) openTools.add(step.callId)
-    else openTools.delete(step.callId)
-  }
+  if (open.includes(step.callId)) openTools.add(step.callId)
+  else openTools.delete(step.callId)
 }
 
 function prettyInput(step: ToolStep): string {
@@ -137,7 +135,7 @@ function handleCancel(): void {
 }
 
 watch(
-  () => messages.value.map((message) => `${message.content.length}:${message.reasoning.length}:${message.toolSteps.length}:${message.status}`).join(','),
+  () => messages.value.map((message) => `${message.status}:${message.content.length}:${message.parts.map((part) => part.kind === 'reasoning' ? `r${part.text.length}` : part.kind === 'text' ? `t${part.text.length}` : `o${part.step.status}:${part.step.result.length}`).join('.')}`).join(','),
   async () => {
     await nextTick()
     listRef.value?.scrollTo({ top: listRef.value.scrollHeight })
@@ -203,51 +201,53 @@ watch(
       <template v-for="message in messages" :key="message.id">
         <Bubble v-if="message.role === 'user'" placement="end" :content="message.content" />
         <div v-else class="assistant-block">
-          <a-collapse
-            v-if="message.reasoning"
-            ghost
-            class="reasoning-collapse"
-            :active-key="reasoningActive(message)"
-            @change="toggleReasoning(message, $event)"
-          >
-            <a-collapse-panel key="reasoning">
-              <template #header>
-                <span v-if="message.status === 'streaming'" class="shimmer-text">正在深度思考</span>
-                <span v-else class="collapsed-title">{{ reasoningDurationText(message) }}</span>
-              </template>
-              <div class="reasoning-text">{{ message.reasoning }}</div>
-            </a-collapse-panel>
-          </a-collapse>
-          <a-collapse
-            v-if="message.toolSteps.length"
-            ghost
-            class="tool-collapse"
-            :active-key="openToolKeys(message)"
-            @change="onToolChange(message, $event)"
-          >
-            <a-collapse-panel v-for="step in message.toolSteps" :key="step.callId">
-              <template #header>
-                <span v-if="step.status === 'running'" class="shimmer-text">{{ toolLabel(step.name) }}</span>
-                <span v-else-if="step.status === 'ok'" class="tool-header">
-                  <span class="tool-name">{{ toolLabel(step.name) }}</span>
-                  <span v-if="step.summary" class="tool-summary" :title="step.summary">{{ step.summary }}</span>
-                </span>
-                <span v-else class="tool-header">
-                  <CloseCircleOutlined class="tool-icon-error" />
-                  <span class="tool-name">{{ toolLabel(step.name) }}</span>
-                  <span v-if="step.summary" class="tool-summary tool-summary-error" :title="step.summary">{{ step.summary }}</span>
-                </span>
-              </template>
-              <div class="tool-io">
-                <div class="tool-io-label">输入</div>
-                <pre class="tool-io-body">{{ prettyInput(step) }}</pre>
-                <div class="tool-io-label">输出</div>
-                <pre class="tool-io-body">{{ prettyOutput(step) }}</pre>
-              </div>
-            </a-collapse-panel>
-          </a-collapse>
-          <div v-if="message.content" class="answer-text" v-html="renderMarkdown(message.content)"></div>
-          <span v-else-if="message.status === 'streaming' && !message.reasoning && message.toolSteps.length === 0" class="shimmer-text pending-line">思考中…</span>
+          <template v-for="(part, index) in message.parts" :key="`${message.id}-${index}`">
+            <a-collapse
+              v-if="part.kind === 'reasoning'"
+              ghost
+              class="reasoning-collapse"
+              :active-key="reasoningActive(message, part)"
+              @change="toggleReasoning(part, $event)"
+            >
+              <a-collapse-panel key="reasoning">
+                <template #header>
+                  <span v-if="isReasoningLive(message, part)" class="shimmer-text">正在深度思考</span>
+                  <span v-else class="collapsed-title">{{ reasoningDurationText(part) }}</span>
+                </template>
+                <div class="reasoning-text">{{ part.text }}</div>
+              </a-collapse-panel>
+            </a-collapse>
+            <div v-else-if="part.kind === 'text'" class="answer-text" v-html="renderMarkdown(part.text)"></div>
+            <a-collapse
+              v-else
+              ghost
+              class="tool-collapse"
+              :active-key="openTools.has(part.step.callId) ? [part.step.callId] : []"
+              @change="onToolChange(part.step, $event)"
+            >
+              <a-collapse-panel :key="part.step.callId">
+                <template #header>
+                  <span v-if="part.step.status === 'running'" class="shimmer-text">{{ toolLabel(part.step.name) }}</span>
+                  <span v-else-if="part.step.status === 'ok'" class="tool-header">
+                    <span class="tool-name">{{ toolLabel(part.step.name) }}</span>
+                    <span v-if="part.step.summary" class="tool-summary" :title="part.step.summary">{{ part.step.summary }}</span>
+                  </span>
+                  <span v-else class="tool-header">
+                    <CloseCircleOutlined class="tool-icon-error" />
+                    <span class="tool-name">{{ toolLabel(part.step.name) }}</span>
+                    <span v-if="part.step.summary" class="tool-summary tool-summary-error" :title="part.step.summary">{{ part.step.summary }}</span>
+                  </span>
+                </template>
+                <div class="tool-io">
+                  <div class="tool-io-label">输入</div>
+                  <pre class="tool-io-body">{{ prettyInput(part.step) }}</pre>
+                  <div class="tool-io-label">输出</div>
+                  <pre class="tool-io-body">{{ prettyOutput(part.step) }}</pre>
+                </div>
+              </a-collapse-panel>
+            </a-collapse>
+          </template>
+          <span v-if="message.status === 'streaming' && message.parts.length === 0" class="shimmer-text pending-line">思考中…</span>
           <a-alert v-if="message.status === 'error'" type="error" show-icon :message="message.error" class="answer-error" />
         </div>
       </template>

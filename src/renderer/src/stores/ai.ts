@@ -11,13 +11,31 @@ export interface ToolStep {
   result: string
 }
 
+export interface ReasoningPart {
+  kind: 'reasoning'
+  id: string
+  text: string
+  ms: number
+  startedAt: number
+}
+
+export interface TextPart {
+  kind: 'text'
+  text: string
+}
+
+export interface ToolPart {
+  kind: 'tool'
+  step: ToolStep
+}
+
+export type AssistantPart = ReasoningPart | TextPart | ToolPart
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
-  reasoning: string
-  reasoningMs: number
-  toolSteps: ToolStep[]
+  parts: AssistantPart[]
   status: 'streaming' | 'done' | 'error'
   error: string
 }
@@ -31,7 +49,6 @@ let eventListenerBound = false
 let messageSeq = 0
 let sessionSeq = 0
 let activeSessionId = ''
-let reasoningStartAt = 0
 
 const rendererTools = new Map<string, RendererTool>()
 
@@ -66,24 +83,33 @@ export const useAiStore = defineStore('ai', () => {
     if (event.type === 'reasoning-delta' || event.type === 'text-delta') {
       const assistant = currentAssistant()
       if (!assistant || assistant.status !== 'streaming') return
+      const last = assistant.parts[assistant.parts.length - 1]
       if (event.type === 'reasoning-delta') {
-        if (!reasoningStartAt) reasoningStartAt = Date.now()
-        assistant.reasoningMs = Date.now() - reasoningStartAt
-        assistant.reasoning += event.text
+        let part = last && last.kind === 'reasoning' ? last : undefined
+        if (!part) {
+          part = { kind: 'reasoning', id: `${assistant.id}-r${assistant.parts.length}`, text: '', ms: 0, startedAt: Date.now() }
+          assistant.parts.push(part)
+        }
+        part.text += event.text
+        part.ms = Date.now() - part.startedAt
+      } else if (last && last.kind === 'text') {
+        assistant.content += event.text
+        last.text += event.text
       } else {
         assistant.content += event.text
+        assistant.parts.push({ kind: 'text', text: event.text })
       }
       return
     }
     if (event.type === 'tool-start') {
       const assistant = currentAssistant()
       if (!assistant || assistant.status !== 'streaming') return
-      assistant.toolSteps.push({ callId: event.callId, name: event.name, args: (event.args ?? {}) as Record<string, unknown>, status: 'running', summary: '', result: '' })
+      assistant.parts.push({ kind: 'tool', step: { callId: event.callId, name: event.name, args: (event.args ?? {}) as Record<string, unknown>, status: 'running', summary: '', result: '' } })
       return
     }
     if (event.type === 'tool-end') {
       const assistant = currentAssistant()
-      const step = assistant?.toolSteps.find((item) => item.callId === event.callId)
+      const step = assistant?.parts.find((part): part is ToolPart => part.kind === 'tool' && part.step.callId === event.callId)?.step
       if (step) {
         step.status = event.ok ? 'ok' : 'error'
         step.summary = event.summary
@@ -167,10 +193,9 @@ export const useAiStore = defineStore('ai', () => {
     if (!question || isStreaming.value) return
     await hydrate()
     messageSeq += 1
-    messages.value.push({ id: `m${messageSeq}`, role: 'user', content: question, reasoning: '', reasoningMs: 0, toolSteps: [], status: 'done', error: '' })
+    messages.value.push({ id: `m${messageSeq}`, role: 'user', content: question, parts: [], status: 'done', error: '' })
     messageSeq += 1
-    messages.value.push({ id: `m${messageSeq}`, role: 'assistant', content: '', reasoning: '', reasoningMs: 0, toolSteps: [], status: 'streaming', error: '' })
-    reasoningStartAt = 0
+    messages.value.push({ id: `m${messageSeq}`, role: 'assistant', content: '', parts: [], status: 'streaming', error: '' })
     if (!activeModelReady()) {
       const assistant = currentAssistant()
       if (assistant) {
