@@ -7,6 +7,8 @@ import type { GuEarthSettings, GuEarthSettingsPatch, ProviderCredentialStatus, T
 interface PersistedSettings {
   selectedImageryProviderId: string
   selectedTerrainProviderId: string
+  terrainExaggeration: number
+  terrainLighting: boolean
   tileCacheEnabled: boolean
   selectionMode: 'manual' | 'auto'
   chinaProviderId: string
@@ -18,10 +20,12 @@ interface PersistedSettings {
 
 const defaultSettings: PersistedSettings = {
   selectedImageryProviderId: 'osm',
-  selectedTerrainProviderId: 'ellipsoid',
+  selectedTerrainProviderId: 'arcgis-terrain',
+  terrainExaggeration: 2,
+  terrainLighting: false,
   tileCacheEnabled: true,
   selectionMode: 'manual',
-  chinaProviderId: 'amap',
+  chinaProviderId: 'tianditu',
   globalProviderId: 'osm',
   providerStyles: {
     osm: 'standard',
@@ -73,9 +77,13 @@ function readSettings(): PersistedSettings {
     for (const [providerId, styleId] of Object.entries(providerStyles)) {
       if (/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(providerId) && typeof styleId === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/i.test(styleId)) normalizedStyles[providerId] = styleId
     }
+    const legacyTerrain = parsed.terrainExaggeration === undefined
+    const storedTerrainProviderId = typeof parsed.selectedTerrainProviderId === 'string' ? parsed.selectedTerrainProviderId : defaultSettings.selectedTerrainProviderId
     return {
       selectedImageryProviderId: typeof parsed.selectedImageryProviderId === 'string' ? parsed.selectedImageryProviderId : defaultSettings.selectedImageryProviderId,
-      selectedTerrainProviderId: typeof parsed.selectedTerrainProviderId === 'string' ? parsed.selectedTerrainProviderId : defaultSettings.selectedTerrainProviderId,
+      selectedTerrainProviderId: legacyTerrain && storedTerrainProviderId === 'ellipsoid' ? defaultSettings.selectedTerrainProviderId : storedTerrainProviderId,
+      terrainExaggeration: typeof parsed.terrainExaggeration === 'number' && Number.isFinite(parsed.terrainExaggeration) ? Math.min(5, Math.max(1, parsed.terrainExaggeration)) : defaultSettings.terrainExaggeration,
+      terrainLighting: parsed.terrainLighting === true,
       tileCacheEnabled: parsed.tileCacheEnabled !== false,
       selectionMode: parsed.selectionMode === 'auto' ? 'auto' : 'manual',
       chinaProviderId: typeof parsed.chinaProviderId === 'string' ? parsed.chinaProviderId : defaultSettings.chinaProviderId,
@@ -362,7 +370,13 @@ async function handleTileProtocol(request: Request): Promise<Response> {
   const remoteUrl = tileRemoteUrl(providerId, styleId, level, x, y)
   if (!remoteUrl) return new Response('Unknown provider', { status: 404 })
   try {
-    const response = await net.fetch(remoteUrl)
+    const response = await net.fetch(remoteUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+        'Referer': 'https://www.tianditu.gov.cn/'
+      }
+    })
     if (!response.ok) return new Response(`Tile request failed: ${response.status}`, { status: response.status })
     const data = await response.arrayBuffer()
     const contentType = response.headers.get('content-type') ?? 'image/png'
@@ -385,6 +399,14 @@ function registerIpcHandlers(): void {
     }
     if (patch.selectedImageryProviderId !== undefined) nextSettings.selectedImageryProviderId = safeId(patch.selectedImageryProviderId)
     if (patch.selectedTerrainProviderId !== undefined) nextSettings.selectedTerrainProviderId = safeId(patch.selectedTerrainProviderId)
+    if (patch.terrainExaggeration !== undefined) {
+      if (typeof patch.terrainExaggeration !== 'number' || !Number.isFinite(patch.terrainExaggeration)) throw new Error('无效的地形夸张设置')
+      nextSettings.terrainExaggeration = Math.min(5, Math.max(1, patch.terrainExaggeration))
+    }
+    if (patch.terrainLighting !== undefined) {
+      if (typeof patch.terrainLighting !== 'boolean') throw new Error('无效的光照设置')
+      nextSettings.terrainLighting = patch.terrainLighting
+    }
     if (patch.tileCacheEnabled !== undefined) {
       if (typeof patch.tileCacheEnabled !== 'boolean') throw new Error('无效的缓存设置')
       nextSettings.tileCacheEnabled = patch.tileCacheEnabled

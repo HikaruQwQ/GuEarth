@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Button, Tooltip } from 'ant-design-vue'
-import { GlobalOutlined, EnvironmentOutlined } from '@ant-design/icons-vue'
+import { AimOutlined, EyeOutlined } from '@ant-design/icons-vue'
 
 const props = defineProps<{
-  camera: { longitude: number; latitude: number; height: number }
-  sceneMode: '2D' | '3D'
+  levelViewActive: boolean
   visible: boolean
 }>()
 
@@ -13,9 +12,9 @@ const emit = defineEmits<{
   toggle: []
 }>()
 
-const isGlobeMode = computed(() => props.sceneMode === '3D')
-const buttonIcon = computed(() => isGlobeMode.value ? EnvironmentOutlined : GlobalOutlined)
-const tooltipText = computed(() => isGlobeMode.value ? '切换到平面地图' : '切换到地球视角')
+const buttonIcon = computed(() => (props.levelViewActive ? EyeOutlined : AimOutlined))
+const tooltipText = computed(() => (props.levelViewActive ? '恢复俯视视角' : '平视 3D 地形'))
+const ariaLabel = computed(() => tooltipText.value)
 
 function handleClick(): void {
   emit('toggle')
@@ -24,22 +23,24 @@ function handleClick(): void {
 
 <template>
   <Transition name="fade">
-    <div v-if="visible" class="scene-mode-switcher">
+    <div v-if="visible" class="level-view-switcher">
       <Tooltip :title="tooltipText" placement="left">
         <Button
-          type="default"
-          :icon="buttonIcon"
+          :type="levelViewActive ? 'primary' : 'default'"
           shape="circle"
           size="large"
+          :aria-label="ariaLabel"
           @click="handleClick"
-        />
+        >
+          <template #icon><component :is="buttonIcon" /></template>
+        </Button>
       </Tooltip>
     </div>
   </Transition>
 </template>
 
 <style scoped>
-.scene-mode-switcher {
+.level-view-switcher {
   position: fixed;
   right: 16px;
   bottom: 80px;

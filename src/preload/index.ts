@@ -8,6 +8,8 @@ export interface ProviderCredentialStatus {
 export interface GuEarthSettings {
   selectedImageryProviderId: string
   selectedTerrainProviderId: string
+  terrainExaggeration: number
+  terrainLighting: boolean
   tileCacheEnabled: boolean
   selectionMode: 'manual' | 'auto'
   chinaProviderId: string
@@ -20,6 +22,8 @@ export interface GuEarthSettings {
 export interface GuEarthSettingsPatch {
   selectedImageryProviderId?: string
   selectedTerrainProviderId?: string
+  terrainExaggeration?: number
+  terrainLighting?: boolean
   tileCacheEnabled?: boolean
   selectionMode?: 'manual' | 'auto'
   chinaProviderId?: string

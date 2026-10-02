@@ -65,7 +65,19 @@ const defaultLayers: LayerMeta[] = providerCatalog.map((provider) => ({
   opacity: 1
 }))
 
-const terrainProviderIds = new Set(['ellipsoid', 'arcgis-terrain', 'mapbox-terrain'])
+export interface TerrainMeta {
+  id: string
+  name: string
+  description: string
+}
+
+export const terrainCatalog: TerrainMeta[] = [
+  { id: 'arcgis-terrain', name: '全球 3D 地形', description: 'ArcGIS 高程，免密钥' },
+  { id: 'mapbox-terrain', name: 'Cesium 世界地形', description: 'Cesium ion 官方高程' },
+  { id: 'ellipsoid', name: '椭球（无起伏）', description: '光滑球面，无山脉' }
+]
+
+const terrainProviderIds = new Set(terrainCatalog.map((terrain) => terrain.id))
 
 function providerFor(id: string): ProviderMeta | undefined {
   return providerCatalog.find((provider) => provider.id === id) || credentialOnlyProviders.find((provider) => provider.id === id)
@@ -91,7 +103,9 @@ export const useGlobeStore = defineStore('globe', () => {
   const chinaProviderId = ref('tianditu')
   const globalProviderId = ref('osm')
   const providerStyles = ref<Record<string, string>>(Object.fromEntries(providerCatalog.map((provider) => [provider.id, provider.defaultStyleId])))
-  const terrainProviderId = ref('ellipsoid')
+  const terrainProviderId = ref('arcgis-terrain')
+  const terrainExaggeration = ref(2)
+  const terrainLighting = ref(false)
   const tileCacheEnabled = ref(true)
   const providerCredentials = ref<Record<string, { configured: boolean; updatedAt: number | null }>>({})
   const isLayerPanelOpen = ref(false)
@@ -100,13 +114,16 @@ export const useGlobeStore = defineStore('globe', () => {
   const terrainError = ref('')
   const camera = ref<CameraReadout>({ longitude: 105, latitude: 35, height: 15000000, heading: 0, pitch: 0 })
   const sceneMode = ref<SceneMode>('3D')
+  const levelViewActive = ref(false)
 
   async function hydrateSettings(): Promise<void> {
     if (!apiAvailable()) return
     try {
       const settings = await window.guEarth.settings.get()
       selectedLayerId.value = providerFor(settings.selectedImageryProviderId) ? settings.selectedImageryProviderId : 'osm'
-      terrainProviderId.value = terrainProviderIds.has(settings.selectedTerrainProviderId) ? settings.selectedTerrainProviderId : 'ellipsoid'
+      terrainProviderId.value = terrainProviderIds.has(settings.selectedTerrainProviderId) ? settings.selectedTerrainProviderId : 'arcgis-terrain'
+      terrainExaggeration.value = Math.min(5, Math.max(1, settings.terrainExaggeration))
+      terrainLighting.value = settings.terrainLighting
       tileCacheEnabled.value = settings.tileCacheEnabled
       selectionMode.value = settings.selectionMode
       chinaProviderId.value = providerInRegion(settings.chinaProviderId, 'china') ? settings.chinaProviderId : 'tianditu'
@@ -124,6 +141,8 @@ export const useGlobeStore = defineStore('globe', () => {
     await window.guEarth.settings.update({
       selectedImageryProviderId: selectedLayerId.value,
       selectedTerrainProviderId: terrainProviderId.value,
+      terrainExaggeration: terrainExaggeration.value,
+      terrainLighting: terrainLighting.value,
       tileCacheEnabled: tileCacheEnabled.value,
       selectionMode: selectionMode.value,
       chinaProviderId: chinaProviderId.value,
@@ -153,14 +172,17 @@ export const useGlobeStore = defineStore('globe', () => {
     void persistSettings()
   }
   function setTerrainProvider(id: string): void { if (terrainProviderIds.has(id)) terrainProviderId.value = id; void persistSettings() }
+  function setTerrainExaggeration(value: number): void { terrainExaggeration.value = Math.min(5, Math.max(1, value)); void persistSettings() }
+  function setTerrainLighting(value: boolean): void { terrainLighting.value = value; void persistSettings() }
   function setTileCacheEnabled(value: boolean): void { tileCacheEnabled.value = value; void persistSettings() }
   function setCredentialStatus(id: string, status: { configured: boolean; updatedAt: number | null }): void { providerCredentials.value = { ...providerCredentials.value, [id]: status } }
   function setSceneMode(mode: SceneMode): void { sceneMode.value = mode; void persistSettings() }
+  function setLevelViewActive(value: boolean): void { levelViewActive.value = value }
 
   return {
-    layers, selectedLayerId, selectionMode, chinaProviderId, globalProviderId, providerStyles, terrainProviderId, tileCacheEnabled,
-    providerCredentials, isLayerPanelOpen, isGlobeReady, globeError, terrainError, camera, sceneMode, hydrateSettings,
+    layers, selectedLayerId, selectionMode, chinaProviderId, globalProviderId, providerStyles, terrainProviderId, terrainExaggeration, terrainLighting, tileCacheEnabled,
+    providerCredentials, isLayerPanelOpen, isGlobeReady, globeError, terrainError, camera, sceneMode, levelViewActive, hydrateSettings,
     setLayerPanelOpen, setGlobeReady, setGlobeError, setTerrainError, setCameraReadout, selectBasemap, setLayerOpacity,
-    setSelectionMode, setRegionProviders, setProviderStyle, setTerrainProvider, setTileCacheEnabled, setCredentialStatus, setSceneMode
+    setSelectionMode, setRegionProviders, setProviderStyle, setTerrainProvider, setTerrainExaggeration, setTerrainLighting, setTileCacheEnabled, setCredentialStatus, setSceneMode, setLevelViewActive
   }
 })

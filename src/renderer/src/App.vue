@@ -7,7 +7,7 @@ import { useCesiumViewer } from '@renderer/composables/useCesiumViewer'
 import GlobeToolbar from '@renderer/components/GlobeToolbar.vue'
 import CameraStatus from '@renderer/components/CameraStatus.vue'
 import LayerPanel from '@renderer/components/LayerPanel.vue'
-import SceneModeSwitcher from '@renderer/components/SceneModeSwitcher.vue'
+import LevelViewSwitcher from '@renderer/components/LevelViewSwitcher.vue'
 
 const store = useGlobeStore()
 const {
@@ -18,20 +18,22 @@ const {
   terrainError,
   isGlobeReady,
   camera,
-  sceneMode,
+  levelViewActive,
   selectionMode,
   chinaProviderId,
   globalProviderId,
   providerStyles,
   terrainProviderId,
+  terrainExaggeration,
+  terrainLighting,
   tileCacheEnabled,
   providerCredentials
 } =
   storeToRefs(store)
 
 const globeContainer = ref<HTMLDivElement>()
-const { switchBasemap, setProviderStyle, setLayerOpacity, flyTo, setTerrain, switchSceneMode } = useCesiumViewer(globeContainer)
-const sceneSwitcherVisible = computed(() => isGlobeReady.value && camera.value.height < 5000000)
+const { switchBasemap, setProviderStyle, setLayerOpacity, flyTo, toggleLevelView, setTerrain, setTerrainExaggeration, setTerrainLighting } = useCesiumViewer(globeContainer)
+const levelSwitcherVisible = computed(() => isGlobeReady.value && camera.value.height < 5000000)
 
 function handleOpenLayers(): void {
   store.setLayerPanelOpen(true)
@@ -79,6 +81,14 @@ function handleTerrainChange(id: string): void {
   setTerrain(id)
 }
 
+function handleTerrainExaggeration(value: number): void {
+  setTerrainExaggeration(value)
+}
+
+function handleTerrainLighting(value: boolean): void {
+  setTerrainLighting(value)
+}
+
 function handleCacheChange(value: boolean): void {
   store.setTileCacheEnabled(value)
 }
@@ -118,8 +128,8 @@ function handleRetry(): void {
   location.reload()
 }
 
-function handleSceneModeToggle(): void {
-  switchSceneMode(sceneMode.value === '3D' ? '2D' : '3D')
+function handleLevelViewToggle(): void {
+  toggleLevelView()
 }
 </script>
 
@@ -128,11 +138,10 @@ function handleSceneModeToggle(): void {
     <div ref="globeContainer" class="globe"></div>
     <GlobeToolbar @open-layers="handleOpenLayers" @home="handleHome" />
     <CameraStatus :camera="camera" />
-    <SceneModeSwitcher
-      :camera="camera"
-      :scene-mode="sceneMode"
-      :visible="sceneSwitcherVisible"
-      @toggle="handleSceneModeToggle"
+    <LevelViewSwitcher
+      :level-view-active="levelViewActive"
+      :visible="levelSwitcherVisible"
+      @toggle="handleLevelViewToggle"
     />
     <LayerPanel
       :open="isLayerPanelOpen"
@@ -146,6 +155,8 @@ function handleSceneModeToggle(): void {
       :global-provider-id="globalProviderId"
       :provider-styles="providerStyles"
       :terrain-provider-id="terrainProviderId"
+      :terrain-exaggeration="terrainExaggeration"
+      :terrain-lighting="terrainLighting"
       :tile-cache-enabled="tileCacheEnabled"
       :provider-credentials="providerCredentials"
       @close="handleClosePanel"
@@ -156,6 +167,8 @@ function handleSceneModeToggle(): void {
       @region-provider="handleRegionProvider"
       @provider-style="handleProviderStyle"
       @terrain="handleTerrainChange"
+      @terrain-exaggeration="handleTerrainExaggeration"
+      @terrain-lighting="handleTerrainLighting"
       @cache="handleCacheChange"
       @credential-save="handleCredentialSave"
       @credential-clear="handleCredentialClear"

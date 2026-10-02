@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { CloseOutlined, DeleteOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons-vue'
-import { providerCatalog, credentialOnlyProviders, type LayerMeta, type ProviderRegion, type SelectionMode } from '@renderer/stores/globe'
+import { providerCatalog, credentialOnlyProviders, terrainCatalog, type LayerMeta, type ProviderRegion, type SelectionMode } from '@renderer/stores/globe'
 
 interface CredentialStatus {
   configured: boolean
@@ -20,6 +20,8 @@ const props = defineProps<{
   globalProviderId: string
   providerStyles: Record<string, string>
   terrainProviderId: string
+  terrainExaggeration: number
+  terrainLighting: boolean
   tileCacheEnabled: boolean
   providerCredentials: Record<string, CredentialStatus>
 }>()
@@ -33,6 +35,8 @@ const emit = defineEmits<{
   regionProvider: [region: ProviderRegion, id: string]
   providerStyle: [providerId: string, styleId: string]
   terrain: [id: string]
+  terrainExaggeration: [value: number]
+  terrainLighting: [value: boolean]
   cache: [value: boolean]
   credentialSave: [id: string, apiKey: string, securityKey?: string]
   credentialClear: [id: string]
@@ -45,11 +49,6 @@ const keyProviders = computed(() => [...providerCatalog, ...credentialOnlyProvid
 const credentialProviderId = ref('')
 const credentialDraft = ref('')
 const credentialSkDraft = ref('')
-const terrainOptions = [
-  { id: 'ellipsoid', name: '椭球' },
-  { id: 'arcgis-terrain', name: 'ArcGIS 地形' },
-  { id: 'mapbox-terrain', name: 'Mapbox 地形' }
-]
 
 const selectedCredentialStatus = computed(() => props.providerCredentials[credentialProviderId.value])
 const selectedSecurityCredentialStatus = computed(() => props.providerCredentials[`${credentialProviderId.value}-sk`])
@@ -120,7 +119,20 @@ function clearCredential(): void {
 
       <section class="panel-section">
         <div class="section-heading"><span>地形</span></div>
-        <a-select :value="terrainProviderId" class="full-select" @change="(value: string) => emit('terrain', value)"><a-select-option v-for="option in terrainOptions" :key="option.id" :value="option.id">{{ option.name }}</a-select-option></a-select>
+        <a-select :value="terrainProviderId" class="full-select" @change="(value: string) => emit('terrain', value)">
+          <a-select-option v-for="option in terrainCatalog" :key="option.id" :value="option.id" :title="option.description">{{ option.name }}</a-select-option>
+        </a-select>
+        <div class="terrain-slider-head"><span>垂直夸张</span><span>{{ terrainExaggeration }}×</span></div>
+        <a-slider
+          :value="terrainExaggeration"
+          :min="1"
+          :max="5"
+          :step="0.5"
+          :marks="{ 1: '1×', 3: '3×', 5: '5×' }"
+          aria-label="地形垂直夸张倍数"
+          @change="(value: number) => emit('terrainExaggeration', value)"
+        />
+        <div class="terrain-lighting-row"><span>太阳光照</span><a-switch size="small" :checked="terrainLighting" @change="(value: boolean) => emit('terrainLighting', value)" /></div>
         <a-alert v-if="terrainError" type="warning" :message="terrainError" show-icon class="terrain-alert" />
       </section>
 
@@ -164,5 +176,5 @@ function clearCredential(): void {
 </template>
 
 <style scoped>
-.panel-title{display:flex;align-items:center;justify-content:space-between;width:100%}.panel-kicker{color:rgba(0,0,0,.45);font-size:12px;line-height:20px;letter-spacing:.08em}h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28px}.panel-alert{margin-bottom:16px}.layer-spin{display:block;min-height:168px}.panel-section{padding:0 0 16px;margin:0 0 16px;border-bottom:1px solid rgba(5,5,5,.06)}.section-heading{display:flex;align-items:center;justify-content:space-between;margin:0 0 8px;color:rgba(0,0,0,.65);font-size:12px;line-height:20px}.provider-row{display:flex;align-items:flex-start;gap:12px;margin:8px 0;color:rgba(0,0,0,.65);font-size:13px}.provider-row>span{width:52px;flex:none;padding-top:6px}.provider-controls{display:flex;min-width:0;flex:1;gap:8px}.provider-select,.provider-controls .style-select{min-width:0;flex:1;margin:0}.full-select{width:100%}.cache-row{display:flex;align-items:center;justify-content:space-between}.terrain-alert{margin-top:8px}.key-input{margin-top:8px}.credential-hint{margin-top:8px}.key-actions{display:flex;gap:8px;margin-top:8px}.layer-list :deep(.ant-list-item){display:block;padding:12px 8px;border-radius:6px}.layer-item.selected{background:rgba(22,119,255,.06)}.layer-main{display:flex;align-items:center;min-height:32px;cursor:pointer}.layer-copy{min-width:0;flex:1}.layer-name{overflow:hidden;color:rgba(0,0,0,.88);font-size:14px;line-height:22px;text-overflow:ellipsis;white-space:nowrap}.layer-description{color:rgba(0,0,0,.45);font-size:12px;line-height:20px}.layer-control{display:flex;justify-content:space-between;margin:8px 0 0 32px;color:rgba(0,0,0,.45);font-size:12px;line-height:20px}.style-select{width:calc(100% - 32px);margin:8px 0 0 32px}.layer-item :deep(.ant-slider){margin:8px 8px 0 32px}
+.panel-title{display:flex;align-items:center;justify-content:space-between;width:100%}.panel-kicker{color:rgba(0,0,0,.45);font-size:12px;line-height:20px;letter-spacing:.08em}h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28px}.panel-alert{margin-bottom:16px}.layer-spin{display:block;min-height:168px}.panel-section{padding:0 0 16px;margin:0 0 16px;border-bottom:1px solid rgba(5,5,5,.06)}.section-heading{display:flex;align-items:center;justify-content:space-between;margin:0 0 8px;color:rgba(0,0,0,.65);font-size:12px;line-height:20px}.provider-row{display:flex;align-items:flex-start;gap:12px;margin:8px 0;color:rgba(0,0,0,.65);font-size:13px}.provider-row>span{width:52px;flex:none;padding-top:6px}.provider-controls{display:flex;min-width:0;flex:1;gap:8px}.provider-select,.provider-controls .style-select{min-width:0;flex:1;margin:0}.full-select{width:100%}.cache-row{display:flex;align-items:center;justify-content:space-between}.terrain-slider-head{display:flex;align-items:center;justify-content:space-between;margin-top:12px;color:rgba(0,0,0,.65);font-size:13px;line-height:20px}.terrain-lighting-row{display:flex;align-items:center;justify-content:space-between;margin-top:4px;color:rgba(0,0,0,.65);font-size:13px;line-height:20px}.terrain-alert{margin-top:8px}.key-input{margin-top:8px}.credential-hint{margin-top:8px}.key-actions{display:flex;gap:8px;margin-top:8px}.layer-list :deep(.ant-list-item){display:block;padding:12px 8px;border-radius:6px}.layer-item.selected{background:rgba(22,119,255,.06)}.layer-main{display:flex;align-items:center;min-height:32px;cursor:pointer}.layer-copy{min-width:0;flex:1}.layer-name{overflow:hidden;color:rgba(0,0,0,.88);font-size:14px;line-height:22px;text-overflow:ellipsis;white-space:nowrap}.layer-description{color:rgba(0,0,0,.45);font-size:12px;line-height:20px}.layer-control{display:flex;justify-content:space-between;margin:8px 0 0 32px;color:rgba(0,0,0,.45);font-size:12px;line-height:20px}.style-select{width:calc(100% - 32px);margin:8px 0 0 32px}.layer-item :deep(.ant-slider){margin:8px 8px 0 32px}
 </style>

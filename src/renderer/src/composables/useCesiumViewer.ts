@@ -1,16 +1,10 @@
 import { onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
 import * as Cesium from 'cesium'
-import { useGlobeStore, providerCatalog, type ProviderMeta } from '@renderer/stores/globe'
+import { useGlobeStore, providerCatalog, terrainCatalog, type ProviderMeta } from '@renderer/stores/globe'
 
 interface LayerProvider {
   meta: ProviderMeta
   createImageryProvider: (styleId: string) => Promise<Cesium.ImageryProvider>
-}
-
-interface TerrainProviderDefinition {
-  id: string
-  name: string
-  create: () => Promise<Cesium.TerrainProvider>
 }
 
 const protocolTileUrl = (id: string, styleId: string): string => `guearth-tile://${id}/${styleId}/{z}/{x}/{y}`
@@ -22,14 +16,25 @@ const layerRegistry: Record<string, LayerProvider> = {
   opentopomap: { meta: providerMeta('opentopomap'), createImageryProvider: async () => new Cesium.UrlTemplateImageryProvider({ url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', subdomains: ['a', 'b', 'c'], credit: '© OpenTopoMap contributors' }) },
   amap: { meta: providerMeta('amap'), createImageryProvider: async (styleId) => new Cesium.UrlTemplateImageryProvider({ url: protocolTileUrl('amap', styleId), credit: '© 高德地图' }) },
   baidu: { meta: providerMeta('baidu'), createImageryProvider: async (styleId) => new Cesium.UrlTemplateImageryProvider({ url: protocolTileUrl('baidu', styleId), credit: '© 百度地图' }) },
-  tianditu: { meta: providerMeta('tianditu'), createImageryProvider: async (styleId) => new Cesium.UrlTemplateImageryProvider({ url: protocolTileUrl('tianditu', styleId), credit: '© 天地图' }) }
+  tianditu: {
+    meta: providerMeta('tianditu'),
+    createImageryProvider: async (styleId) => new Cesium.UrlTemplateImageryProvider({
+      url: protocolTileUrl('tianditu', styleId),
+      credit: '© 天地图',
+      tilingScheme: new Cesium.WebMercatorTilingScheme(),
+      minimumLevel: 0,
+      maximumLevel: 18
+    })
+  }
 }
 
-const terrainRegistry: Record<string, TerrainProviderDefinition> = {
-  ellipsoid: { id: 'ellipsoid', name: '椭球', create: async () => new Cesium.EllipsoidTerrainProvider() },
-  'arcgis-terrain': { id: 'arcgis-terrain', name: 'ArcGIS 地形', create: async () => Cesium.ArcGISTiledElevationTerrainProvider.fromUrl('https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer') },
-  'mapbox-terrain': { id: 'mapbox-terrain', name: 'Mapbox 地形', create: async () => Cesium.CesiumTerrainProvider.fromUrl(Cesium.IonResource.fromAssetId(1), { requestVertexNormals: true }) }
+const terrainRegistry: Record<string, () => Promise<Cesium.TerrainProvider>> = {
+  ellipsoid: async () => new Cesium.EllipsoidTerrainProvider(),
+  'arcgis-terrain': () => Cesium.ArcGISTiledElevationTerrainProvider.fromUrl('https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer'),
+  'mapbox-terrain': () => Cesium.CesiumTerrainProvider.fromUrl(Cesium.IonResource.fromAssetId(1), { requestVertexNormals: true })
 }
+
+const terrainName = (id: string): string => terrainCatalog.find((terrain) => terrain.id === id)?.name ?? id
 
 function normalizeHeading(radians: number): number {
   const degrees = Cesium.Math.toDegrees(radians) % 360
@@ -65,6 +70,13 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     }
     try {
       const imageryProvider = await provider.createImageryProvider(store.providerStyles[id] ?? provider.meta.defaultStyleId)
+      imageryProvider.errorEvent.addEventListener((error) => {
+        if (id !== store.selectedLayerId) return
+        const message = typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
+          ? error.message
+          : `${provider.meta.name} 瓦片请求失败`
+        store.setGlobeError(message)
+      })
       const currentViewer = viewer.value
       if (!currentViewer || currentViewer.isDestroyed() || expectedGeneration !== generation) return false
       const layer = currentViewer.imageryLayers.addImageryProvider(imageryProvider)
@@ -108,19 +120,27 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
   }
 
   async function setTerrain(id: string, expectedGeneration: number): Promise<void> {
-    const definition = terrainRegistry[id] ?? terrainRegistry.ellipsoid
+    const create = terrainRegistry[id] ?? terrainRegistry.ellipsoid
     try {
-      const terrain = await definition.create()
+      const terrain = await create()
       if (!viewer.value || viewer.value.isDestroyed() || expectedGeneration !== generation) return
       viewer.value.terrainProvider = terrain
       store.setTerrainError('')
     } catch (error) {
-      store.setTerrainError(error instanceof Error ? error.message : `${definition.name} 加载失败`)
+      store.setTerrainError(error instanceof Error ? error.message : `${terrainName(id)} 加载失败`)
       if (id !== 'ellipsoid') {
-        const fallback = await terrainRegistry.ellipsoid.create()
+        const fallback = await terrainRegistry.ellipsoid()
         if (viewer.value && !viewer.value.isDestroyed() && expectedGeneration === generation) viewer.value.terrainProvider = fallback
       }
     }
+  }
+
+  function applyTerrainRendering(): void {
+    const currentViewer = viewer.value
+    if (!currentViewer || currentViewer.isDestroyed()) return
+    currentViewer.scene.verticalExaggeration = store.terrainExaggeration
+    currentViewer.scene.globe.enableLighting = store.terrainLighting
+    currentViewer.scene.globe.depthTestAgainstTerrain = true
   }
 
   function syncAutoProvider(): void {
@@ -129,39 +149,41 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     if (target !== store.selectedLayerId) switchBasemap(target, false)
   }
 
-  function switchSceneMode(mode: '2D' | '3D'): void {
+  function toggleLevelView(): void {
     if (!viewer.value || viewer.value.isDestroyed()) return
-    const camera = viewer.value.camera
-    if (mode === '3D') {
-      const cartographic = camera.positionCartographic
-      const longitude = Cesium.Math.toDegrees(cartographic.longitude)
-      const latitude = Cesium.Math.toDegrees(cartographic.latitude)
-      const height = cartographic.height * 1.5
-      camera.flyTo({
+    const currentViewer = viewer.value
+    const camera = currentViewer.camera
+    const cartographic = camera.positionCartographic
+    const longitude = Cesium.Math.toDegrees(cartographic.longitude)
+    const latitude = Cesium.Math.toDegrees(cartographic.latitude)
+    const activate = !store.levelViewActive
+    store.setLevelViewActive(activate)
+    const height = activate ? Math.min(Math.max(cartographic.height * 0.35, 15000), 120000) : Math.min(Math.max(cartographic.height * 2, 40000), 4000000)
+    const pitch = activate ? -12 : -45
+    const flyToOrientation = () => {
+      if (currentViewer.isDestroyed()) return
+      currentViewer.camera.flyTo({
         destination: Cesium.Cartesian3.fromDegrees(longitude, latitude, height),
         orientation: {
-          heading: Cesium.Math.toRadians(0),
-          pitch: Cesium.Math.toRadians(-45),
+          heading: camera.heading,
+          pitch: Cesium.Math.toRadians(pitch),
           roll: 0.0
         },
-        duration: 1.0
-      })
-    } else {
-      const cartographic = camera.positionCartographic
-      const longitude = Cesium.Math.toDegrees(cartographic.longitude)
-      const latitude = Cesium.Math.toDegrees(cartographic.latitude)
-      const height = Math.max(cartographic.height * 0.8, 5000)
-      camera.flyTo({
-        destination: Cesium.Cartesian3.fromDegrees(longitude, latitude, height),
-        orientation: {
-          heading: Cesium.Math.toRadians(0),
-          pitch: Cesium.Math.toRadians(-90),
-          roll: 0.0
-        },
-        duration: 1.0
+        duration: 1.2,
+        complete: updateCameraState
       })
     }
-    store.setSceneMode(mode)
+    if (currentViewer.scene.mode !== Cesium.SceneMode.SCENE3D) {
+      const morphComplete = () => {
+        currentViewer.scene.morphComplete.removeEventListener(morphComplete)
+        flyToOrientation()
+      }
+      currentViewer.scene.morphComplete.addEventListener(morphComplete)
+      currentViewer.scene.morphTo3D(1.0)
+      store.setSceneMode('3D')
+    } else {
+      flyToOrientation()
+    }
   }
 
   function flyTo(longitude: number, latitude: number, height: number): void {
@@ -180,6 +202,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
         viewer.value.camera.setView({ destination: Cesium.Cartesian3.fromDegrees(105, 35, 15000000) })
         const initialMode = store.sceneMode === '2D' ? Cesium.SceneMode.SCENE2D : Cesium.SceneMode.SCENE3D
         viewer.value.scene.mode = initialMode
+        applyTerrainRendering()
         viewer.value.camera.moveEnd.addEventListener(updateCameraState)
         viewer.value.camera.moveEnd.addEventListener(syncAutoProvider)
         updateCameraState()
@@ -213,5 +236,15 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     imageryLayers.clear()
   })
 
-  return { viewer, switchBasemap, setProviderStyle, setLayerOpacity: (id: string, opacity: number) => { const value = Math.min(1, Math.max(0, opacity)); const layer = imageryLayers.get(id); if (layer) layer.alpha = value; store.setLayerOpacity(id, value) }, flyTo, setTerrain: (id: string) => { store.setTerrainProvider(id); void setTerrain(id, generation) }, switchSceneMode }
+  return {
+    viewer,
+    switchBasemap,
+    setProviderStyle,
+    setLayerOpacity: (id: string, opacity: number) => { const value = Math.min(1, Math.max(0, opacity)); const layer = imageryLayers.get(id); if (layer) layer.alpha = value; store.setLayerOpacity(id, value) },
+    flyTo,
+    toggleLevelView,
+    setTerrain: (id: string) => { store.setTerrainProvider(id); void setTerrain(id, generation) },
+    setTerrainExaggeration: (value: number) => { store.setTerrainExaggeration(value); const currentViewer = viewer.value; if (currentViewer && !currentViewer.isDestroyed()) currentViewer.scene.verticalExaggeration = store.terrainExaggeration },
+    setTerrainLighting: (value: boolean) => { store.setTerrainLighting(value); const currentViewer = viewer.value; if (currentViewer && !currentViewer.isDestroyed()) currentViewer.scene.globe.enableLighting = value }
+  }
 }
