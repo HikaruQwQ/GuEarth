@@ -1,4 +1,4 @@
-import { onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
+import { onBeforeUnmount, onMounted, shallowRef, type Ref } from 'vue'
 import * as Cesium from 'cesium'
 import { useGlobeStore, providerCatalog, terrainCatalog, type ProviderMeta } from '@renderer/stores/globe'
 import type { PlaceSuggestion } from '../../../preload'
@@ -33,7 +33,7 @@ function normalizeHeading(radians: number): number {
 }
 
 export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
-  const viewer = ref<Cesium.Viewer>()
+  const viewer = shallowRef<Cesium.Viewer>()
   const imageryLayers = new Map<string, Cesium.ImageryLayer>()
   const store = useGlobeStore()
   let generation = 0
