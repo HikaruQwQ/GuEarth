@@ -64,7 +64,7 @@ Teaching modules (人教版选择性必修一 mapping; thematic layers live in `
 | Module | Scope | Status |
 | --- | --- | --- |
 | M1 | Earth's motion: solar terminator timeline (date/hour, solstice/equinox presets), day-length & noon-altitude charts, Coriolis demo layer, timezone compare tool, `set_sim_time`/`query_solar` AI tools | Done |
-| M2 | Atmosphere: pressure/wind belt layer (Jan/Jul shift), global Köppen zones, thematic-entity picking + AI explain, frontal-cyclone anchored overlay, `set_layer` tool | Planned |
+| M2 | Atmosphere: pressure/wind belt layer (Jan/Jul shift), global Köppen zones, thematic-entity picking + AI explain, frontal-cyclone anchored overlay, `set_layer` tool | Done |
 | M3 | Landforms: plate boundaries + USGS earthquakes/volcanoes (dataset fetch + cache in main process), `explain_landform` tool | Planned |
 | M4 | Ocean: ENSO phase layer (El Niño / La Niña SST anomaly + Walker circulation overlay) | Planned |
 | M5 | Integrality/zonation: `find_peaks`, mountain vertical zonation profile, guided transect flights (`fly_transect`) | Planned |

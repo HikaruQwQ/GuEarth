@@ -7,7 +7,7 @@ import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { useGlobeStore } from '@renderer/stores/globe'
 import { useDrawingStore, type DrawTool, type GeoPosition } from '@renderer/stores/drawing'
 import { useAiStore } from '@renderer/stores/ai'
-import { useClimateStore } from '@renderer/stores/climate'
+import { thematicLayerCatalog, useClimateStore } from '@renderer/stores/climate'
 import { useSolarStore } from '@renderer/stores/solar'
 import { useCesiumViewer } from '@renderer/composables/useCesiumViewer'
 import { useDrawing, measureShape } from '@renderer/composables/useDrawing'
@@ -396,6 +396,48 @@ aiStore.registerTool({
       sunriseLocalSolarTime: times.sunrise !== undefined ? formatClock(times.sunrise) : undefined,
       sunsetLocalSolarTime: times.sunset !== undefined ? formatClock(times.sunset) : undefined,
       note: '日出日落为地方时（平太阳时近似）'
+    }
+  }
+})
+
+aiStore.registerTool({
+  definition: {
+    name: 'set_layer',
+    description: '开关教学专题图层并可选设置月份（1-12），用于讲解气压带与风带、气候类型、锋面气旋、洋流等。气压带风带图层会随月份在1月与7月位置间移动，适合对比讲解。',
+    parameters: {
+      type: 'object',
+      properties: {
+        layerId: {
+          type: 'string',
+          enum: thematicLayerCatalog.map((layer) => layer.id),
+          description: '图层 id：pressure-belts 气压带与风带、koppen-zones 世界气候类型、frontal-cyclone 锋面气旋、ocean-currents 世界洋流、climate-zones 中国气候区、coriolis-demo 地转偏向力等'
+        },
+        enabled: { type: 'boolean', description: 'true 开启图层，false 关闭图层' },
+        month: { type: 'number', description: '1-12 的月份整数，设置专题时间轴（如 1 月与 7 月对比气压带位置）' }
+      },
+      required: ['layerId', 'enabled']
+    }
+  },
+  execute: async (args) => {
+    const layer = thematicLayerCatalog.find((item) => item.id === args.layerId)
+    if (!layer) return { error: `未知图层 ${String(args.layerId)}，可用图层：${thematicLayerCatalog.map((item) => `${item.id}（${item.name}）`).join('、')}` }
+    if (typeof args.enabled !== 'boolean') return { error: 'enabled 需为布尔值' }
+    climateStore.setOverlay(layer.id, args.enabled)
+    if (args.month !== undefined) {
+      const month = Number(args.month)
+      if (!Number.isFinite(month) || month < 1 || month > 12) return { error: 'month 需为 1-12 的月份' }
+      climateStore.setMonth(month)
+      climateStore.isPlaying = false
+    }
+    return {
+      status: 'ok',
+      layerId: layer.id,
+      name: layer.name,
+      enabled: args.enabled,
+      month: climateStore.month,
+      message: args.enabled
+        ? `已开启「${layer.name}」图层${args.month !== undefined ? `并设置月份为 ${climateStore.month} 月` : ''}；可在地球上点击图层要素查看成因`
+        : `已关闭「${layer.name}」图层`
     }
   }
 })
