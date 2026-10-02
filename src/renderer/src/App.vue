@@ -11,6 +11,7 @@ import { useDrawingStore, type DrawTool, type GeoPosition } from '@renderer/stor
 import { useAiStore } from '@renderer/stores/ai'
 import { thematicLayerCatalog, useClimateStore } from '@renderer/stores/climate'
 import { useSolarStore } from '@renderer/stores/solar'
+import { useAtmosphereStore } from '@renderer/stores/atmosphere'
 import { useCesiumViewer } from '@renderer/composables/useCesiumViewer'
 import { useDrawing, measureShape } from '@renderer/composables/useDrawing'
 import { useThematicLayers } from '@renderer/composables/useThematicLayers'
@@ -28,6 +29,10 @@ import SolarTimePanel from '@renderer/components/SolarTimePanel.vue'
 import SolarPathPanel from '@renderer/components/SolarPathPanel.vue'
 import ObliquityPanel from '@renderer/components/ObliquityPanel.vue'
 import RotationSpeedPanel from '@renderer/components/RotationSpeedPanel.vue'
+import ThermalCirculationPanel from '@renderer/components/ThermalCirculationPanel.vue'
+import AtmosphereHeatingPanel from '@renderer/components/AtmosphereHeatingPanel.vue'
+import AtmosphereLayersPanel from '@renderer/components/AtmosphereLayersPanel.vue'
+import TyphoonOverlay from '@renderer/components/TyphoonOverlay.vue'
 import TimezonePanel from '@renderer/components/TimezonePanel.vue'
 import ThematicLegend from '@renderer/components/ThematicLegend.vue'
 import FrontalCyclone from '@renderer/components/FrontalCyclone.vue'
@@ -64,6 +69,7 @@ const { flyToShape } = useDrawing(viewer)
 const { comparison: timezoneComparison, clearComparison: clearTimezone } = useTimezoneCompare(viewer)
 const climateStore = useClimateStore()
 const solarStore = useSolarStore()
+const atmosphereStore = useAtmosphereStore()
 const { overlays: thematicOverlays } = storeToRefs(climateStore)
 useThematicLayers(viewer)
 
@@ -77,7 +83,7 @@ const selectedShape = computed(() => shapes.value.find((shape) => shape.id === s
 const levelSwitcherVisible = computed(() => isGlobeReady.value && camera.value.height < 5000000)
 const showGlobeLoading = computed(() => !isGlobeReady.value && !globeError.value)
 const isLabOpen = ref(false)
-const labActive = computed(() => climateStore.hasActiveOverlay || solarStore.active || solarStore.motionPanel !== null || activeTool.value === 'timezone')
+const labActive = computed(() => climateStore.hasActiveOverlay || solarStore.active || solarStore.motionPanel !== null || atmosphereStore.panel !== null || activeTool.value === 'timezone')
 const drawHint = computed(() => {
   if (!activeTool.value) return ''
   if (activeTool.value === 'timezone') return '单击选取两个地点对比地方时 · Esc 退出'
@@ -697,6 +703,7 @@ function deleteSelectedShape(): void {
     <FailureBanner />
     <WindParticles v-if="thematicOverlays['wind-particles']" :viewer="viewer" />
     <FrontalCyclone v-if="thematicOverlays['frontal-cyclone']" :viewer="viewer" />
+    <TyphoonOverlay v-if="thematicOverlays['typhoon']" :viewer="viewer" />
     <GlobeToolbar
       :active-tool="activeTool"
       :shape-count="shapes.length"
@@ -719,6 +726,9 @@ function deleteSelectedShape(): void {
     <SolarPathPanel v-if="solarStore.motionPanel === 'solar-path'" @close="solarStore.setMotionPanel(null)" />
     <ObliquityPanel v-if="solarStore.motionPanel === 'obliquity'" @close="solarStore.setMotionPanel(null)" />
     <RotationSpeedPanel v-if="solarStore.motionPanel === 'rotation-speed'" @close="solarStore.setMotionPanel(null)" />
+    <ThermalCirculationPanel v-if="atmosphereStore.panel === 'circulation'" @close="atmosphereStore.setPanel(null)" />
+    <AtmosphereHeatingPanel v-if="atmosphereStore.panel === 'heating'" @close="atmosphereStore.setPanel(null)" />
+    <AtmosphereLayersPanel v-if="atmosphereStore.panel === 'layers'" @close="atmosphereStore.setPanel(null)" />
     <TimezonePanel v-if="timezoneComparison" :comparison="timezoneComparison" @clear="clearTimezone" />
     <ThematicLegend />
     <ThematicInfoCard />

@@ -2,7 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { summerFactor, winterFactor } from '@renderer/thematic/windField'
 
-export type ThematicLayerId = 'wind-particles' | 'pressure-belts' | 'koppen-zones' | 'frontal-cyclone' | 'rain-belt' | 'summer-monsoon' | 'winter-monsoon' | 'ocean-currents' | 'climate-zones' | 'coriolis-demo' | 'plate-tectonics' | 'temperature-zones'
+export type ThematicLayerId = 'wind-particles' | 'pressure-belts' | 'koppen-zones' | 'frontal-cyclone' | 'rain-belt' | 'summer-monsoon' | 'winter-monsoon' | 'ocean-currents' | 'climate-zones' | 'coriolis-demo' | 'plate-tectonics' | 'temperature-zones' | 'typhoon'
 
 export interface ThematicLayerMeta {
   id: ThematicLayerId
@@ -23,7 +23,8 @@ export const thematicLayerCatalog: ThematicLayerMeta[] = [
   { id: 'climate-zones', name: '中国气候区', description: '五大气候区示意' },
   { id: 'coriolis-demo', name: '地转偏向力演示', description: '水平运动物体的偏转轨迹（北右南左）' },
   { id: 'plate-tectonics', name: '板块运动与地震火山', description: '三大类板块边界、典型火山与近期地震（可点击查看成因）' },
-  { id: 'temperature-zones', name: '五带与直射点回归', description: '五带划分与回归线、极圈界线，直射点标记随日期时刻移动' }
+  { id: 'temperature-zones', name: '五带与直射点回归', description: '五带划分与回归线、极圈界线，直射点标记随日期时刻移动' },
+  { id: 'typhoon', name: '台风（热带气旋）', description: '台风眼、眼墙与螺旋雨带结构，叠加历史真实台风路径（可点击查看）' }
 ]
 
 const MONTHS_PER_SECOND = 0.5
@@ -44,7 +45,8 @@ export const useClimateStore = defineStore('climate', () => {
     'climate-zones': false,
     'coriolis-demo': false,
     'plate-tectonics': false,
-    'temperature-zones': false
+    'temperature-zones': false,
+    'typhoon': false
   })
 
   const summerStrength = computed(() => summerFactor(month.value))

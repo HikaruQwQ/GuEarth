@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { CloseOutlined } from '@ant-design/icons-vue'
 import { thematicLayerCatalog, useClimateStore, type ThematicLayerId } from '@renderer/stores/climate'
-import { useSolarStore } from '@renderer/stores/solar'
+import { useSolarStore, type MotionPanel as SolarMotionPanel } from '@renderer/stores/solar'
+import { useAtmosphereStore, type AtmospherePanel } from '@renderer/stores/atmosphere'
 import { useDrawingStore } from '@renderer/stores/drawing'
 
 interface LabEntry {
@@ -24,6 +25,7 @@ const emit = defineEmits<{ close: [] }>()
 
 const climateStore = useClimateStore()
 const solarStore = useSolarStore()
+const atmosphereStore = useAtmosphereStore()
 const drawingStore = useDrawingStore()
 
 function layerEntry(id: ThematicLayerId): LabEntry {
@@ -34,6 +36,32 @@ function layerEntry(id: ThematicLayerId): LabEntry {
     description: layer?.description ?? '',
     active: () => climateStore.overlays[id],
     toggle: () => climateStore.setOverlay(id, !climateStore.overlays[id])
+  }
+}
+
+function solarPanelEntry(panel: SolarMotionPanel, name: string, description: string): LabEntry {
+  return {
+    key: panel,
+    name,
+    description,
+    active: () => solarStore.motionPanel === panel,
+    toggle: () => {
+      atmosphereStore.setPanel(null)
+      solarStore.setMotionPanel(solarStore.motionPanel === panel ? null : panel)
+    }
+  }
+}
+
+function atmospherePanelEntry(panel: AtmospherePanel, name: string, description: string): LabEntry {
+  return {
+    key: panel,
+    name,
+    description,
+    active: () => atmosphereStore.panel === panel,
+    toggle: () => {
+      solarStore.setMotionPanel(null)
+      atmosphereStore.setPanel(atmosphereStore.panel === panel ? null : panel)
+    }
   }
 }
 
@@ -49,27 +77,9 @@ const chapters: LabChapter[] = [
         active: () => solarStore.active,
         toggle: () => solarStore.setActive(!solarStore.active)
       },
-      {
-        key: 'solar-path',
-        name: '太阳视运动轨迹',
-        description: '站在地面看天空：日出日落方位与正午太阳方位',
-        active: () => solarStore.motionPanel === 'solar-path',
-        toggle: () => solarStore.setMotionPanel(solarStore.motionPanel === 'solar-path' ? null : 'solar-path')
-      },
-      {
-        key: 'obliquity',
-        name: '黄赤交角可调探究',
-        description: '拖动交角，观察直射点范围与五带变化',
-        active: () => solarStore.motionPanel === 'obliquity',
-        toggle: () => solarStore.setMotionPanel(solarStore.motionPanel === 'obliquity' ? null : 'obliquity')
-      },
-      {
-        key: 'rotation-speed',
-        name: '自转速度与周期',
-        description: '角速度线速度随纬度变化、恒星日与太阳日',
-        active: () => solarStore.motionPanel === 'rotation-speed',
-        toggle: () => solarStore.setMotionPanel(solarStore.motionPanel === 'rotation-speed' ? null : 'rotation-speed')
-      },
+      solarPanelEntry('solar-path', '太阳视运动轨迹', '站在地面看天空：日出日落方位与正午太阳方位'),
+      solarPanelEntry('obliquity', '黄赤交角可调探究', '拖动交角，观察直射点范围与五带变化'),
+      solarPanelEntry('rotation-speed', '自转速度与周期', '角速度线速度随纬度变化、恒星日与太阳日'),
       {
         key: 'temperature-zones',
         name: '五带与直射点回归',
@@ -95,6 +105,10 @@ const chapters: LabChapter[] = [
     id: 'atmosphere',
     title: '第二章 · 地球上的大气',
     entries: [
+      atmospherePanelEntry('circulation', '热力环流', '海陆风、山谷风、城市风动画'),
+      atmospherePanelEntry('heating', '大气受热过程', '削弱作用与保温作用（温室效应）'),
+      atmospherePanelEntry('layers', '大气垂直分层', '各层高度-气温曲线与特征'),
+      layerEntry('typhoon'),
       layerEntry('pressure-belts'),
       layerEntry('wind-particles'),
       layerEntry('summer-monsoon'),

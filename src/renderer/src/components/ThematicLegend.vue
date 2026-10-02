@@ -43,6 +43,13 @@ const koppenEntries = koppenZones.map((zone) => ({ name: zone.name, color: zone.
       <div class="legend-item"><span class="swatch" style="background: #1677ff"></span><span>冷锋</span></div>
       <div class="legend-item"><span class="swatch" style="background: #69b1ff"></span><span>雨区</span></div>
     </div>
+    <div v-if="store.overlays['typhoon']" class="legend-group">
+      <div class="legend-item"><span class="swatch" style="background: #1677ff"></span><span>热带低压</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #faad14"></span><span>热带风暴</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #fa8c16"></span><span>台风</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #f5222d"></span><span>超强台风</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #fa541c"></span><span>历史台风路径与结构锚点</span></div>
+    </div>
     <div v-if="store.overlays['ocean-currents']" class="legend-group">
       <div class="legend-item"><span class="swatch" style="background: #f5222d"></span><span>暖流</span></div>
       <div class="legend-item"><span class="swatch" style="background: #1677ff"></span><span>寒流</span></div>
