@@ -2,6 +2,7 @@ import { onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
 import * as Cesium from 'cesium'
 import { useGlobeStore, providerCatalog, terrainCatalog, type ProviderMeta } from '@renderer/stores/globe'
 import type { PlaceSuggestion } from '../../../preload'
+import { createPolarCaps } from './polarCaps'
 
 interface LayerProvider {
   meta: ProviderMeta
@@ -12,9 +13,9 @@ const protocolTileUrl = (id: string, styleId: string): string => `guearth-tile:/
 const providerMeta = (id: string): ProviderMeta => providerCatalog.find((provider) => provider.id === id) ?? providerCatalog[0]
 
 const layerRegistry: Record<string, LayerProvider> = {
-  osm: { meta: providerMeta('osm'), createImageryProvider: async () => new Cesium.UrlTemplateImageryProvider({ url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', credit: '© OpenStreetMap contributors' }) },
-  'esri-imagery': { meta: providerMeta('esri-imagery'), createImageryProvider: async () => Cesium.ArcGisMapServerImageryProvider.fromUrl('https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer', { credit: '© Esri' }) },
-  opentopomap: { meta: providerMeta('opentopomap'), createImageryProvider: async () => new Cesium.UrlTemplateImageryProvider({ url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', subdomains: ['a', 'b', 'c'], credit: '© OpenTopoMap contributors' }) },
+  osm: { meta: providerMeta('osm'), createImageryProvider: async (styleId) => new Cesium.UrlTemplateImageryProvider({ url: protocolTileUrl('osm', styleId), credit: '© OpenStreetMap contributors' }) },
+  'esri-imagery': { meta: providerMeta('esri-imagery'), createImageryProvider: async (styleId) => new Cesium.UrlTemplateImageryProvider({ url: protocolTileUrl('esri-imagery', styleId), credit: '© Esri' }) },
+  opentopomap: { meta: providerMeta('opentopomap'), createImageryProvider: async (styleId) => new Cesium.UrlTemplateImageryProvider({ url: protocolTileUrl('opentopomap', styleId), credit: '© OpenTopoMap contributors' }) },
   baidu: { meta: providerMeta('baidu'), createImageryProvider: async (styleId) => new Cesium.UrlTemplateImageryProvider({ url: protocolTileUrl('baidu', styleId), credit: '© 百度地图' }) }
 }
 
@@ -37,6 +38,24 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
   const store = useGlobeStore()
   let generation = 0
   let selectedPlaceMarker: Cesium.Entity | undefined
+  let polarCaps: Cesium.Primitive | undefined
+
+  function updatePolarCapsVisibility(): void {
+    if (polarCaps && viewer.value) polarCaps.show = viewer.value.scene.mode === Cesium.SceneMode.SCENE3D
+  }
+
+  function applyTerrain(terrain: Cesium.TerrainProvider): void {
+    const currentViewer = viewer.value
+    if (!currentViewer || currentViewer.isDestroyed()) return
+    currentViewer.terrainProvider = terrain
+    if (polarCaps) currentViewer.scene.primitives.remove(polarCaps)
+    polarCaps = createPolarCaps(terrain)
+    if (polarCaps) {
+      polarCaps.appearance = new Cesium.PerInstanceColorAppearance({ flat: !store.terrainLighting, translucent: false })
+      currentViewer.scene.primitives.add(polarCaps)
+      updatePolarCapsVisibility()
+    }
+  }
 
   function updateCameraState(): void {
     const currentViewer = viewer.value
@@ -110,13 +129,13 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     try {
       const terrain = await create()
       if (!viewer.value || viewer.value.isDestroyed() || expectedGeneration !== generation) return
-      viewer.value.terrainProvider = terrain
+      applyTerrain(terrain)
       store.setTerrainError('')
     } catch (error) {
       store.setTerrainError(error instanceof Error ? error.message : `${terrainName(id)} 加载失败`)
       if (id !== 'ellipsoid') {
         const fallback = await terrainRegistry.ellipsoid()
-        if (viewer.value && !viewer.value.isDestroyed() && expectedGeneration === generation) viewer.value.terrainProvider = fallback
+        if (viewer.value && !viewer.value.isDestroyed() && expectedGeneration === generation) applyTerrain(fallback)
       }
     }
   }
@@ -219,6 +238,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
         const initialMode = store.sceneMode === '2D' ? Cesium.SceneMode.SCENE2D : Cesium.SceneMode.SCENE3D
         viewer.value.scene.mode = initialMode
         applyTerrainRendering()
+        viewer.value.scene.preUpdate.addEventListener(updatePolarCapsVisibility)
         viewer.value.camera.moveEnd.addEventListener(updateCameraState)
         updateCameraState()
         const initialLayerId = store.selectedLayerId
@@ -245,9 +265,11 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     const currentViewer = viewer.value
     if (!currentViewer || currentViewer.isDestroyed()) return
     currentViewer.camera.moveEnd.removeEventListener(updateCameraState)
+    currentViewer.scene.preUpdate.removeEventListener(updatePolarCapsVisibility)
     currentViewer.destroy()
     viewer.value = undefined
     selectedPlaceMarker = undefined
+    polarCaps = undefined
     imageryLayers.clear()
   })
 
@@ -261,6 +283,11 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     toggleLevelView,
     setTerrain: (id: string) => { store.setTerrainProvider(id); void setTerrain(id, generation) },
     setTerrainExaggeration: (value: number) => { store.setTerrainExaggeration(value); const currentViewer = viewer.value; if (currentViewer && !currentViewer.isDestroyed()) currentViewer.scene.verticalExaggeration = store.terrainExaggeration },
-    setTerrainLighting: (value: boolean) => { store.setTerrainLighting(value); const currentViewer = viewer.value; if (currentViewer && !currentViewer.isDestroyed()) currentViewer.scene.globe.enableLighting = value }
+    setTerrainLighting: (value: boolean) => {
+      store.setTerrainLighting(value)
+      const currentViewer = viewer.value
+      if (currentViewer && !currentViewer.isDestroyed()) currentViewer.scene.globe.enableLighting = value
+      if (polarCaps) polarCaps.appearance = new Cesium.PerInstanceColorAppearance({ flat: !value, translucent: false })
+    }
   }
 }
