@@ -2,7 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { summerFactor, winterFactor } from '@renderer/thematic/windField'
 
-export type ThematicLayerId = 'wind-particles' | 'pressure-belts' | 'koppen-zones' | 'frontal-cyclone' | 'rain-belt' | 'summer-monsoon' | 'winter-monsoon' | 'ocean-currents' | 'climate-zones' | 'coriolis-demo'
+export type ThematicLayerId = 'wind-particles' | 'pressure-belts' | 'koppen-zones' | 'frontal-cyclone' | 'rain-belt' | 'summer-monsoon' | 'winter-monsoon' | 'ocean-currents' | 'climate-zones' | 'coriolis-demo' | 'plate-tectonics'
 
 export interface ThematicLayerMeta {
   id: ThematicLayerId
@@ -20,7 +20,8 @@ export const thematicLayerCatalog: ThematicLayerMeta[] = [
   { id: 'winter-monsoon', name: '冬季风风向', description: '偏北气流路径' },
   { id: 'ocean-currents', name: '世界洋流', description: '暖流与寒流分布' },
   { id: 'climate-zones', name: '中国气候区', description: '五大气候区示意' },
-  { id: 'coriolis-demo', name: '地转偏向力演示', description: '水平运动物体的偏转轨迹（北右南左）' }
+  { id: 'coriolis-demo', name: '地转偏向力演示', description: '水平运动物体的偏转轨迹（北右南左）' },
+  { id: 'plate-tectonics', name: '板块运动与地震火山', description: '三大类板块边界、典型火山与近期地震（可点击查看成因）' }
 ]
 
 const MONTHS_PER_SECOND = 0.5
@@ -39,7 +40,8 @@ export const useClimateStore = defineStore('climate', () => {
     'winter-monsoon': false,
     'ocean-currents': false,
     'climate-zones': false,
-    'coriolis-demo': false
+    'coriolis-demo': false,
+    'plate-tectonics': false
   })
 
   const summerStrength = computed(() => summerFactor(month.value))

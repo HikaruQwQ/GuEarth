@@ -9,6 +9,7 @@ import { AiSettingsStore } from './ai/settingsStore'
 import { registerAiIpcHandlers } from './ai/agent'
 import { searchPlaces } from './ai/amap'
 import { searchBaiduPlaces } from './ai/baidu'
+import { initDatasets, loadEarthquakeFeed } from './datasets'
 
 interface PersistedSettings {
   selectedImageryProviderId: string
@@ -345,6 +346,7 @@ function registerIpcHandlers(): void {
     const searchProvider = provider ?? (hasProviderKey('amap') ? 'amap' : hasProviderKey('baidu') ? 'baidu' : 'amap')
     return searchProvider === 'baidu' ? searchBaiduPlaces(keyword) : searchPlaces(keyword)
   })
+  ipcMain.handle('datasets:earthquakes', () => loadEarthquakeFeed())
   ipcMain.handle('tiles:get', (_event, key: TileKey) => readTile(key))
   ipcMain.handle('tiles:put', (_event, entry: TileCacheEntry) => writeTile(entry))
   ipcMain.handle('tiles:clear', (_event, providerId?: string) => {
@@ -405,6 +407,7 @@ app.whenReady().then(() => {
   tileCachePath = join(userDataPath, 'tile-cache')
   annotationsPath = join(userDataPath, 'annotations.json')
   initKeyVault(join(userDataPath, 'credentials'))
+  initDatasets(userDataPath)
   mkdirSync(tileCachePath, { recursive: true })
   settings = readSettings()
   shapes = readShapes()

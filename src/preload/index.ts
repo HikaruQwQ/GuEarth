@@ -124,6 +124,20 @@ export interface PlaceSearchResult {
   error?: string
 }
 
+export interface EarthquakeEvent {
+  magnitude: number
+  longitude: number
+  latitude: number
+  depthKm: number
+  place: string
+  time: number
+}
+
+export interface EarthquakeFeed {
+  fetchedAt: number
+  events: EarthquakeEvent[]
+}
+
 export type PlaceSearchProvider = 'amap' | 'baidu'
 
 const api = {
@@ -152,6 +166,9 @@ const api = {
   },
   places: {
     search: (keyword: string, provider?: PlaceSearchProvider): Promise<PlaceSearchResult> => ipcRenderer.invoke('places:search', keyword, provider)
+  },
+  datasets: {
+    getEarthquakes: (): Promise<EarthquakeFeed> => ipcRenderer.invoke('datasets:earthquakes')
   },
   ai: {
     getSettings: (): Promise<AiSettings> => ipcRenderer.invoke('ai:get-settings'),

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { AimOutlined, AppstoreOutlined, BorderOuterOutlined, BulbOutlined, ClearOutlined, ColumnWidthOutlined, EnvironmentOutlined, EyeOutlined, FieldTimeOutlined, GatewayOutlined, HomeOutlined, NodeIndexOutlined, RobotOutlined, TagsOutlined } from '@ant-design/icons-vue'
+import { AimOutlined, AppstoreOutlined, BorderOuterOutlined, ClearOutlined, ColumnWidthOutlined, EnvironmentOutlined, ExperimentOutlined, EyeOutlined, GatewayOutlined, HomeOutlined, NodeIndexOutlined, RobotOutlined, TagsOutlined } from '@ant-design/icons-vue'
 import { Button, Tooltip } from 'ant-design-vue'
 import type { Component } from 'vue'
 import type { DrawTool } from '@renderer/stores/drawing'
@@ -10,7 +10,7 @@ const props = defineProps<{
   shapeCount: number
   levelViewActive: boolean
   levelViewVisible: boolean
-  solarActive: boolean
+  labActive: boolean
 }>()
 
 defineEmits<{
@@ -21,7 +21,7 @@ defineEmits<{
   tool: [tool: DrawTool]
   clearShapes: []
   toggleLevelView: []
-  toggleSolar: []
+  toggleLab: []
 }>()
 
 const tools: { id: DrawTool; label: string; icon: Component }[] = [
@@ -29,8 +29,7 @@ const tools: { id: DrawTool; label: string; icon: Component }[] = [
   { id: 'line', label: '绘制线', icon: NodeIndexOutlined },
   { id: 'polygon', label: '绘制多边形', icon: GatewayOutlined },
   { id: 'distance', label: '测量距离', icon: ColumnWidthOutlined },
-  { id: 'area', label: '测量面积', icon: BorderOuterOutlined },
-  { id: 'timezone', label: '时区对比', icon: FieldTimeOutlined }
+  { id: 'area', label: '测量面积', icon: BorderOuterOutlined }
 ]
 
 const levelViewIcon = computed(() => (props.levelViewActive ? EyeOutlined : AimOutlined))
@@ -50,9 +49,9 @@ const levelViewTooltip = computed(() => (props.levelViewActive ? '恢复俯视�
           <AppstoreOutlined />
         </a-button>
       </a-tooltip>
-      <a-tooltip title="太阳光照" placement="top">
-        <a-button type="text" class="toolbar-btn" :class="{ active: solarActive }" aria-label="太阳光照" @click="$emit('toggleSolar')">
-          <BulbOutlined />
+      <a-tooltip title="地理实验室" placement="top">
+        <a-button type="text" class="toolbar-btn" :class="{ active: labActive }" aria-label="地理实验室" @click="$emit('toggleLab')">
+          <ExperimentOutlined />
         </a-button>
       </a-tooltip>
     </div>

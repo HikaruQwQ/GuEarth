@@ -1,5 +1,6 @@
 import { onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import * as Cesium from 'cesium'
+import type { EarthquakeEvent, EarthquakeFeed } from '../../../preload'
 import { thematicLayerCatalog, useClimateStore, type ThematicLayerId } from '@renderer/stores/climate'
 import { beltLabel, beltLabelPosition, beltOpacity, beltRing } from '@renderer/thematic/rainBelt'
 import { summerMonsoonArrows, winterMonsoonArrows, type MonsoonArrow } from '@renderer/thematic/monsoonArrows'
@@ -8,6 +9,8 @@ import { climateZones } from '@renderer/thematic/climateZones'
 import { coriolisDemos, sampleTrack } from '@renderer/thematic/coriolis'
 import { beltCenter, beltRingDegrees, pressureBelts, windBeltLatitude, windBelts, type PressureBeltSpec, type WindBeltSpec } from '@renderer/thematic/pressureBelts'
 import { koppenZones } from '@renderer/thematic/koppenZones'
+import { nearestBoundary, plateBoundaries, plateBoundaryKindName } from '@renderer/thematic/plateBoundaries'
+import { volcanoes } from '@renderer/thematic/volcanoes'
 
 const WARM_COLOR = '#f5222d'
 const COLD_COLOR = '#1677ff'
@@ -16,6 +19,10 @@ const CORIOLIS_NORTH_COLOR = '#1677ff'
 const CORIOLIS_SOUTH_COLOR = '#fa8c16'
 const CORIOLIS_INERTIAL_COLOR = 'rgba(0, 0, 0, 0.45)'
 const WIND_BELT_COLOR = '#722ed1'
+const PLATE_DIVERGENT_COLOR = '#1677ff'
+const PLATE_CONVERGENT_COLOR = '#f5222d'
+const PLATE_TRANSFORM_COLOR = '#fa8c16'
+const VOLCANO_COLOR = '#fa541c'
 const FRONTAL_CYCLONE_LON = 125
 const FRONTAL_CYCLONE_LAT = 34
 const BELT_LABEL_LON = 150
@@ -463,6 +470,130 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     })
   }
 
+  function plateBoundaryColor(kind: 'divergent' | 'convergent' | 'transform'): Cesium.Color {
+    return Cesium.Color.fromCssColorString(
+      kind === 'divergent' ? PLATE_DIVERGENT_COLOR : kind === 'convergent' ? PLATE_CONVERGENT_COLOR : PLATE_TRANSFORM_COLOR
+    )
+  }
+
+  function quakeStyle(magnitude: number): { color: string; pixelSize: number } {
+    if (magnitude >= 7) return { color: '#f5222d', pixelSize: 12 }
+    if (magnitude >= 6.5) return { color: '#fa541c', pixelSize: 9 }
+    if (magnitude >= 5.5) return { color: '#fa8c16', pixelSize: 7 }
+    return { color: '#faad14', pixelSize: 5 }
+  }
+
+  function earthquakeSummary(event: EarthquakeEvent): string {
+    const nearest = nearestBoundary(event.longitude, event.latitude)
+    const distanceKm = Math.round(nearest.distanceKm)
+    const boundaryNote = distanceKm <= 600
+      ? `震中位于「${nearest.boundary.name}」（${plateBoundaryKindName[nearest.boundary.kind]}）约 ${distanceKm} 千米处，与板块运动关系密切。`
+      : `震中距最近的板块边界「${nearest.boundary.name}」约 ${distanceKm} 千米，属板块内部（板缘远端）的地震活动。`
+    return `${event.place}发生 M${event.magnitude} 地震，震源深度约 ${event.depthKm} 千米。${boundaryNote}地震是地壳应力积累超过岩层强度后快速释放能量并以地震波传播的结果，全球地震大多分布于板块边界及其附近。`
+  }
+
+  async function addEarthquakeEntities(dataSource: Cesium.CustomDataSource): Promise<void> {
+    let feed: EarthquakeFeed
+    try {
+      feed = await window.guEarth.datasets.getEarthquakes()
+    } catch {
+      return
+    }
+    if (sources.get('plate-tectonics') !== dataSource) return
+    for (const event of feed.events) {
+      const style = quakeStyle(event.magnitude)
+      dataSource.entities.add({
+        properties: new Cesium.PropertyBag({
+          name: `M${event.magnitude} 地震`,
+          layerId: 'plate-tectonics',
+          summary: earthquakeSummary(event)
+        }),
+        position: Cesium.Cartesian3.fromDegrees(event.longitude, event.latitude),
+        point: {
+          pixelSize: style.pixelSize,
+          color: Cesium.Color.fromCssColorString(style.color),
+          outlineColor: Cesium.Color.WHITE,
+          outlineWidth: 1.5,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: 10_000
+        }
+      })
+    }
+  }
+
+  function buildPlateTectonics(dataSource: Cesium.CustomDataSource): void {
+    for (const boundary of plateBoundaries) {
+      const color = plateBoundaryColor(boundary.kind)
+      const properties = new Cesium.PropertyBag({
+        name: boundary.name,
+        layerId: 'plate-tectonics',
+        summary: `${plateBoundaryKindName[boundary.kind]}。${boundary.summary}`
+      })
+      dataSource.entities.add({
+        properties,
+        polyline: {
+          positions: toCartesians(boundary.path),
+          clampToGround: true,
+          width: boundary.kind === 'convergent' ? 4.5 : 3,
+          material: color.withAlpha(0.9)
+        }
+      })
+      const mid = pathPointAt(boundary.path, 0.55)
+      dataSource.entities.add({
+        properties,
+        position: Cesium.Cartesian3.fromDegrees(mid.position[0], mid.position[1]),
+        label: {
+          text: boundary.name,
+          font: labelFont(12, 600),
+          fillColor: color,
+          outlineColor: Cesium.Color.WHITE,
+          outlineWidth: 2,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          pixelOffset: new Cesium.Cartesian2(0, -10),
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: 10_000,
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 7000000)
+        }
+      })
+    }
+    for (const volcano of volcanoes) {
+      const color = Cesium.Color.fromCssColorString(VOLCANO_COLOR)
+      const properties = new Cesium.PropertyBag({
+        name: `${volcano.name}（${volcano.region}）`,
+        layerId: 'plate-tectonics',
+        summary: `${volcano.summary}海拔约 ${volcano.heightM} 米。火山是岩浆喷出地表形成的山体，多分布于板块边界（尤其消亡边界）与地壳薄弱地带。`
+      })
+      dataSource.entities.add({
+        properties,
+        polygon: {
+          hierarchy: new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray([
+            volcano.lon, volcano.lat + 0.55,
+            volcano.lon - 0.42, volcano.lat - 0.3,
+            volcano.lon + 0.42, volcano.lat - 0.3
+          ])),
+          material: color.withAlpha(0.95)
+        }
+      })
+      dataSource.entities.add({
+        properties,
+        position: Cesium.Cartesian3.fromDegrees(volcano.lon, volcano.lat),
+        label: {
+          text: volcano.name,
+          font: labelFont(11, 600),
+          fillColor: color,
+          outlineColor: Cesium.Color.WHITE,
+          outlineWidth: 2,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          pixelOffset: new Cesium.Cartesian2(0, -12),
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: 10_000,
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2600000)
+        }
+      })
+    }
+    void addEarthquakeEntities(dataSource)
+  }
+
   const builders: Record<ThematicLayerId, (dataSource: Cesium.CustomDataSource) => void> = {
     'wind-particles': () => undefined,
     'pressure-belts': buildPressureBelts,
@@ -473,7 +604,8 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     'winter-monsoon': (dataSource) => buildMonsoonArrows(dataSource, 'winter'),
     'ocean-currents': buildOceanCurrents,
     'climate-zones': buildClimateZones,
-    'coriolis-demo': buildCoriolis
+    'coriolis-demo': buildCoriolis,
+    'plate-tectonics': buildPlateTectonics
   }
 
   const enableViews: Partial<Record<ThematicLayerId, LayerView>> = {
@@ -484,7 +616,8 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     'summer-monsoon': { longitude: 96, latitude: 24, height: 7500000 },
     'winter-monsoon': { longitude: 108, latitude: 32, height: 7500000 },
     'climate-zones': { longitude: 104, latitude: 34, height: 5200000 },
-    'coriolis-demo': { longitude: 100, latitude: 0, height: 12000000 }
+    'coriolis-demo': { longitude: 100, latitude: 0, height: 12000000 },
+    'plate-tectonics': { longitude: 180, latitude: 5, height: 17000000 }
   }
 
   function syncOverlays(): void {

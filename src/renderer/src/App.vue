@@ -14,6 +14,7 @@ import { useDrawing, measureShape } from '@renderer/composables/useDrawing'
 import { useThematicLayers } from '@renderer/composables/useThematicLayers'
 import { useTimezoneCompare } from '@renderer/composables/useTimezoneCompare'
 import { datePartsOf, dayLength, declinationForDate, formatClock, isValidDate, noonAltitudeDeg, sunTimes } from '@renderer/thematic/solarMath'
+import { nearestBoundary, plateBoundaryKindName } from '@renderer/thematic/plateBoundaries'
 import GlobeToolbar from '@renderer/components/GlobeToolbar.vue'
 import CameraStatus from '@renderer/components/CameraStatus.vue'
 import LayerPanel from '@renderer/components/LayerPanel.vue'
@@ -26,6 +27,7 @@ import TimezonePanel from '@renderer/components/TimezonePanel.vue'
 import ThematicLegend from '@renderer/components/ThematicLegend.vue'
 import FrontalCyclone from '@renderer/components/FrontalCyclone.vue'
 import ThematicInfoCard from '@renderer/components/ThematicInfoCard.vue'
+import TeachingLab from '@renderer/components/TeachingLab.vue'
 import EoqAssistant from '@renderer/components/EoqAssistant.vue'
 import AiSettingsModal from '@renderer/components/AiSettingsModal.vue'
 
@@ -63,6 +65,8 @@ const isAnnotationPanelOpen = ref(false)
 const annotationDraft = ref('')
 const selectedShape = computed(() => shapes.value.find((shape) => shape.id === selectedShapeId.value) ?? null)
 const levelSwitcherVisible = computed(() => isGlobeReady.value && camera.value.height < 5000000)
+const isLabOpen = ref(false)
+const labActive = computed(() => climateStore.hasActiveOverlay || solarStore.active || activeTool.value === 'timezone')
 const drawHint = computed(() => {
   if (!activeTool.value) return ''
   if (activeTool.value === 'timezone') return '单击选取两个地点对比地方时 · Esc 退出'
@@ -501,6 +505,57 @@ aiStore.registerTool({
   }
 })
 
+aiStore.registerTool({
+  definition: {
+    name: 'explain_landform',
+    description: '查询某 WGS-84 经纬度的地表海拔与最近的板块边界（名称、边界类型、距离），用于分析地貌成因、讲解板块运动与地表形态塑造。',
+    parameters: {
+      type: 'object',
+      properties: {
+        longitude: { type: 'number', description: '经度（WGS-84，-180 到 180）' },
+        latitude: { type: 'number', description: '纬度（WGS-84，-90 到 90）' }
+      },
+      required: ['longitude', 'latitude']
+    }
+  },
+  execute: async (args) => {
+    const current = viewer.value
+    if (!current || current.isDestroyed()) return { error: '地球尚未就绪' }
+    const longitude = Number(args.longitude)
+    const latitude = Number(args.latitude)
+    if (!Number.isFinite(longitude) || !Number.isFinite(latitude) || longitude < -180 || longitude > 180 || latitude < -90 || latitude > 90) return { error: '坐标无效，需要 WGS-84 经纬度' }
+    const cartographic = Cesium.Cartographic.fromDegrees(longitude, latitude)
+    let heightMeters: number | null = null
+    try {
+      const [sampled] = await Cesium.sampleTerrainMostDetailed(current.terrainProvider, [cartographic.clone()])
+      if (sampled && Number.isFinite(sampled.height)) heightMeters = Math.round(sampled.height * 100) / 100
+    } catch {
+      void 0
+    }
+    if (heightMeters === null) {
+      const fallback = current.scene.globe.getHeight(cartographic)
+      if (typeof fallback === 'number' && Number.isFinite(fallback)) heightMeters = Math.round(fallback * 100) / 100
+    }
+    const nearest = nearestBoundary(longitude, latitude)
+    const distanceKm = Math.round(nearest.distanceKm)
+    return {
+      longitude,
+      latitude,
+      heightMeters: heightMeters ?? undefined,
+      heightNote: heightMeters === null ? '该位置地形数据暂不可用' : undefined,
+      nearestBoundary: {
+        name: nearest.boundary.name,
+        kind: nearest.boundary.kind,
+        kindName: plateBoundaryKindName[nearest.boundary.kind],
+        distanceKm
+      },
+      hint: distanceKm <= 600
+        ? '距板块边界较近，地貌成因以内力作用为主（板块碰撞挤压、俯冲、岩浆活动），可再结合外力作用分析'
+        : '距板块边界较远，属板内环境，重点考虑外力作用（流水、风力、冰川、海浪）与岩石性质、地质构造'
+    }
+  }
+})
+
 watch(selectedShape, (shape) => {
   annotationDraft.value = shape?.annotation ?? ''
 })
@@ -582,8 +637,8 @@ function handleLevelViewToggle(): void {
   toggleLevelView()
 }
 
-function handleToggleSolar(): void {
-  solarStore.setActive(!solarStore.active)
+function handleToggleLab(): void {
+  isLabOpen.value = !isLabOpen.value
 }
 
 function handleTool(tool: DrawTool): void {
@@ -624,7 +679,7 @@ function deleteSelectedShape(): void {
       :shape-count="shapes.length"
       :level-view-active="levelViewActive"
       :level-view-visible="levelSwitcherVisible"
-      :solar-active="solarStore.active"
+      :lab-active="labActive"
       @open-layers="handleOpenLayers"
       @open-annotations="handleOpenAnnotations"
       @open-assistant="handleOpenAssistant"
@@ -632,8 +687,9 @@ function deleteSelectedShape(): void {
       @tool="handleTool"
       @clear-shapes="handleClearShapes"
       @toggle-level-view="handleLevelViewToggle"
-      @toggle-solar="handleToggleSolar"
+      @toggle-lab="handleToggleLab"
     />
+    <TeachingLab :open="isLabOpen" @close="isLabOpen = false" />
     <PlaceSearchBox @select="flyToPlace" />
     <MonthTimeline />
     <SolarTimePanel />
