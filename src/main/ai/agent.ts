@@ -21,6 +21,10 @@ const SYSTEM_PROMPT = [
   '- 用户想找山峰、火山或按地形选点时：请用户先把视野缩放到目标区域，再用 find_peaks 检索，把结果中的典型山峰逐个 fly_to 展示。',
   '- 话题涉及季节变化（季风、气压带风带、雨带）时：用 set_month 切换到对应月份演示；解释气候成因或比较两地气候时：先对相关地点调用 explain_climate 获取气候区、纬度带与海拔背景，再结合海陆位置、大气环流、地形与洋流解释成因。',
   '- 话题涉及资源配置（南水北调、西气东输、西电东送）、能源安全、粮食基地、核电站、水电站、资源型城市、台风路径或经纬网定位时：调用 open_layer 打开对应教学图层并自动飞往展示，再结合图层内容讲解；不需要时可用 visible=false 关闭。',
+  '- 需要在地图上标注地点时：add_marker 添加命名标记点（返回 id）；draw_shape 绘制线或多边形，省略 name 时自动标注长度或面积，适合测距、测面、展示边界与路线。',
+  '- 添加标记或绘图后，用 fly_to 飞往该处向用户展示；讲解时可引用工具返回的 measurement 数值。',
+  '- 用户要删除标记或图形时：先用 list_shapes 查看现有标注（含 id 与名称），再调用 remove_shape 按 id 或名称删除。',
+  '- 用户让你看当前画面（“看看这里”“这是不是某种地貌”“我在看哪里”）时：先调用 capture_view 获取当前视角截图与地理范围，再结合画面、地形与地理知识判断；截图以图片形式提供，若当前模型不支持图像输入，则依据返回的 camera 与 extent 文本作答。',
   '- 工具返回 error 字段时，向用户说明原因（例如需要在图层面板配置高德密钥），不要编造坐标。',
   '不要在回答中输出 markdown 标题或表格，使用简洁的分段与短列表。'
 ].join('\n')
@@ -57,11 +61,18 @@ interface WireMessage {
   callId?: string
   name?: string
   isError?: boolean
+  image?: ToolImage
+}
+
+interface ToolImage {
+  data: string
+  mediaType: string
 }
 
 interface ToolOutcome {
   ok: boolean
   content: string
+  image?: ToolImage
 }
 
 interface AgentSession {
@@ -88,6 +99,25 @@ function safeParseJson(text: string): Record<string, unknown> {
 function clampToolResult(value: string): string {
   if (value.length <= TOOL_RESULT_LIMIT) return value
   return `${value.slice(0, TOOL_RESULT_LIMIT / 2)}\n…(结果过长已截断)…\n${value.slice(-TOOL_RESULT_LIMIT / 2)}`
+}
+
+function extractImage(value: unknown): ToolImage | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const image = (value as Record<string, unknown>).image
+  if (typeof image !== 'string') return undefined
+  const match = /^data:([^;]+);base64,(.+)$/.exec(image)
+  return match ? { mediaType: match[1], data: match[2] } : undefined
+}
+
+function withoutImage(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null) return value
+  const { image, ...rest } = value as Record<string, unknown>
+  return image === undefined ? value : rest
+}
+
+function imageUnsupported(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /image|vision|multimodal|modal|unsupported|不支持|图片/i.test(message)
 }
 
 function stringifyArgSummary(args: unknown): string {
@@ -143,7 +173,16 @@ function toOpenAiMessages(messages: WireMessage[]): unknown[] {
       }
       return entry
     }
-    return { role: 'tool', tool_call_id: message.callId, content: message.content }
+    return {
+      role: 'tool',
+      tool_call_id: message.callId,
+      content: message.image
+        ? [
+            { type: 'text', text: message.content },
+            { type: 'image_url', image_url: { url: `data:${message.image.mediaType};base64,${message.image.data}` } }
+          ]
+        : message.content
+    }
   })
 }
 
@@ -164,7 +203,13 @@ function toAnthropicMessages(messages: WireMessage[]): unknown[] {
       result.push({ role: 'assistant', content: blocks.length ? blocks : [{ type: 'text', text: '' }] })
       continue
     }
-    const block = { type: 'tool_result', tool_use_id: message.callId, content: message.content, is_error: message.isError === true }
+    const content = message.image
+      ? [
+          { type: 'text', text: message.content },
+          { type: 'image', source: { type: 'base64', media_type: message.image.mediaType, data: message.image.data } }
+        ]
+      : message.content
+    const block = { type: 'tool_result', tool_use_id: message.callId, content, is_error: message.isError === true }
     const last = result[result.length - 1]
     if (last && last.role === 'user' && Array.isArray(last.content)) last.content.push(block)
     else result.push({ role: 'user', content: [block] })
@@ -451,18 +496,34 @@ async function runAgent(options: {
   const toolset: AiToolDefinition[] = [...tools.filter((tool) => tool.name !== 'search_place'), SEARCH_PLACE_TOOL]
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
-    const requestMessages = trimHistory(messages, model.contextWindow)
+    let requestMessages = trimHistory(messages, model.contextWindow)
     const runTurn = provider.protocol === 'anthropic' ? runAnthropicTurn : runOpenAiTurn
-    const result = await runTurn({
-      provider,
-      model,
-      apiKey,
-      messages: requestMessages,
-      tools: toolset,
-      signal,
-      onTextDelta: (text) => send({ sessionId, type: 'text-delta', text }),
-      onReasoningDelta: (text) => send({ sessionId, type: 'reasoning-delta', text })
-    })
+    let result: RequestResult
+    try {
+      result = await runTurn({
+        provider,
+        model,
+        apiKey,
+        messages: requestMessages,
+        tools: toolset,
+        signal,
+        onTextDelta: (text) => send({ sessionId, type: 'text-delta', text }),
+        onReasoningDelta: (text) => send({ sessionId, type: 'reasoning-delta', text })
+      })
+    } catch (error) {
+      if (signal.aborted || !requestMessages.some((message) => message.image) || !imageUnsupported(error)) throw error
+      requestMessages = requestMessages.map((message) => (message.image ? { ...message, image: undefined } : message))
+      result = await runTurn({
+        provider,
+        model,
+        apiKey,
+        messages: requestMessages,
+        tools: toolset,
+        signal,
+        onTextDelta: (text) => send({ sessionId, type: 'text-delta', text }),
+        onReasoningDelta: (text) => send({ sessionId, type: 'reasoning-delta', text })
+      })
+    }
     if (!result.toolCalls.length) {
       messages.push({ role: 'assistant', content: result.text })
       send({ sessionId, type: 'done' })
@@ -472,7 +533,7 @@ async function runAgent(options: {
     for (const call of result.toolCalls) {
       const outcome = await executeTool(sender, sessionId, call.name, call.arguments)
       send({ sessionId, type: 'tool-end', callId: outcome.callId, ok: outcome.ok, summary: outcome.summary, result: outcome.content })
-      messages.push({ role: 'tool', content: outcome.content, callId: call.id, name: call.name, isError: !outcome.ok })
+      messages.push({ role: 'tool', content: outcome.content, callId: call.id, name: call.name, isError: !outcome.ok, image: outcome.image })
     }
   }
   send({ sessionId, type: 'error', message: '工具调用轮次过多，已停止' })
@@ -482,6 +543,11 @@ function summarizeToolResult(content: string): string {
   const parsed = safeParseJson(content)
   if (typeof parsed.error === 'string') return parsed.error.slice(0, 60)
   if (Array.isArray(parsed.places)) return `${parsed.places.length} 个地点`
+  if (parsed.screenshot) return '已截图'
+  if (Array.isArray(parsed.shapes)) return `${parsed.shapes.length} 个标注`
+  if (typeof parsed.removed === 'number') return `已删除 ${parsed.removed} 个标注`
+  if (typeof parsed.name === 'string' && parsed.name) return parsed.kind === 'point' ? `已添加标记「${parsed.name}」` : `已绘制「${parsed.name}」`
+  if (typeof parsed.measurement === 'string' && parsed.measurement) return parsed.measurement
   if (typeof parsed.height === 'number') return `海拔 ${Math.round(parsed.height)} m`
   if (typeof parsed.longitude === 'number') return '已定位'
   return '完成'
@@ -547,8 +613,9 @@ export function registerAiIpcHandlers(settingsStore: AiSettingsStore): void {
     if (!entry) return
     clearTimeout(entry.timer)
     pendingRendererTools.delete(callId)
-    const payload = clampToolResult(typeof result === 'string' ? result : JSON.stringify(result ?? {}) ?? '{}')
-    entry.resolve({ ok: ok === true, content: payload || '{}' })
+    const image = extractImage(result)
+    const payload = clampToolResult(typeof result === 'string' ? result : JSON.stringify(withoutImage(result) ?? {}) ?? '{}')
+    entry.resolve({ ok: ok === true, content: payload || '{}', image })
   })
 }
 

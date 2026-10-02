@@ -3,9 +3,11 @@ import { computed, ref, watch } from 'vue'
 import { CloseOutlined, DeleteOutlined, MoreOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons-vue'
 import { basemapCategories, providerCatalog, credentialOnlyProviders, terrainCatalog, type LayerMeta, type ProviderMeta } from '@renderer/stores/globe'
 import { useTeachingStore } from '@renderer/stores/teaching'
+import { thematicLayerCatalog, useClimateStore } from '@renderer/stores/climate'
 import type { TeachingLayerCategory } from '@renderer/teaching/registry'
 
 const teachingStore = useTeachingStore()
+const climateStore = useClimateStore()
 
 const TEACHING_CATEGORY_LABELS: Record<TeachingLayerCategory, string> = {
   skills: '地理技能',
@@ -189,6 +191,29 @@ function clearCredential(): void {
       </section>
 
       <section class="panel-section">
+        <div class="section-heading"><span>专题图层</span></div>
+        <div class="thematic-list">
+          <div
+            v-for="layer in thematicLayerCatalog"
+            :key="layer.id"
+            class="thematic-item"
+            role="checkbox"
+            tabindex="0"
+            :aria-checked="climateStore.overlays[layer.id]"
+            :aria-label="`切换${layer.name}`"
+            @click="climateStore.setOverlay(layer.id, !climateStore.overlays[layer.id])"
+            @keydown.enter="climateStore.setOverlay(layer.id, !climateStore.overlays[layer.id])"
+          >
+            <a-checkbox :checked="climateStore.overlays[layer.id]" tabindex="-1" />
+            <div class="basemap-copy">
+              <div class="basemap-name">{{ layer.name }}</div>
+              <div class="basemap-description">{{ layer.description }}</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel-section">
         <div class="section-heading"><span>3D 地形</span></div>
         <a-select :value="terrainProviderId" class="full-select" @change="(value: string) => emit('terrain', value)">
           <a-select-option v-for="option in terrainCatalog" :key="option.id" :value="option.id" :title="option.description">{{ option.name }}</a-select-option>
@@ -262,5 +287,5 @@ function clearCredential(): void {
 </template>
 
 <style scoped>
-.panel-title{display:flex;align-items:center;justify-content:space-between;width:100%}h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28px}.panel-alert{margin-bottom:16px}.layer-spin{display:block;min-height:168px}.panel-section{padding:0 0 16px;margin:0 0 16px;border-bottom:1px solid rgba(5,5,5,.06)}.panel-section:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none}.section-heading{display:flex;align-items:center;justify-content:space-between;margin:0 0 8px;color:rgba(0,0,0,.65);font-size:12px;line-height:20px}.full-select{width:100%}.cache-row{display:flex;align-items:center;justify-content:space-between}.terrain-slider-head{display:flex;align-items:center;justify-content:space-between;margin-top:12px;color:rgba(0,0,0,.65);font-size:13px;line-height:20px}.terrain-lighting-row{display:flex;align-items:center;justify-content:space-between;margin-top:4px;color:rgba(0,0,0,.65);font-size:13px;line-height:20px}.terrain-alert{margin-top:8px}.key-input{margin-top:8px}.credential-hint{margin-top:8px}.key-actions{display:flex;gap:8px;margin-top:8px}.basemap-item{display:flex;align-items:center;gap:4px;min-height:48px;padding:6px 8px;border-radius:6px;cursor:pointer}.basemap-item.selected{background:rgba(22,119,255,.06)}.basemap-copy{flex:1;min-width:0;margin-left:4px}.basemap-name{color:rgba(0,0,0,.88);font-size:14px;line-height:22px}.basemap-description{overflow:hidden;color:rgba(0,0,0,.45);font-size:12px;line-height:20px;text-overflow:ellipsis;white-space:nowrap}.more-button{color:rgba(0,0,0,.45)}.modal-block{margin-bottom:16px}.teaching-list{display:flex;flex-direction:column;gap:2px}.teaching-item{display:flex;align-items:flex-start;gap:4px;padding:4px 0;cursor:pointer}.teaching-copy{flex:1;min-width:0;margin-left:4px}.teaching-name{color:rgba(0,0,0,.88);font-size:13px;line-height:22px}.teaching-description{color:rgba(0,0,0,.45);font-size:12px;line-height:18px}.setting-head{display:flex;align-items:center;justify-content:space-between;color:rgba(0,0,0,.65);font-size:12px;line-height:20px}.provider-group{display:flex;flex-direction:column;gap:8px;width:100%;margin-top:8px}.provider-radio{display:flex;align-items:flex-start;margin:0}.provider-radio :deep(.ant-radio){margin-top:1px}.provider-copy{min-width:0}.provider-name{color:rgba(0,0,0,.88);font-size:14px;line-height:22px}.provider-description{color:rgba(0,0,0,.45);font-size:12px;line-height:20px}
+.panel-title{display:flex;align-items:center;justify-content:space-between;width:100%}h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28px}.panel-alert{margin-bottom:16px}.layer-spin{display:block;min-height:168px}.panel-section{padding:0 0 16px;margin:0 0 16px;border-bottom:1px solid rgba(5,5,5,.06)}.panel-section:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none}.section-heading{display:flex;align-items:center;justify-content:space-between;margin:0 0 8px;color:rgba(0,0,0,.65);font-size:12px;line-height:20px}.full-select{width:100%}.cache-row{display:flex;align-items:center;justify-content:space-between}.terrain-slider-head{display:flex;align-items:center;justify-content:space-between;margin-top:12px;color:rgba(0,0,0,.65);font-size:13px;line-height:20px}.terrain-lighting-row{display:flex;align-items:center;justify-content:space-between;margin-top:4px;color:rgba(0,0,0,.65);font-size:13px;line-height:20px}.terrain-alert{margin-top:8px}.key-input{margin-top:8px}.credential-hint{margin-top:8px}.key-actions{display:flex;gap:8px;margin-top:8px}.basemap-item{display:flex;align-items:center;gap:4px;min-height:48px;padding:6px 8px;border-radius:6px;cursor:pointer}.basemap-item.selected{background:rgba(22,119,255,.06)}.basemap-copy{flex:1;min-width:0;margin-left:4px}.basemap-name{color:rgba(0,0,0,.88);font-size:14px;line-height:22px}.basemap-description{overflow:hidden;color:rgba(0,0,0,.45);font-size:12px;line-height:20px;text-overflow:ellipsis;white-space:nowrap}.more-button{color:rgba(0,0,0,.45)}.modal-block{margin-bottom:16px}.setting-head{display:flex;align-items:center;justify-content:space-between;color:rgba(0,0,0,.65);font-size:12px;line-height:20px}.provider-group{display:flex;flex-direction:column;gap:8px;width:100%;margin-top:8px}.provider-radio{display:flex;align-items:flex-start;margin:0}.provider-radio :deep(.ant-radio){margin-top:1px}.provider-copy{min-width:0}.provider-name{color:rgba(0,0,0,.88);font-size:14px;line-height:22px}.provider-description{color:rgba(0,0,0,.45);font-size:12px;line-height:20px}.thematic-list{display:flex;flex-direction:column;gap:4px}.thematic-item{display:flex;align-items:center;gap:8px;min-height:44px;padding:6px 8px;border-radius:6px;cursor:pointer}.thematic-item:hover{background:rgba(0,0,0,.04)}.thematic-item:focus-visible{outline:2px solid #1677ff;outline-offset:-2px}.thematic-item :deep(.ant-checkbox-wrapper){pointer-events:none;margin:0}.teaching-list{display:flex;flex-direction:column;gap:2px}.teaching-item{display:flex;align-items:flex-start;gap:4px;padding:4px 0;cursor:pointer}.teaching-copy{flex:1;min-width:0;margin-left:4px}.teaching-name{color:rgba(0,0,0,.88);font-size:13px;line-height:22px}.teaching-description{color:rgba(0,0,0,.45);font-size:12px;line-height:18px}
 </style>

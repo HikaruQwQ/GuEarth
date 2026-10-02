@@ -39,6 +39,12 @@ function stripIpcErrorPrefix(message: string): string {
   return message.replace(/^Error invoking remote method '[^']+':?\s*(Error:\s*)?/i, '')
 }
 
+function reportsFailure(result: unknown): boolean {
+  if (typeof result !== 'object' || result === null) return false
+  const error = (result as Record<string, unknown>).error
+  return typeof error === 'string' && error !== ''
+}
+
 export const useAiStore = defineStore('ai', () => {
   const settings = ref<AiSettings>({ providers: [], activeProviderId: '', activeModelId: '' })
   const messages = ref<ChatMessage[]>([])
@@ -94,7 +100,7 @@ export const useAiStore = defineStore('ai', () => {
         }
         try {
           const result = await tool.execute((event.args ?? {}) as Record<string, unknown>)
-          await window.guEarth.ai.toolResult(event.sessionId, event.callId, true, result ?? { ok: true })
+          await window.guEarth.ai.toolResult(event.sessionId, event.callId, !reportsFailure(result), result ?? { ok: true })
         } catch (error) {
           await window.guEarth.ai.toolResult(event.sessionId, event.callId, false, { error: error instanceof Error ? error.message : '工具执行失败' })
         }
