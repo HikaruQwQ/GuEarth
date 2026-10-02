@@ -119,6 +119,16 @@ onBeforeUnmount(() => {
   bottom: 160px;
 }
 
+@media (max-width: 1320px) {
+  .solar-panel {
+    bottom: 160px;
+  }
+
+  .solar-panel.stacked {
+    bottom: 240px;
+  }
+}
+
 .clock-readout {
   display: flex;
   flex-direction: column;

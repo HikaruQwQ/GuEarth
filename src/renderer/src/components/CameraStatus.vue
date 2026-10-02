@@ -64,6 +64,12 @@ function formatAngle(angle: number): string {
   padding: 8px 12px;
 }
 
+@media (max-width: 1320px) {
+  .camera-status {
+    bottom: 80px;
+  }
+}
+
 .status-item {
   display: flex;
   flex-direction: column;

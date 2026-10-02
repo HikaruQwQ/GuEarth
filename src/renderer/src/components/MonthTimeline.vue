@@ -82,6 +82,12 @@ onBeforeUnmount(() => {
   box-shadow: var(--ant-box-shadow-secondary, 0 4px 12px rgba(0, 0, 0, 0.08));
 }
 
+@media (max-width: 1320px) {
+  .month-timeline {
+    width: min(560px, calc(100vw - 720px));
+  }
+}
+
 .month-readout {
   display: flex;
   flex-direction: column;

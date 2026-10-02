@@ -80,6 +80,12 @@ const differenceText = computed(() => {
   z-index: 10;
 }
 
+@media (max-width: 1320px) {
+  .timezone-panel {
+    bottom: 148px;
+  }
+}
+
 .panel-header {
   display: flex;
   align-items: center;
