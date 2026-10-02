@@ -1,15 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
-  AiChatMessage,
-  AiChunkEvent,
-  AiConfigInfo,
-  AiConfigPatch,
-  AnnotationData,
   GeoBounds,
   GuEarthSettings,
   GuEarthSettingsPatch,
   PeakResult,
-  PlaceResult,
   ProviderCredentialStatus,
   TileCacheEntry,
   TileCacheStats,
@@ -17,23 +11,93 @@ import type {
 } from './types'
 
 export type {
-  AiChatMessage,
-  AiChatToolCall,
-  AiChunkEvent,
-  AiConfigInfo,
-  AiConfigPatch,
-  AnnotationData,
-  AnnotationKind,
   GeoBounds,
   GuEarthSettings,
   GuEarthSettingsPatch,
   PeakResult,
-  PlaceResult,
   ProviderCredentialStatus,
   TileCacheEntry,
   TileCacheStats,
   TileKey
 } from './types'
+
+export interface GeoPosition {
+  longitude: number
+  latitude: number
+  height: number
+}
+
+export interface StoredShape {
+  id: string
+  kind: 'point' | 'polyline' | 'polygon'
+  positions: GeoPosition[]
+  annotation: string
+  createdAt: number
+}
+
+export type AiProtocol = 'openai' | 'anthropic'
+export type AiThinkingLevel = 'low' | 'medium' | 'high'
+
+export interface AiModelConfig {
+  id: string
+  label: string
+  contextWindow: number
+  streaming: boolean
+  thinking: boolean
+  thinkingLevel: AiThinkingLevel
+}
+
+export interface AiProviderConfig {
+  id: string
+  name: string
+  protocol: AiProtocol
+  baseUrl: string
+  models: AiModelConfig[]
+}
+
+export interface AiSettings {
+  providers: AiProviderConfig[]
+  activeProviderId: string
+  activeModelId: string
+}
+
+export interface AiChatTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface AiToolDefinition {
+  name: string
+  description: string
+  parameters: Record<string, unknown>
+}
+
+export type AiChatEvent =
+  | { sessionId: string; type: 'reasoning-delta'; text: string }
+  | { sessionId: string; type: 'text-delta'; text: string }
+  | { sessionId: string; type: 'tool-start'; callId: string; name: string; args: unknown }
+  | { sessionId: string; type: 'tool-end'; callId: string; ok: boolean; summary: string; result: string }
+  | { sessionId: string; type: 'execute-tool'; callId: string; name: string; args: unknown }
+  | { sessionId: string; type: 'done' }
+  | { sessionId: string; type: 'error'; message: string }
+
+export interface PlaceSuggestion {
+  name: string
+  province: string
+  city: string
+  district: string
+  address: string
+  type: string
+  longitude: number
+  latitude: number
+}
+
+export interface PlaceSearchResult {
+  query: string
+  places: PlaceSuggestion[]
+  note?: string
+  error?: string
+}
 
 const api = {
   versions: {
@@ -54,26 +118,25 @@ const api = {
     clear: (providerId?: string): Promise<void> => ipcRenderer.invoke('tiles:clear', providerId),
     stats: (): Promise<TileCacheStats> => ipcRenderer.invoke('tiles:stats')
   },
+  annotations: {
+    list: (): Promise<StoredShape[]> => ipcRenderer.invoke('annotations:list'),
+    save: (shape: StoredShape): Promise<void> => ipcRenderer.invoke('annotations:save', shape),
+    remove: (id: string): Promise<void> => ipcRenderer.invoke('annotations:remove', id)
+  },
   places: {
-    search: (query: string): Promise<PlaceResult[]> => ipcRenderer.invoke('places:search', query),
+    search: (keyword: string): Promise<PlaceSearchResult> => ipcRenderer.invoke('places:search', keyword),
     peaks: (bounds: GeoBounds, minElevation?: number): Promise<PeakResult[]> => ipcRenderer.invoke('places:peaks', bounds, minElevation)
   },
-  annotations: {
-    list: (): Promise<AnnotationData[]> => ipcRenderer.invoke('annotations:list'),
-    add: (annotation: AnnotationData): Promise<AnnotationData[]> => ipcRenderer.invoke('annotations:add', annotation),
-    remove: (id: string): Promise<AnnotationData[]> => ipcRenderer.invoke('annotations:remove', id)
-  },
   ai: {
-    getConfig: (): Promise<AiConfigInfo> => ipcRenderer.invoke('ai:get-config'),
-    saveConfig: (patch: AiConfigPatch): Promise<AiConfigInfo> => ipcRenderer.invoke('ai:save-config', patch),
-    chat: (requestId: string, messages: AiChatMessage[]): Promise<void> => ipcRenderer.invoke('ai:chat', requestId, messages),
-    abort: (requestId: string): Promise<void> => ipcRenderer.invoke('ai:abort', requestId),
-    onChunk: (listener: (event: AiChunkEvent) => void): (() => void) => {
-      const wrapped = (_event: unknown, payload: AiChunkEvent): void => listener(payload)
-      ipcRenderer.on('ai:chunk', wrapped)
-      return () => {
-        ipcRenderer.removeListener('ai:chunk', wrapped)
-      }
+    getSettings: (): Promise<AiSettings> => ipcRenderer.invoke('ai:get-settings'),
+    updateSettings: (settings: AiSettings): Promise<AiSettings> => ipcRenderer.invoke('ai:update-settings', settings),
+    chat: (sessionId: string, turns: AiChatTurn[], tools: AiToolDefinition[]): Promise<void> => ipcRenderer.invoke('ai:chat', sessionId, turns, tools),
+    stop: (sessionId: string): Promise<void> => ipcRenderer.invoke('ai:stop', sessionId),
+    toolResult: (sessionId: string, callId: string, ok: boolean, result: unknown): Promise<void> => ipcRenderer.invoke('ai:tool-result', sessionId, callId, ok, result),
+    onEvent: (listener: (event: AiChatEvent) => void): (() => void) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, payload: AiChatEvent): void => listener(payload)
+      ipcRenderer.on('ai:event', wrapped)
+      return () => ipcRenderer.removeListener('ai:event', wrapped)
     }
   }
 }

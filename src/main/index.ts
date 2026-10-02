@@ -1,11 +1,14 @@
-import { app, shell, BrowserWindow, ipcMain, safeStorage, net, protocol } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, net, protocol } from 'electron'
 import { join } from 'path'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs'
 import { createHash } from 'crypto'
-import type { AnnotationData, GuEarthSettings, GuEarthSettingsPatch, ProviderCredentialStatus, TileCacheEntry, TileCacheStats, TileKey } from '../preload'
-import { findPeaks, searchPlaces } from './places'
-import { registerAiIpc } from './ai'
-import { deleteAnnotation, initAnnotationsStore, listAnnotations, saveAnnotation } from './annotations'
+import type { GeoPosition, GuEarthSettings, GuEarthSettingsPatch, ProviderCredentialStatus, StoredShape, TileCacheEntry, TileCacheStats, TileKey } from '../preload'
+import { assertEncryptionAvailable, assertSafeId, clearProviderKey, hasProviderKey, initKeyVault, readProviderKey, writeProviderKey } from './keyVault'
+import { baiduLngLatToTile, tileCenter, wgs84ToBd09 } from './geo'
+import { AiSettingsStore } from './ai/settingsStore'
+import { registerAiIpcHandlers } from './ai/agent'
+import { searchPlaces } from './ai/amap'
+import { findPeaks } from './places'
 
 interface PersistedSettings {
   selectedImageryProviderId: string
@@ -16,8 +19,6 @@ interface PersistedSettings {
   providerStyles: Record<string, string>
   providerCredentials: Record<string, ProviderCredentialStatus>
   sceneMode: '2D' | '3D'
-  aiBaseUrl: string
-  aiModel: string
 }
 
 const defaultSettings: PersistedSettings = {
@@ -33,15 +34,15 @@ const defaultSettings: PersistedSettings = {
     baidu: 'road'
   },
   providerCredentials: {},
-  sceneMode: '3D',
-  aiBaseUrl: '',
-  aiModel: 'deepseek-chat'
+  sceneMode: '3D'
 }
 
 let settingsPath = ''
-let credentialsPath = ''
 let tileCachePath = ''
+let annotationsPath = ''
 let settings: PersistedSettings = { ...defaultSettings, providerCredentials: {} }
+let shapes: StoredShape[] = []
+const aiSettings = new AiSettingsStore()
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'guearth-tile', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
@@ -51,10 +52,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function safeId(value: unknown): string {
-  if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(value)) throw new Error('无效的供应商标识')
-  return value
-}
+const safeId = assertSafeId
 
 function readSettings(): PersistedSettings {
   if (!existsSync(settingsPath)) return { ...defaultSettings, providerCredentials: {} }
@@ -87,9 +85,7 @@ function readSettings(): PersistedSettings {
       tileCacheEnabled: parsed.tileCacheEnabled !== false,
       providerStyles: normalizedStyles,
       providerCredentials,
-      sceneMode: parsed.sceneMode === '2D' ? '2D' : '3D',
-      aiBaseUrl: typeof parsed.aiBaseUrl === 'string' && /^https?:\/\/[^\s]+$/i.test(parsed.aiBaseUrl) ? parsed.aiBaseUrl : '',
-      aiModel: typeof parsed.aiModel === 'string' && parsed.aiModel.length <= 120 ? parsed.aiModel : 'deepseek-chat'
+      sceneMode: parsed.sceneMode === '2D' ? '2D' : '3D'
     }
   } catch {
     return { ...defaultSettings, providerCredentials: {} }
@@ -100,12 +96,8 @@ function saveSettings(): void {
   writeFileSync(settingsPath, JSON.stringify(settings), 'utf8')
 }
 
-function credentialPath(providerId: string): string {
-  return join(credentialsPath, `${safeId(providerId)}.bin`)
-}
-
 function credentialStatus(providerId: string): ProviderCredentialStatus {
-  const configured = existsSync(credentialPath(providerId))
+  const configured = hasProviderKey(providerId)
   const saved = settings.providerCredentials[providerId]
   if (!configured) return { configured: false, updatedAt: saved?.updatedAt ?? null }
   return { configured: true, updatedAt: saved?.updatedAt ?? null }
@@ -115,10 +107,6 @@ function settingsSnapshot(): GuEarthSettings {
   const providerCredentials: Record<string, ProviderCredentialStatus> = {}
   for (const providerId of Object.keys(settings.providerCredentials)) providerCredentials[providerId] = credentialStatus(providerId)
   return { ...settings, providerCredentials }
-}
-
-function assertEncryptionAvailable(): void {
-  if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用')
 }
 
 function pathPart(value: number): string {
@@ -188,113 +176,9 @@ function cacheStats(): TileCacheStats {
   }, { files: 0, bytes: 0 })
 }
 
-function readProviderKey(providerId: string): string | undefined {
-  const path = credentialPath(providerId)
-  if (!existsSync(path) || !safeStorage.isEncryptionAvailable()) return undefined
-  try {
-    return safeStorage.decryptString(readFileSync(path))
-  } catch {
-    return undefined
-  }
-}
-
-function readProviderSk(providerId: string): string | undefined {
-  const path = credentialPath(`${providerId}-sk`)
-  if (!existsSync(path) || !safeStorage.isEncryptionAvailable()) return undefined
-  try {
-    return safeStorage.decryptString(readFileSync(path))
-  } catch {
-    return undefined
-  }
-}
-
 function computeBaiduSn(path: string, queryString: string, sk: string): string {
   const plaintext = encodeURIComponent(`${path}?${queryString}${sk}`)
   return createHash('md5').update(plaintext).digest('hex')
-}
-
-const coordinatePi = Math.PI
-const coordinateAxis = 6378245
-const coordinateEccentricity = 0.006693421622965943
-
-function outOfChina(longitude: number, latitude: number): boolean {
-  return longitude < 72.004 || longitude > 137.8347 || latitude < 0.8293 || latitude > 55.8271
-}
-
-function transformLatitude(x: number, y: number): number {
-  let value = -100 + 2 * x + 3 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x))
-  value += (20 * Math.sin(6 * x * coordinatePi) + 20 * Math.sin(2 * x * coordinatePi)) * 2 / 3
-  value += (20 * Math.sin(y * coordinatePi) + 40 * Math.sin(y / 3 * coordinatePi)) * 2 / 3
-  value += (160 * Math.sin(y / 12 * coordinatePi) + 320 * Math.sin(y * coordinatePi / 30)) * 2 / 3
-  return value
-}
-
-function transformLongitude(x: number, y: number): number {
-  let value = 300 + x + 2 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x))
-  value += (20 * Math.sin(6 * x * coordinatePi) + 20 * Math.sin(2 * x * coordinatePi)) * 2 / 3
-  value += (20 * Math.sin(x * coordinatePi) + 40 * Math.sin(x / 3 * coordinatePi)) * 2 / 3
-  value += (150 * Math.sin(x / 12 * coordinatePi) + 300 * Math.sin(x / 30 * coordinatePi)) * 2 / 3
-  return value
-}
-
-function wgs84ToGcj02(longitude: number, latitude: number): [number, number] {
-  if (outOfChina(longitude, latitude)) return [longitude, latitude]
-  const deltaLatitude = transformLatitude(longitude - 105, latitude - 35)
-  const deltaLongitude = transformLongitude(longitude - 105, latitude - 35)
-  const latitudeRadians = latitude / 180 * coordinatePi
-  const magic = 1 - coordinateEccentricity * Math.sin(latitudeRadians) ** 2
-  const sqrtMagic = Math.sqrt(magic)
-  const adjustedLatitude = deltaLatitude * 180 / ((coordinateAxis * (1 - coordinateEccentricity)) / (magic * sqrtMagic) * coordinatePi)
-  const adjustedLongitude = deltaLongitude * 180 / (coordinateAxis / sqrtMagic * Math.cos(latitudeRadians) * coordinatePi)
-  return [longitude + adjustedLongitude, latitude + adjustedLatitude]
-}
-
-function gcj02ToBd09(longitude: number, latitude: number): [number, number] {
-  const z = Math.sqrt(longitude * longitude + latitude * latitude) + 0.00002 * Math.sin(latitude * coordinatePi)
-  const theta = Math.atan2(latitude, longitude) + 0.000003 * Math.cos(longitude * coordinatePi)
-  return [z * Math.cos(theta) + 0.0065, z * Math.sin(theta) + 0.006]
-}
-
-function wgs84ToBd09(longitude: number, latitude: number): [number, number] {
-  const [gcjLongitude, gcjLatitude] = wgs84ToGcj02(longitude, latitude)
-  return gcj02ToBd09(gcjLongitude, gcjLatitude)
-}
-
-function tileCenter(level: number, x: number, y: number): [number, number] {
-  const scale = 2 ** level
-  const longitude = (x + 0.5) / scale * 360 - 180
-  const mercator = Math.PI * (1 - 2 * (y + 0.5) / scale)
-  const latitude = 180 / coordinatePi * Math.atan(Math.sinh(mercator))
-  return [longitude, latitude]
-}
-
-const baiduMercatorBands = [75, 60, 45, 30, 15, 0]
-const baiduMercatorFactors = [
-  [-0.0015702102444, 111320.7020616939, 1704480524535203, -10338987376042340, 26112667856603880, -35149669176653700, 26595700718403920, -10725012454188240, 1800819912950474, 82.5],
-  [0.0008277824516172526, 111320.7020463578, 647795574.6671607, -4082003173.6413164, 10774905661.35142, -15171875531.51559, 12052655338.62167, -5124939663.577472, 913311935.9512032, 67.5],
-  [0.00337398766765, 111320.7020202162, 4481351.045890365, -23393751.19931662, 79682215.47186455, -115964993.2797253, 97236711.15602145, -43661946.33352821, 8477230.501135234, 52.5],
-  [0.00220636496208, 111320.7020209128, 51751.86112841131, 3796837.749470245, 992013.7397791013, -1221952.21711287, 1340652.697009075, -620943.6990984312, 144416.9293806241, 37.5],
-  [-0.0003441963504368392, 111320.7020576856, 278.2353980772752, 2485758.690035394, 6070.750963243378, 54821.18345352118, 9540.606633304236, -2710.55326746645, 1405.483844121726, 22.5],
-  [-0.0003218135878613132, 111320.7020701615, 0.00369383431289, 823725.6402795718, 0.46104986909093, 2351.343141331292, 1.58060784298199, 8.77738589078284, 0.37238884252424, 7.45]
-]
-
-function baiduLngLatToPoint(longitude: number, latitude: number): [number, number] {
-  const normalizedLongitude = ((longitude + 180) % 360 + 360) % 360 - 180
-  const normalizedLatitude = Math.max(-74, Math.min(74, latitude))
-  const absoluteLatitude = Math.abs(normalizedLatitude)
-  const factorIndex = baiduMercatorBands.findIndex((band) => absoluteLatitude >= band)
-  const factor = baiduMercatorFactors[factorIndex === -1 ? baiduMercatorFactors.length - 1 : factorIndex]
-  const ratio = absoluteLatitude / factor[9]
-  const ratioSquared = ratio * ratio
-  const absoluteY = factor[2] + factor[3] * ratio + factor[4] * ratioSquared + factor[5] * ratioSquared * ratio + factor[6] * ratioSquared ** 2 + factor[7] * ratioSquared ** 2 * ratio + factor[8] * ratioSquared ** 3
-  const absoluteX = factor[0] + factor[1] * Math.abs(normalizedLongitude)
-  return [absoluteX * (normalizedLongitude < 0 ? -1 : 1), absoluteY * (normalizedLatitude < 0 ? -1 : 1)]
-}
-
-function baiduLngLatToTile(level: number, longitude: number, latitude: number): [number, number] {
-  const [pointX, pointY] = baiduLngLatToPoint(longitude, latitude)
-  const retain = 2 ** (level - 18)
-  return [Math.floor(pointX * retain / 256), Math.floor(pointY * retain / 256)]
 }
 
 function tileRemoteUrl(providerId: string, styleId: string, level: number, x: number, y: number): string | undefined {
@@ -304,7 +188,7 @@ function tileRemoteUrl(providerId: string, styleId: string, level: number, x: nu
     if (!key) return undefined
     const [translatedX, translatedY] = baiduLngLatToTile(level, ...wgs84ToBd09(...tileCenter(level, x, y)))
     const ak = key
-    const sk = readProviderSk(providerId)
+    const sk = readProviderKey(`${providerId}-sk`)
     if (styleId === 'satellite') {
       const baseQueryString = `qt=satepc&x=${translatedX}&y=${translatedY}&z=${level}&udt=20230101&ak=${encodeURIComponent(ak)}`
       if (!sk) return `https://maponline${subdomain}.bdimg.com/tile/?${baseQueryString}`
@@ -355,6 +239,51 @@ async function handleTileProtocol(request: Request): Promise<Response> {
   }
 }
 
+function normalizeShape(value: unknown): StoredShape {
+  if (!isRecord(value)) throw new Error('无效的标注数据')
+  const id = safeId(value.id)
+  if (value.kind !== 'point' && value.kind !== 'polyline' && value.kind !== 'polygon') throw new Error('无效的标注类型')
+  if (!Array.isArray(value.positions)) throw new Error('无效的标注坐标')
+  const positions: GeoPosition[] = value.positions.map((item) => {
+    if (!isRecord(item)) throw new Error('无效的标注坐标')
+    const { longitude, latitude, height } = item
+    if (typeof longitude !== 'number' || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) throw new Error('无效的标注坐标')
+    if (typeof latitude !== 'number' || !Number.isFinite(latitude) || latitude < -90 || latitude > 90) throw new Error('无效的标注坐标')
+    if (typeof height !== 'number' || !Number.isFinite(height) || height < -11000 || height > 20000) throw new Error('无效的标注坐标')
+    return { longitude, latitude, height }
+  })
+  const minimum = value.kind === 'point' ? 1 : value.kind === 'polyline' ? 2 : 3
+  if (positions.length < minimum || positions.length > 500) throw new Error('无效的标注坐标')
+  return {
+    id,
+    kind: value.kind,
+    positions,
+    annotation: typeof value.annotation === 'string' ? value.annotation.slice(0, 200) : '',
+    createdAt: typeof value.createdAt === 'number' && Number.isFinite(value.createdAt) ? value.createdAt : Date.now()
+  }
+}
+
+function readShapes(): StoredShape[] {
+  if (!existsSync(annotationsPath)) return []
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(annotationsPath, 'utf8'))
+    if (!Array.isArray(parsed)) return []
+    return parsed.flatMap((item) => {
+      try {
+        return [normalizeShape(item)]
+      } catch {
+        return []
+      }
+    })
+  } catch {
+    return []
+  }
+}
+
+function saveShapes(): void {
+  writeFileSync(annotationsPath, JSON.stringify(shapes), 'utf8')
+}
+
 function registerIpcHandlers(): void {
   ipcMain.handle('settings:get', () => settingsSnapshot())
   ipcMain.handle('settings:update', (_event, patch: GuEarthSettingsPatch): GuEarthSettings => {
@@ -389,23 +318,13 @@ function registerIpcHandlers(): void {
       if (patch.sceneMode !== '2D' && patch.sceneMode !== '3D') throw new Error('无效的场景模式')
       nextSettings.sceneMode = patch.sceneMode
     }
-    if (patch.aiBaseUrl !== undefined) {
-      if (typeof patch.aiBaseUrl !== 'string' || patch.aiBaseUrl.length > 300 || (patch.aiBaseUrl !== '' && !/^https?:\/\/[^\s]+$/i.test(patch.aiBaseUrl))) throw new Error('无效的 AI 服务地址')
-      nextSettings.aiBaseUrl = patch.aiBaseUrl
-    }
-    if (patch.aiModel !== undefined) {
-      if (typeof patch.aiModel !== 'string' || patch.aiModel.length > 120) throw new Error('无效的模型名称')
-      nextSettings.aiModel = patch.aiModel
-    }
     settings = nextSettings
     saveSettings()
     return settingsSnapshot()
   })
   ipcMain.handle('settings:set-provider-api-key', (_event, providerId: string, apiKey: string): ProviderCredentialStatus => {
-    assertEncryptionAvailable()
     const id = safeId(providerId)
-    if (typeof apiKey !== 'string' || apiKey.length < 1 || apiKey.length > 4096) throw new Error('无效的供应商密钥')
-    writeFileSync(credentialPath(id), safeStorage.encryptString(apiKey))
+    writeProviderKey(id, apiKey)
     const status = { configured: true, updatedAt: Date.now() }
     settings.providerCredentials[id] = status
     saveSettings()
@@ -413,14 +332,17 @@ function registerIpcHandlers(): void {
   })
   ipcMain.handle('settings:clear-provider-api-key', (_event, providerId: string): ProviderCredentialStatus => {
     const id = safeId(providerId)
-    const path = credentialPath(id)
-    if (existsSync(path)) unlinkSync(path)
+    clearProviderKey(id)
     const status = { configured: false, updatedAt: null }
     settings.providerCredentials[id] = status
     saveSettings()
     return status
   })
   ipcMain.handle('settings:has-provider-api-key', (_event, providerId: string): ProviderCredentialStatus => credentialStatus(safeId(providerId)))
+  ipcMain.handle('places:search', (_event, keyword: unknown) => {
+    if (typeof keyword !== 'string') throw new Error('无效的搜索关键词')
+    return searchPlaces(keyword)
+  })
   ipcMain.handle('tiles:get', (_event, key: TileKey) => readTile(key))
   ipcMain.handle('tiles:put', (_event, entry: TileCacheEntry) => writeTile(entry))
   ipcMain.handle('tiles:clear', (_event, providerId?: string) => {
@@ -432,26 +354,18 @@ function registerIpcHandlers(): void {
     rmSync(join(tileCachePath, safeId(providerId)), { recursive: true, force: true })
   })
   ipcMain.handle('tiles:stats', () => cacheStats())
-  ipcMain.handle('places:search', (_event, query: string) => searchPlaces(query))
   ipcMain.handle('places:peaks', (_event, bounds: unknown, minElevation: unknown) => findPeaks(bounds, minElevation))
-  ipcMain.handle('annotations:list', () => listAnnotations())
-  ipcMain.handle('annotations:add', (_event, annotation: unknown) => saveAnnotation(annotation as AnnotationData))
-  ipcMain.handle('annotations:remove', (_event, id: string) => deleteAnnotation(id))
-}
-
-function registerAiHandlers(): void {
-  registerAiIpc({
-    getBaseUrl: () => settings.aiBaseUrl,
-    getModel: () => settings.aiModel,
-    getApiKey: () => readProviderKey('ai-provider'),
-    setApiKey: (apiKey) => {
-      assertEncryptionAvailable()
-      writeFileSync(credentialPath('ai-provider'), safeStorage.encryptString(apiKey))
-    },
-    clearApiKey: () => {
-      const path = credentialPath('ai-provider')
-      if (existsSync(path)) unlinkSync(path)
-    }
+  ipcMain.handle('annotations:list', (): StoredShape[] => shapes)
+  ipcMain.handle('annotations:save', (_event, shape: unknown): void => {
+    const stored = normalizeShape(shape)
+    const index = shapes.findIndex((item) => item.id === stored.id)
+    if (index === -1) shapes.push(stored)
+    else shapes[index] = stored
+    saveShapes()
+  })
+  ipcMain.handle('annotations:remove', (_event, id: string): void => {
+    shapes = shapes.filter((item) => item.id !== safeId(id))
+    saveShapes()
   })
 }
 
@@ -485,15 +399,17 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
-  settingsPath = join(app.getPath('userData'), 'settings.json')
-  credentialsPath = join(app.getPath('userData'), 'credentials')
-  tileCachePath = join(app.getPath('userData'), 'tile-cache')
-  initAnnotationsStore(app.getPath('userData'))
-  mkdirSync(credentialsPath, { recursive: true })
+  const userDataPath = app.getPath('userData')
+  settingsPath = join(userDataPath, 'settings.json')
+  tileCachePath = join(userDataPath, 'tile-cache')
+  annotationsPath = join(userDataPath, 'annotations.json')
+  initKeyVault(join(userDataPath, 'credentials'))
   mkdirSync(tileCachePath, { recursive: true })
   settings = readSettings()
+  shapes = readShapes()
+  aiSettings.init(join(userDataPath, 'ai-settings.json'))
   registerIpcHandlers()
-  registerAiHandlers()
+  registerAiIpcHandlers(aiSettings)
   protocol.handle('guearth-tile', handleTileProtocol)
   createWindow()
 

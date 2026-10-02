@@ -1,13 +1,5 @@
 import { net } from 'electron'
 
-export interface PlaceResult {
-  name: string
-  detail: string
-  lon: number
-  lat: number
-  kind: string
-}
-
 export interface PeakResult {
   name: string
   lon: number
@@ -22,7 +14,6 @@ export interface BoundsInput {
   north: number
 }
 
-const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search'
 const OVERPASS_ENDPOINTS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter']
 const REQUEST_TIMEOUT_MS = 20000
 
@@ -38,37 +29,6 @@ function assertBounds(value: unknown): BoundsInput {
   }
   if (west >= east || south >= north) throw new Error('无效的视角范围')
   return { west, south, east, north }
-}
-
-export async function searchPlaces(rawQuery: unknown): Promise<PlaceResult[]> {
-  if (typeof rawQuery !== 'string') throw new Error('无效的搜索词')
-  const query = rawQuery.trim()
-  if (!query || query.length > 120) throw new Error('无效的搜索词')
-  const url = new URL(NOMINATIM_URL)
-  url.searchParams.set('q', query)
-  url.searchParams.set('format', 'jsonv2')
-  url.searchParams.set('limit', '8')
-  url.searchParams.set('accept-language', 'zh-CN')
-  const response = await netFetchJson(url.toString(), {
-    method: 'GET',
-    headers: { 'User-Agent': 'GuEarth/0.1 (geography teaching desktop app)', 'Accept-Language': 'zh-CN' }
-  })
-  if (!Array.isArray(response)) throw new Error('地名检索服务返回异常')
-  return response
-    .filter((entry) => typeof entry === 'object' && entry !== null)
-    .map((entry) => {
-      const record = entry as Record<string, unknown>
-      const displayName = typeof record.display_name === 'string' ? record.display_name : '未知地点'
-      const parts = displayName.split(',').map((part) => part.trim())
-      return {
-        name: typeof record.name === 'string' && record.name ? record.name : parts[0] ?? '未知地点',
-        detail: parts.slice(1).join('，') || displayName,
-        lon: Number(record.lon),
-        lat: Number(record.lat),
-        kind: typeof record.type === 'string' ? record.type : 'place'
-      }
-    })
-    .filter((entry) => Number.isFinite(entry.lon) && Number.isFinite(entry.lat))
 }
 
 function overpassQuery(bounds: BoundsInput): string {

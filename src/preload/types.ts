@@ -12,8 +12,6 @@ export interface GuEarthSettings {
   providerStyles: Record<string, string>
   providerCredentials: Record<string, ProviderCredentialStatus>
   sceneMode: '2D' | '3D'
-  aiBaseUrl: string
-  aiModel: string
 }
 
 export interface GuEarthSettingsPatch {
@@ -24,8 +22,6 @@ export interface GuEarthSettingsPatch {
   tileCacheEnabled?: boolean
   providerStyles?: Record<string, string>
   sceneMode?: '2D' | '3D'
-  aiBaseUrl?: string
-  aiModel?: string
 }
 
 export interface TileKey {
@@ -54,59 +50,9 @@ export interface GeoBounds {
   north: number
 }
 
-export interface PlaceResult {
-  name: string
-  detail: string
-  lon: number
-  lat: number
-  kind: string
-}
-
 export interface PeakResult {
   name: string
   lon: number
   lat: number
   elevation: number
-}
-
-export interface AiChatToolCall {
-  id: string
-  name: string
-  args: string
-}
-
-export interface AiChatMessage {
-  role: 'system' | 'user' | 'assistant' | 'tool'
-  content: string
-  toolCallId?: string
-  toolCalls?: AiChatToolCall[]
-}
-
-export type AiChunkEvent =
-  | { requestId: string; type: 'text'; value: string }
-  | { requestId: string; type: 'end'; content: string; toolCalls: AiChatToolCall[] }
-  | { requestId: string; type: 'error'; message: string }
-
-export interface AiConfigInfo {
-  configured: boolean
-  baseUrl: string
-  model: string
-}
-
-export interface AiConfigPatch {
-  baseUrl?: string
-  model?: string
-  apiKey?: string
-}
-
-export type AnnotationKind = 'point' | 'line' | 'polygon'
-
-export interface AnnotationData {
-  id: string
-  kind: AnnotationKind
-  name: string
-  points: Array<[number, number]>
-  distanceKm: number | null
-  areaKm2: number | null
-  createdAt: number
 }

@@ -1,6 +1,7 @@
 import { onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
 import * as Cesium from 'cesium'
 import { useGlobeStore, providerCatalog, terrainCatalog, type ProviderMeta } from '@renderer/stores/globe'
+import type { PlaceSuggestion } from '../../../preload'
 
 interface LayerProvider {
   meta: ProviderMeta
@@ -35,6 +36,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
   const imageryLayers = new Map<string, Cesium.ImageryLayer>()
   const store = useGlobeStore()
   let generation = 0
+  let selectedPlaceMarker: Cesium.Entity | undefined
 
   function updateCameraState(): void {
     const currentViewer = viewer.value
@@ -170,6 +172,42 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     viewer.value.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(longitude, latitude, height), duration: 1.2, complete: updateCameraState })
   }
 
+  function flyToPlace(place: PlaceSuggestion): void {
+    const currentViewer = viewer.value
+    if (!currentViewer || currentViewer.isDestroyed()) return
+    const { longitude, latitude } = place
+    if (!Number.isFinite(longitude) || !Number.isFinite(latitude) || longitude < -180 || longitude > 180 || latitude < -90 || latitude > 90) return
+    if (selectedPlaceMarker) currentViewer.entities.remove(selectedPlaceMarker)
+    selectedPlaceMarker = currentViewer.entities.add({
+      name: place.name,
+      position: Cesium.Cartesian3.fromDegrees(longitude, latitude),
+      point: {
+        pixelSize: 12,
+        color: Cesium.Color.fromCssColorString('#1677ff'),
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 3,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
+      },
+      label: {
+        text: place.name,
+        font: '14px -apple-system, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif',
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        pixelOffset: new Cesium.Cartesian2(0, -16),
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
+      }
+    })
+    void currentViewer.flyTo(selectedPlaceMarker, {
+      offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-60), 5000),
+      duration: 1.2
+    }).then(updateCameraState)
+  }
+
   onMounted(() => {
     void (async () => {
       if (!container.value) return
@@ -209,6 +247,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     currentViewer.camera.moveEnd.removeEventListener(updateCameraState)
     currentViewer.destroy()
     viewer.value = undefined
+    selectedPlaceMarker = undefined
     imageryLayers.clear()
   })
 
@@ -218,6 +257,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     setProviderStyle,
     setLayerOpacity: (id: string, opacity: number) => { const value = Math.min(1, Math.max(0, opacity)); const layer = imageryLayers.get(id); if (layer) layer.alpha = value; store.setLayerOpacity(id, value) },
     flyTo,
+    flyToPlace,
     toggleLevelView,
     setTerrain: (id: string) => { store.setTerrainProvider(id); void setTerrain(id, generation) },
     setTerrainExaggeration: (value: number) => { store.setTerrainExaggeration(value); const currentViewer = viewer.value; if (currentViewer && !currentViewer.isDestroyed()) currentViewer.scene.verticalExaggeration = store.terrainExaggeration },
