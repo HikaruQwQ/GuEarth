@@ -7,7 +7,6 @@ import {
   PRESSURE_BELTS,
   windBeltArrows,
   WIND_KIND_COLORS,
-  zonalBandRing,
   type WindArrowPath
 } from '@renderer/utils/pressureWindData'
 
@@ -31,10 +30,11 @@ export function usePressureWindLayer(viewerRef: Ref<Cesium.Viewer | undefined>) 
     for (const belt of PRESSURE_BELTS) {
       beltEntities.push(
         viewer.entities.add({
-          polygon: {
-            hierarchy: new Cesium.CallbackProperty(() => new Cesium.PolygonHierarchy(
-              Cesium.Cartesian3.fromDegreesArray(zonalBandRing(beltLatRange(belt, store.monthPhase).south, beltLatRange(belt, store.monthPhase).north).flat())
-            ), false),
+          rectangle: {
+            coordinates: new Cesium.CallbackProperty(() => {
+              const range = beltLatRange(belt, store.monthPhase)
+              return Cesium.Rectangle.fromDegrees(-180, range.south, 180, range.north)
+            }, false),
             material: new Cesium.ColorMaterialProperty(
               new Cesium.CallbackProperty(() => Cesium.Color.fromCssColorString(BELT_COLORS[belt.kind]).withAlpha(0.16), false)
             ),

@@ -38,16 +38,6 @@ export function beltLatRange(belt: PressureBelt, monthPhase: number): { south: n
   return { south, north }
 }
 
-export function zonalBandRing(south: number, north: number, stepDegrees = 20): Array<[number, number]> {
-  const ring: Array<[number, number]> = []
-  for (let lon = -180; lon < 180; lon += stepDegrees) ring.push([lon, south])
-  ring.push([180, south])
-  for (let lon = 180; lon > -180; lon -= stepDegrees) ring.push([lon, north])
-  ring.push([-180, north])
-  ring.push([-180, south])
-  return ring
-}
-
 export function windLanes(): WindLane[] {
   const lanes: WindLane[] = []
   for (const lon of WIND_LONLANES) {

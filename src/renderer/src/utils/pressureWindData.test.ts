@@ -4,8 +4,7 @@ import {
   beltShiftDegrees,
   PRESSURE_BELTS,
   windBeltArrows,
-  windLanes,
-  zonalBandRing
+  windLanes
 } from './pressureWindData'
 
 describe('beltShiftDegrees', () => {
@@ -28,18 +27,15 @@ describe('beltLatRange', () => {
     expect(range.north).toBeLessThanOrEqual(90)
     expect(range.south).toBeLessThan(range.north)
   })
-})
 
-describe('zonalBandRing', () => {
-  it('produces a closed ring with distinct consecutive points', () => {
-    const ring = zonalBandRing(-5, 5)
-    expect(ring.length).toBeGreaterThan(8)
-    const first = ring[0]
-    const last = ring[ring.length - 1]
-    expect(first[0]).toBeCloseTo(last[0], 6)
-    expect(first[1]).toBeCloseTo(last[1], 6)
-    for (let i = 1; i < ring.length; i++) {
-      expect(ring[i]).not.toEqual(ring[i - 1])
+  it('yields valid rectangle bounds for every belt in every month', () => {
+    for (const belt of PRESSURE_BELTS) {
+      for (let month = 1; month <= 12; month++) {
+        const range = beltLatRange(belt, month)
+        expect(range.south).toBeGreaterThanOrEqual(-90)
+        expect(range.north).toBeLessThanOrEqual(90)
+        expect(range.south).toBeLessThan(range.north)
+      }
     }
   })
 })
