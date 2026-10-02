@@ -45,6 +45,20 @@ export interface TileCacheStats {
   bytes: number
 }
 
+export interface GeoPosition {
+  longitude: number
+  latitude: number
+  height: number
+}
+
+export interface StoredShape {
+  id: string
+  kind: 'point' | 'polyline' | 'polygon'
+  positions: GeoPosition[]
+  annotation: string
+  createdAt: number
+}
+
 export type AiProtocol = 'openai' | 'anthropic'
 export type AiThinkingLevel = 'low' | 'medium' | 'high'
 
@@ -127,6 +141,11 @@ const api = {
     put: (entry: TileCacheEntry): Promise<void> => ipcRenderer.invoke('tiles:put', entry),
     clear: (providerId?: string): Promise<void> => ipcRenderer.invoke('tiles:clear', providerId),
     stats: (): Promise<TileCacheStats> => ipcRenderer.invoke('tiles:stats')
+  },
+  annotations: {
+    list: (): Promise<StoredShape[]> => ipcRenderer.invoke('annotations:list'),
+    save: (shape: StoredShape): Promise<void> => ipcRenderer.invoke('annotations:save', shape),
+    remove: (id: string): Promise<void> => ipcRenderer.invoke('annotations:remove', id)
   },
   places: {
     search: (keyword: string): Promise<PlaceSearchResult> => ipcRenderer.invoke('places:search', keyword)

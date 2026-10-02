@@ -1,15 +1,19 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { storeToRefs } from 'pinia'
+import { Modal } from 'ant-design-vue'
 import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { useGlobeStore } from '@renderer/stores/globe'
+import { useDrawingStore, type DrawTool } from '@renderer/stores/drawing'
 import { useAiStore } from '@renderer/stores/ai'
 import { useCesiumViewer } from '@renderer/composables/useCesiumViewer'
+import { useDrawing } from '@renderer/composables/useDrawing'
 import GlobeToolbar from '@renderer/components/GlobeToolbar.vue'
 import CameraStatus from '@renderer/components/CameraStatus.vue'
 import LayerPanel from '@renderer/components/LayerPanel.vue'
 import LevelViewSwitcher from '@renderer/components/LevelViewSwitcher.vue'
+import AnnotationPanel from '@renderer/components/AnnotationPanel.vue'
 import PlaceSearchBox from '@renderer/components/PlaceSearchBox.vue'
 import type { PlaceSuggestion } from '../../preload'
 import EoqAssistant from '@renderer/components/EoqAssistant.vue'
@@ -35,9 +39,16 @@ const {
 
 const globeContainer = ref<HTMLDivElement>()
 const { viewer, switchBasemap, setLayerOpacity, flyTo, toggleLevelView, setTerrain, setTerrainExaggeration, setTerrainLighting } = useCesiumViewer(globeContainer)
+const { flyToShape } = useDrawing(viewer)
 
+const drawingStore = useDrawingStore()
+const { activeTool, shapes, selectedShapeId } = storeToRefs(drawingStore)
 const aiStore = useAiStore()
+const isAnnotationPanelOpen = ref(false)
+const annotationDraft = ref('')
+const selectedShape = computed(() => shapes.value.find((shape) => shape.id === selectedShapeId.value) ?? null)
 const levelSwitcherVisible = computed(() => isGlobeReady.value && camera.value.height < 5000000)
+const drawHint = computed(() => (activeTool.value ? (activeTool.value === 'point' ? '在地球上单击以放置点' : '单击加点 · 双击或右键完成 · Esc 取消') : ''))
 
 aiStore.registerTool({
   definition: {
@@ -110,6 +121,10 @@ aiStore.registerTool({
     heading: Math.round(camera.value.heading * 10) / 10,
     pitch: Math.round(camera.value.pitch * 10) / 10
   })
+})
+
+watch(selectedShape, (shape) => {
+  annotationDraft.value = shape?.annotation ?? ''
 })
 
 function handleOpenLayers(): void {
@@ -190,17 +205,50 @@ function handleRetry(): void {
 function handleLevelViewToggle(): void {
   toggleLevelView()
 }
+
+function handleTool(tool: DrawTool): void {
+  drawingStore.setActiveTool(activeTool.value === tool ? null : tool)
+}
+
+function handleOpenAnnotations(): void {
+  isAnnotationPanelOpen.value = true
+}
+
+function handleClearShapes(): void {
+  Modal.confirm({ title: '清除全部标注？', okText: '清除', okButtonProps: { danger: true }, cancelText: '取消', onOk: () => drawingStore.clearAll() })
+}
+
+function handleFlyShape(id: string): void {
+  const shape = shapes.value.find((item) => item.id === id)
+  if (shape) flyToShape(shape)
+}
+
+function saveSelectedAnnotation(): void {
+  if (!selectedShape.value) return
+  drawingStore.updateAnnotation(selectedShape.value.id, annotationDraft.value.trim())
+  drawingStore.setSelectedShapeId(null)
+}
+
+function deleteSelectedShape(): void {
+  if (selectedShape.value) drawingStore.removeShape(selectedShape.value.id)
+}
 </script>
 
 <template>
   <div class="app">
-    <div ref="globeContainer" class="globe"></div>
+    <div ref="globeContainer" class="globe" :class="{ drawing: activeTool }"></div>
     <GlobeToolbar
+      :active-tool="activeTool"
+      :shape-count="shapes.length"
       @open-layers="handleOpenLayers"
+      @open-annotations="handleOpenAnnotations"
       @open-assistant="handleOpenAssistant"
       @home="handleHome"
+      @tool="handleTool"
+      @clear-shapes="handleClearShapes"
     />
     <PlaceSearchBox @select="handleFlyPlace" />
+    <div v-if="drawHint" class="draw-hint">{{ drawHint }}</div>
     <CameraStatus :camera="camera" />
     <EoqAssistant />
     <AiSettingsModal />
@@ -209,6 +257,23 @@ function handleLevelViewToggle(): void {
       :visible="levelSwitcherVisible"
       @toggle="handleLevelViewToggle"
     />
+    <AnnotationPanel
+      :open="isAnnotationPanelOpen"
+      :shapes="shapes"
+      :selected-shape-id="selectedShapeId"
+      @close="isAnnotationPanelOpen = false"
+      @select="drawingStore.setSelectedShapeId"
+      @fly="handleFlyShape"
+      @remove="drawingStore.removeShape"
+    />
+    <a-modal :open="Boolean(selectedShape)" title="编辑标注" :width="380" @cancel="drawingStore.setSelectedShapeId(null)">
+      <a-input v-model:value="annotationDraft" :maxlength="200" placeholder="标注名称" @press-enter="saveSelectedAnnotation" />
+      <template #footer>
+        <a-button danger @click="deleteSelectedShape">删除</a-button>
+        <a-button @click="drawingStore.setSelectedShapeId(null)">取消</a-button>
+        <a-button type="primary" @click="saveSelectedAnnotation">保存</a-button>
+      </template>
+    </a-modal>
     <LayerPanel
       :open="isLayerPanelOpen"
       :layers="layers"
@@ -246,5 +311,23 @@ function handleLevelViewToggle(): void {
 .globe {
   width: 100%;
   height: 100%;
+}
+
+.globe.drawing :deep(canvas) {
+  cursor: crosshair;
+}
+
+.draw-hint {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.72);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 12px;
+  line-height: 20px;
+  pointer-events: none;
 }
 </style>
