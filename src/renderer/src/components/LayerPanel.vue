@@ -93,7 +93,7 @@ const selectedSecurityCredentialStatus = computed(() => props.providerCredential
 const selectedProvider = computed(() => [...providerCatalog, ...credentialOnlyProviders].find((provider) => provider.id === credentialProviderId.value))
 const supportsSecurityKey = computed(() => Boolean(selectedProvider.value?.requiresSk || selectedProvider.value?.requiresSecurityKey))
 const requiresSecurityKey = computed(() => Boolean((selectedProvider.value?.requiresSecurityKey && !selectedProvider.value?.securityKeyOptional) || (selectedProvider.value?.requiresSk && !selectedProvider.value?.skOptional)))
-const securityKeyPlaceholder = computed(() => selectedProvider.value?.requiresSecurityKey ? '输入安全密钥 (securityJsCode)' : '输入 SK (签名密钥，可选)')
+const securityKeyPlaceholder = computed(() => selectedProvider.value?.requiresSecurityKey ? '输入安全密钥' : '输入 SK (签名密钥，可选)')
 
 watch(keyProviders, (providers) => {
   if (!providers.some((provider) => provider.id === credentialProviderId.value)) credentialProviderId.value = providers[0]?.id ?? ''
