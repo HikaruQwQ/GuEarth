@@ -16,6 +16,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   reasoning: string
+  reasoningMs: number
   toolSteps: ToolStep[]
   status: 'streaming' | 'done' | 'error'
   error: string
@@ -30,6 +31,7 @@ let eventListenerBound = false
 let messageSeq = 0
 let sessionSeq = 0
 let activeSessionId = ''
+let reasoningStartAt = 0
 
 const rendererTools = new Map<string, RendererTool>()
 
@@ -58,8 +60,13 @@ export const useAiStore = defineStore('ai', () => {
     if (event.type === 'reasoning-delta' || event.type === 'text-delta') {
       const assistant = currentAssistant()
       if (!assistant || assistant.status !== 'streaming') return
-      if (event.type === 'reasoning-delta') assistant.reasoning += event.text
-      else assistant.content += event.text
+      if (event.type === 'reasoning-delta') {
+        if (!reasoningStartAt) reasoningStartAt = Date.now()
+        assistant.reasoningMs = Date.now() - reasoningStartAt
+        assistant.reasoning += event.text
+      } else {
+        assistant.content += event.text
+      }
       return
     }
     if (event.type === 'tool-start') {
@@ -149,9 +156,10 @@ export const useAiStore = defineStore('ai', () => {
     if (!question || isStreaming.value) return
     await hydrate()
     messageSeq += 1
-    messages.value.push({ id: `m${messageSeq}`, role: 'user', content: question, reasoning: '', toolSteps: [], status: 'done', error: '' })
+    messages.value.push({ id: `m${messageSeq}`, role: 'user', content: question, reasoning: '', reasoningMs: 0, toolSteps: [], status: 'done', error: '' })
     messageSeq += 1
-    messages.value.push({ id: `m${messageSeq}`, role: 'assistant', content: '', reasoning: '', toolSteps: [], status: 'streaming', error: '' })
+    messages.value.push({ id: `m${messageSeq}`, role: 'assistant', content: '', reasoning: '', reasoningMs: 0, toolSteps: [], status: 'streaming', error: '' })
+    reasoningStartAt = 0
     if (!activeModelReady()) {
       const assistant = currentAssistant()
       if (assistant) {

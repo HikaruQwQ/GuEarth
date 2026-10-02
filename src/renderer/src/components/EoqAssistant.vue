@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { nextTick, reactive, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
+import MarkdownIt from 'markdown-it'
 import { Bubble, Prompts, Sender } from 'ant-design-x-vue'
-import { CheckCircleOutlined, ClearOutlined, CloseCircleOutlined, CloseOutlined, CompassOutlined, SettingOutlined } from '@ant-design/icons-vue'
+import { ClearOutlined, CloseCircleOutlined, CloseOutlined, CompassOutlined, SettingOutlined } from '@ant-design/icons-vue'
 import { useAiStore, type ChatMessage, type ToolStep } from '@renderer/stores/ai'
 
 const store = useAiStore()
@@ -26,6 +27,17 @@ const toolLabels: Record<string, string> = {
 
 function toolLabel(name: string): string {
   return toolLabels[name] ?? name
+}
+
+const md = new MarkdownIt({ breaks: true, linkify: true })
+
+function renderMarkdown(text: string): string {
+  return md.render(text)
+}
+
+function reasoningDurationText(message: ChatMessage): string {
+  const seconds = message.reasoningMs / 1000
+  return seconds < 1 ? '已思考 <1s' : `已思考 ${Math.round(seconds)}s`
 }
 
 const reasonTouched = reactive(new Set<string>())
@@ -146,59 +158,54 @@ watch(
     <div v-else ref="listRef" class="chat-list">
       <template v-for="message in messages" :key="message.id">
         <Bubble v-if="message.role === 'user'" placement="end" :content="message.content" />
-        <Bubble v-else placement="start">
-          <template #message>
-            <div class="assistant-block">
-              <a-collapse
-                v-if="message.reasoning"
-                ghost
-                class="reasoning-collapse"
-                :active-key="reasoningActive(message)"
-                @change="toggleReasoning(message, $event)"
-              >
-                <a-collapse-panel key="reasoning">
-                  <template #header>
-                    <span v-if="message.status === 'streaming'" class="shimmer-text">正在深度思考</span>
-                    <span v-else class="collapsed-title">已深度思考</span>
-                  </template>
-                  <div class="reasoning-text">{{ message.reasoning }}</div>
-                </a-collapse-panel>
-              </a-collapse>
-              <a-collapse
-                v-if="message.toolSteps.length"
-                ghost
-                class="tool-collapse"
-                :active-key="openToolKeys(message)"
-                @change="onToolChange(message, $event)"
-              >
-                <a-collapse-panel v-for="step in message.toolSteps" :key="step.callId">
-                  <template #header>
-                    <span v-if="step.status === 'running'" class="shimmer-text">正在使用工具 {{ toolLabel(step.name) }}</span>
-                    <span v-else-if="step.status === 'ok'" class="tool-header">
-                      <CheckCircleOutlined class="tool-icon-ok" />
-                      <span>使用工具 {{ toolLabel(step.name) }}</span>
-                      <span v-if="step.summary" class="tool-summary">{{ step.summary }}</span>
-                    </span>
-                    <span v-else class="tool-header">
-                      <CloseCircleOutlined class="tool-icon-error" />
-                      <span>使用工具 {{ toolLabel(step.name) }} 失败</span>
-                      <span v-if="step.summary" class="tool-summary tool-summary-error">{{ step.summary }}</span>
-                    </span>
-                  </template>
-                  <div class="tool-io">
-                    <div class="tool-io-label">输入</div>
-                    <pre class="tool-io-body">{{ prettyInput(step) }}</pre>
-                    <div class="tool-io-label">输出</div>
-                    <pre class="tool-io-body">{{ prettyOutput(step) }}</pre>
-                  </div>
-                </a-collapse-panel>
-              </a-collapse>
-              <div v-if="message.content" class="answer-text">{{ message.content }}</div>
-              <span v-else-if="message.status === 'streaming' && !message.reasoning && message.toolSteps.length === 0" class="shimmer-text pending-line">思考中…</span>
-              <a-alert v-if="message.status === 'error'" type="error" show-icon :message="message.error" class="answer-error" />
-            </div>
-          </template>
-        </Bubble>
+        <div v-else class="assistant-block">
+          <a-collapse
+            v-if="message.reasoning"
+            ghost
+            class="reasoning-collapse"
+            :active-key="reasoningActive(message)"
+            @change="toggleReasoning(message, $event)"
+          >
+            <a-collapse-panel key="reasoning">
+              <template #header>
+                <span v-if="message.status === 'streaming'" class="shimmer-text">正在深度思考</span>
+                <span v-else class="collapsed-title">{{ reasoningDurationText(message) }}</span>
+              </template>
+              <div class="reasoning-text">{{ message.reasoning }}</div>
+            </a-collapse-panel>
+          </a-collapse>
+          <a-collapse
+            v-if="message.toolSteps.length"
+            ghost
+            class="tool-collapse"
+            :active-key="openToolKeys(message)"
+            @change="onToolChange(message, $event)"
+          >
+            <a-collapse-panel v-for="step in message.toolSteps" :key="step.callId">
+              <template #header>
+                <span v-if="step.status === 'running'" class="shimmer-text">{{ toolLabel(step.name) }}</span>
+                <span v-else-if="step.status === 'ok'" class="tool-header">
+                  <span>{{ toolLabel(step.name) }}</span>
+                  <span v-if="step.summary" class="tool-summary">{{ step.summary }}</span>
+                </span>
+                <span v-else class="tool-header">
+                  <CloseCircleOutlined class="tool-icon-error" />
+                  <span>{{ toolLabel(step.name) }}</span>
+                  <span v-if="step.summary" class="tool-summary tool-summary-error">{{ step.summary }}</span>
+                </span>
+              </template>
+              <div class="tool-io">
+                <div class="tool-io-label">输入</div>
+                <pre class="tool-io-body">{{ prettyInput(step) }}</pre>
+                <div class="tool-io-label">输出</div>
+                <pre class="tool-io-body">{{ prettyOutput(step) }}</pre>
+              </div>
+            </a-collapse-panel>
+          </a-collapse>
+          <div v-if="message.content" class="answer-text" v-html="renderMarkdown(message.content)"></div>
+          <span v-else-if="message.status === 'streaming' && !message.reasoning && message.toolSteps.length === 0" class="shimmer-text pending-line">思考中…</span>
+          <a-alert v-if="message.status === 'error'" type="error" show-icon :message="message.error" class="answer-error" />
+        </div>
       </template>
     </div>
 
@@ -229,7 +236,6 @@ h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28p
 .collapsed-title{color:rgba(0,0,0,.45)}
 .reasoning-text{color:rgba(0,0,0,.45);font-size:12px;line-height:20px;white-space:pre-wrap;word-break:break-word;max-height:180px;overflow-y:auto}
 .tool-header{display:inline-flex;align-items:center;gap:6px;min-width:0}
-.tool-icon-ok{color:#52c41a}
 .tool-icon-error{color:#ff4d4f}
 .tool-summary{color:rgba(0,0,0,.45);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tool-summary-error{color:#ff4d4f}
@@ -237,7 +243,26 @@ h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28p
 .tool-io-label{color:rgba(0,0,0,.45);font-size:12px;line-height:20px}
 .tool-io-body{margin:0 0 8px;padding:8px;background:#f5f5f5;border-radius:4px;color:rgba(0,0,0,.65);font-family:ui-monospace,SFMono-Regular,Consolas,'Courier New',monospace;font-size:12px;line-height:18px;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto}
 .tool-io-body:last-child{margin-bottom:0}
-.answer-text{color:rgba(0,0,0,.88);font-size:14px;line-height:22px;white-space:pre-wrap;word-break:break-word}
+.answer-text{color:rgba(0,0,0,.88);font-size:14px;line-height:22px;word-break:break-word;min-width:0}
+.answer-text :deep(p){margin:0 0 8px}
+.answer-text :deep(p:last-child){margin-bottom:0}
+.answer-text :deep(h1),.answer-text :deep(h2),.answer-text :deep(h3),.answer-text :deep(h4),.answer-text :deep(h5),.answer-text :deep(h6){margin:16px 0 8px;color:rgba(0,0,0,.88);font-weight:600;line-height:24px}
+.answer-text :deep(h1){font-size:16px}
+.answer-text :deep(h2),.answer-text :deep(h3),.answer-text :deep(h4),.answer-text :deep(h5),.answer-text :deep(h6){font-size:14px}
+.answer-text :deep(ul),.answer-text :deep(ol){margin:0 0 8px;padding-left:20px}
+.answer-text :deep(li){margin:2px 0}
+.answer-text :deep(li>ul),.answer-text :deep(li>ol){margin-bottom:0}
+.answer-text :deep(blockquote){margin:0 0 8px;padding:4px 12px;border-left:3px solid rgba(5,5,5,.06);color:rgba(0,0,0,.65)}
+.answer-text :deep(blockquote p:last-child){margin-bottom:0}
+.answer-text :deep(code){padding:2px 4px;background:rgba(0,0,0,.06);border-radius:4px;font-family:ui-monospace,SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:13px;line-height:20px}
+.answer-text :deep(pre){margin:0 0 8px;padding:12px;background:#f5f5f5;border-radius:6px;overflow-x:auto}
+.answer-text :deep(pre code){padding:0;background:none;border-radius:0}
+.answer-text :deep(table){display:block;width:max-content;max-width:100%;margin:0 0 8px;overflow-x:auto;border-collapse:collapse}
+.answer-text :deep(th),.answer-text :deep(td){padding:4px 8px;border:1px solid rgba(5,5,5,.06)}
+.answer-text :deep(th){font-weight:600}
+.answer-text :deep(a){color:#1677ff}
+.answer-text :deep(hr){margin:12px 0;border:0;border-top:1px solid rgba(5,5,5,.06)}
+.answer-text :deep(img){max-width:100%;border-radius:6px}
 .pending-line{margin:2px 0}
 .answer-error{margin-top:4px}
 .shimmer-text{
