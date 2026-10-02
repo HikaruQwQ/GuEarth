@@ -22,7 +22,6 @@
     "electron-vite": "^5.0.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.6",
-    "vite-plugin-static-copy": "^4.1.1",
     "vue-tsc": "^3.3.11"
   }
 }

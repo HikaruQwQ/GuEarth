@@ -1,53 +1,74 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
-import * as Cesium from 'cesium'
+import { ref } from 'vue'
+import { storeToRefs } from 'pinia'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
+import { useGlobeStore } from '@renderer/stores/globe'
+import { useCesiumViewer } from '@renderer/composables/useCesiumViewer'
+import GlobeToolbar from '@renderer/components/GlobeToolbar.vue'
+import CameraStatus from '@renderer/components/CameraStatus.vue'
+import LayerPanel from '@renderer/components/LayerPanel.vue'
+
+const store = useGlobeStore()
+const { isLayerPanelOpen, layers, selectedLayerId, globeError, isGlobeReady, camera } =
+  storeToRefs(store)
 
 const globeContainer = ref<HTMLDivElement>()
-let viewer: Cesium.Viewer | undefined
+const { switchBasemap, setLayerOpacity, flyTo } = useCesiumViewer(globeContainer)
 
-onMounted(() => {
-  if (!globeContainer.value) return
+function handleOpenLayers(): void {
+  store.setLayerPanelOpen(true)
+}
 
-  viewer = new Cesium.Viewer(globeContainer.value, {
-    baseLayer: false,
-    baseLayerPicker: false,
-    geocoder: false,
-    animation: false,
-    timeline: false,
-    sceneModePicker: false,
-    navigationHelpButton: false,
-    fullscreenButton: false,
-    homeButton: false,
-    infoBox: false,
-    selectionIndicator: false
-  })
+function handleClosePanel(): void {
+  store.setLayerPanelOpen(false)
+}
 
-  viewer.imageryLayers.addImageryProvider(
-    new Cesium.UrlTemplateImageryProvider({
-      url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-      credit: '© OpenStreetMap contributors'
-    })
-  )
+function handleSelectLayer(id: string): void {
+  switchBasemap(id)
+}
 
-  viewer.camera.setView({
-    destination: Cesium.Cartesian3.fromDegrees(105, 35, 15000000)
-  })
-})
+function handleOpacityChange(id: string, opacity: number): void {
+  setLayerOpacity(id, opacity)
+}
 
-onBeforeUnmount(() => {
-  viewer?.destroy()
-})
+function handleHome(): void {
+  flyTo(105, 35, 15000000)
+}
+
+function handleRetry(): void {
+  location.reload()
+}
 </script>
 
 <template>
-  <div ref="globeContainer" class="globe"></div>
+  <div class="app">
+    <div ref="globeContainer" class="globe"></div>
+    <GlobeToolbar @open-layers="handleOpenLayers" @home="handleHome" />
+    <CameraStatus :camera="camera" />
+    <LayerPanel
+      :open="isLayerPanelOpen"
+      :layers="layers"
+      :selected-layer-id="selectedLayerId"
+      :error="globeError"
+      :loading="!isGlobeReady"
+      @close="handleClosePanel"
+      @select="handleSelectLayer"
+      @opacity="handleOpacityChange"
+      @retry="handleRetry"
+    />
+  </div>
 </template>
 
 <style scoped>
-.globe {
+.app {
+  position: relative;
   width: 100%;
   height: 100%;
   overflow: hidden;
+}
+
+.globe {
+  width: 100%;
+  height: 100%;
 }
 </style>

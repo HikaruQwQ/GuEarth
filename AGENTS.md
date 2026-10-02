@@ -13,7 +13,8 @@ map data providers, an AI globe assistant ("EOQ agent"), and teaching/drawing to
 | Layer | Choice | Notes |
 | --- | --- | --- |
 | Shell | Electron + electron-vite | contextIsolation on, nodeIntegration off, typed preload IPC (`window.guEarth`) |
-| Renderer | Vue 3 + Pinia + **Ant Design Vue** | UI framework is Ant Design Vue — see [DESIGN.md](./DESIGN.md) || 3D / Map | CesiumJS | Static assets (Workers/Assets/Widgets) copied to `cesium/` via vite-plugin-static-copy; `CESIUM_BASE_URL=./cesium` |
+| Renderer | Vue 3 + Pinia + **Ant Design Vue** | UI framework is Ant Design Vue — see [DESIGN.md](./DESIGN.md) |
+| 3D / Map | CesiumJS | Static assets (Workers/ThirdParty/Assets/Widgets) served from `cesium/` by the inline plugin in `electron.vite.config.ts`; `CESIUM_BASE_URL=./cesium/`. The renderer CSP must keep `'unsafe-eval'` — Cesium's bundled Knockout calls `eval` at module load, so without it the whole entry module aborts and the window is blank |
 | AI | OpenAI-compatible streaming client in the main process | Provider-agnostic (DeepSeek/Qwen/OpenAI…); API keys live **only** in the main process via `safeStorage`, never in the renderer |
 | Storage | better-sqlite3 + electron-store | Annotations, bookmarks, lessons; settings |
 | Packaging | electron-builder | Windows NSIS first |
@@ -76,7 +77,9 @@ npm run typecheck  # tsc (node) + vue-tsc (web)
 - **No code comments** in any file type. Encode reasoning in names, structure, and tests.
 - **Commit messages and PR titles/descriptions in English.** Conversation with the user in
   Chinese.
-- Renderer root is `src/renderer` — static-copy/glob paths must be absolute with **forward
-  slashes** on Windows.
+- Renderer root is `src/renderer`. Cesium's static assets are served and copied by the inline
+  `cesiumStaticPlugin` in `electron.vite.config.ts`; do not swap in a glob-based copy plugin —
+  on Windows it nests the full source path under `dest`, and `rename.stripBase` miscounts
+  backslash-separated segments.
 - Verify UI changes by running `npm run dev` and exercising the feature; report explicitly if a
   change could not be visually verified.
