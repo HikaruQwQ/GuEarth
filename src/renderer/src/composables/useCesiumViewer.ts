@@ -205,6 +205,8 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
         applyTerrainRendering()
         viewer.value.camera.moveEnd.addEventListener(updateCameraState)
         viewer.value.camera.moveEnd.addEventListener(syncAutoProvider)
+        viewer.value.camera.percentageChanged = 0.02
+        viewer.value.camera.changed.addEventListener(updateCameraState)
         updateCameraState()
         const initialLayerId = store.selectedLayerId
         void addLayer(initialLayerId, generation).then(async (loaded) => {
@@ -231,6 +233,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     if (!currentViewer || currentViewer.isDestroyed()) return
     currentViewer.camera.moveEnd.removeEventListener(updateCameraState)
     currentViewer.camera.moveEnd.removeEventListener(syncAutoProvider)
+    currentViewer.camera.changed.removeEventListener(updateCameraState)
     currentViewer.destroy()
     viewer.value = undefined
     imageryLayers.clear()

@@ -1,8 +1,15 @@
 <script setup lang="ts">
-import { AppstoreOutlined, HomeOutlined } from '@ant-design/icons-vue'
+import { AimOutlined, AppstoreOutlined, CloudOutlined, HomeOutlined, RobotOutlined } from '@ant-design/icons-vue'
+
+defineProps<{
+  active: string[]
+}>()
 
 defineEmits<{
   openLayers: []
+  openTerrainLab: []
+  openMonsoon: []
+  openAssistant: []
   home: []
 }>()
 </script>
@@ -10,8 +17,23 @@ defineEmits<{
 <template>
   <div class="toolbar">
     <a-tooltip title="图层管理" placement="right">
-      <a-button type="text" class="toolbar-btn" aria-label="图层管理" @click="$emit('openLayers')">
+      <a-button type="text" :class="['toolbar-btn', { active: active.includes('layers') }]" aria-label="图层管理" @click="$emit('openLayers')">
         <AppstoreOutlined />
+      </a-button>
+    </a-tooltip>
+    <a-tooltip title="地形实验室（框选区域生成 3D 地形与剖面）" placement="right">
+      <a-button type="text" :class="['toolbar-btn', { active: active.includes('terrain') }]" aria-label="地形实验室" @click="$emit('openTerrainLab')">
+        <AimOutlined />
+      </a-button>
+    </a-tooltip>
+    <a-tooltip title="季风 · 洋流 · 气候（随月份联动）" placement="right">
+      <a-button type="text" :class="['toolbar-btn', { active: active.includes('monsoon') }]" aria-label="季风洋流气候" @click="$emit('openMonsoon')">
+        <CloudOutlined />
+      </a-button>
+    </a-tooltip>
+    <a-tooltip title="智能助手（搜索地点 / 地貌选点）" placement="right">
+      <a-button type="text" :class="['toolbar-btn', { active: active.includes('assistant') }]" aria-label="智能助手" @click="$emit('openAssistant')">
+        <RobotOutlined />
       </a-button>
     </a-tooltip>
     <a-tooltip title="回到初始视角" placement="right">
@@ -50,5 +72,15 @@ defineEmits<{
 .toolbar-btn:hover {
   background: rgba(0, 0, 0, 0.04);
   color: rgba(0, 0, 0, 0.88);
+}
+
+.toolbar-btn.active {
+  background: #1677ff;
+  color: #ffffff;
+}
+
+.toolbar-btn.active:hover {
+  background: #4096ff;
+  color: #ffffff;
 }
 </style>

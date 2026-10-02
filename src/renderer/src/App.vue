@@ -1,15 +1,29 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed, ref } from 'vue'
 import { storeToRefs } from 'pinia'
+import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { useGlobeStore } from '@renderer/stores/globe'
+import { useTerrainLabStore } from '@renderer/stores/terrainLab'
+import { useMonsoonStore } from '@renderer/stores/monsoon'
+import { useAssistantStore } from '@renderer/stores/assistant'
 import { useCesiumViewer } from '@renderer/composables/useCesiumViewer'
+import { useRegionTerrain } from '@renderer/composables/useRegionTerrain'
+import { useMonsoonLayer } from '@renderer/composables/useMonsoonLayer'
+import { useMarkers } from '@renderer/composables/useMarkers'
 import GlobeToolbar from '@renderer/components/GlobeToolbar.vue'
 import CameraStatus from '@renderer/components/CameraStatus.vue'
 import LayerPanel from '@renderer/components/LayerPanel.vue'
 import LevelViewSwitcher from '@renderer/components/LevelViewSwitcher.vue'
+import TerrainLabPanel from '@renderer/components/TerrainLabPanel.vue'
+import MonsoonPanel from '@renderer/components/MonsoonPanel.vue'
+import AssistantPanel from '@renderer/components/AssistantPanel.vue'
+import type { GeoBounds } from '../../preload/types'
 
 const store = useGlobeStore()
+const terrainLabStore = useTerrainLabStore()
+const monsoonStore = useMonsoonStore()
+const assistantStore = useAssistantStore()
 const {
   isLayerPanelOpen,
   layers,
@@ -32,8 +46,47 @@ const {
   storeToRefs(store)
 
 const globeContainer = ref<HTMLDivElement>()
-const { switchBasemap, setProviderStyle, setLayerOpacity, flyTo, toggleLevelView, setTerrain, setTerrainExaggeration, setTerrainLighting } = useCesiumViewer(globeContainer)
+const { viewer, switchBasemap, setProviderStyle, setLayerOpacity, flyTo, setTerrain, toggleLevelView, setTerrainExaggeration, setTerrainLighting } = useCesiumViewer(globeContainer)
 const levelSwitcherVisible = computed(() => isGlobeReady.value && camera.value.height < 5000000)
+const regionTerrain = useRegionTerrain(viewer)
+useMonsoonLayer(viewer)
+const markers = useMarkers(viewer)
+terrainLabStore.registerLab(regionTerrain)
+const toolbarActive = computed(() => {
+  const active: string[] = []
+  if (isLayerPanelOpen.value) active.push('layers')
+  if (terrainLabStore.panelOpen) active.push('terrain')
+  if (monsoonStore.panelOpen) active.push('monsoon')
+  if (assistantStore.open) active.push('assistant')
+  return active
+})
+
+function currentViewBounds(): GeoBounds | null {
+  const currentViewer = viewer.value
+  if (!currentViewer || currentViewer.isDestroyed()) return null
+  const rectangle = currentViewer.camera.computeViewRectangle()
+  if (!rectangle) return null
+  return {
+    west: Cesium.Math.toDegrees(rectangle.west),
+    south: Cesium.Math.toDegrees(rectangle.south),
+    east: Cesium.Math.toDegrees(rectangle.east),
+    north: Cesium.Math.toDegrees(rectangle.north)
+  }
+}
+
+assistantStore.registerTools({
+  flyTo: (lon, lat, height) => {
+    const resolved = height ?? Math.min(Math.max(camera.value.height, 60000), 3000000)
+    flyTo(lon, lat, resolved)
+  },
+  viewBounds: currentViewBounds,
+  camera: () => ({ longitude: camera.value.longitude, latitude: camera.value.latitude, height: camera.value.height }),
+  setMonth: (month) => {
+    monsoonStore.setMonth(month)
+    monsoonStore.setPanelOpen(true)
+  },
+  dropMarker: markers.dropMarker
+})
 
 function handleOpenLayers(): void {
   store.setLayerPanelOpen(true)
@@ -136,7 +189,14 @@ function handleLevelViewToggle(): void {
 <template>
   <div class="app">
     <div ref="globeContainer" class="globe"></div>
-    <GlobeToolbar @open-layers="handleOpenLayers" @home="handleHome" />
+    <GlobeToolbar
+      :active="toolbarActive"
+      @open-layers="handleOpenLayers"
+      @open-terrain-lab="terrainLabStore.setPanelOpen(true)"
+      @open-monsoon="monsoonStore.setPanelOpen(true)"
+      @open-assistant="assistantStore.setOpen(true)"
+      @home="handleHome"
+    />
     <CameraStatus :camera="camera" />
     <LevelViewSwitcher
       :level-view-active="levelViewActive"
@@ -173,6 +233,9 @@ function handleLevelViewToggle(): void {
       @credential-save="handleCredentialSave"
       @credential-clear="handleCredentialClear"
     />
+    <TerrainLabPanel />
+    <MonsoonPanel />
+    <AssistantPanel />
   </div>
 </template>
 

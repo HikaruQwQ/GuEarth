@@ -50,10 +50,10 @@ src/renderer/   Vue app: globe view, layer registry, drawing tools, EOQ assistan
 | Phase | Scope | Status |
 | --- | --- | --- |
 | 0 | Scaffold: electron-vite + TS + Vue + Cesium build | Done (`1a61c43`) |
-| 1 | Globe core: viewer, camera, fly-to, basemap layers, layer-manager skeleton | Pending |
-| 2 | Multi-provider layers, API-key settings (encrypted), terrain providers, tile cache | Pending |
-| 3 | Teaching tools: draw point/line/polygon, measure distance/area, annotations, persistence | Pending |
-| 4 | EOQ agent: provider-agnostic AI settings, streaming chat, tool-calling bridge | Pending |
+| 1 | Globe core: viewer, camera, fly-to, basemap layers, layer-manager skeleton | Done (`64f786d`) |
+| 2 | Multi-provider layers, API-key settings (encrypted), terrain providers, tile cache | Done (tile protocol, key vault, tile cache) |
+| 3 | Teaching tools: terrain lab (region selection → 3D mesh + contours + elevation profile), draw tools, annotations, persistence | Partial (terrain lab done; annotations/SQLite pending) |
+| 4 | EOQ agent: provider-agnostic AI settings, streaming chat, tool-calling bridge | Partial (streaming chat + tools done; no LLM features beyond globe tools) |
 | 5 | Packaging, auto-update stub, offline groundwork, performance | Pending |
 
 ## Commands

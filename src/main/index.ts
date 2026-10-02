@@ -3,6 +3,8 @@ import { join } from 'path'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs'
 import { createHash } from 'crypto'
 import type { GuEarthSettings, GuEarthSettingsPatch, ProviderCredentialStatus, TileCacheEntry, TileCacheStats, TileKey } from '../preload'
+import { findPeaks, searchPlaces } from './places'
+import { registerAiIpc } from './ai'
 
 interface PersistedSettings {
   selectedImageryProviderId: string
@@ -16,6 +18,8 @@ interface PersistedSettings {
   providerStyles: Record<string, string>
   providerCredentials: Record<string, ProviderCredentialStatus>
   sceneMode: '2D' | '3D'
+  aiBaseUrl: string
+  aiModel: string
 }
 
 const defaultSettings: PersistedSettings = {
@@ -36,7 +40,9 @@ const defaultSettings: PersistedSettings = {
     tianditu: 'road'
   },
   providerCredentials: {},
-  sceneMode: '3D'
+  sceneMode: '3D',
+  aiBaseUrl: '',
+  aiModel: 'deepseek-chat'
 }
 
 let settingsPath = ''
@@ -90,7 +96,9 @@ function readSettings(): PersistedSettings {
       globalProviderId: typeof parsed.globalProviderId === 'string' ? parsed.globalProviderId : defaultSettings.globalProviderId,
       providerStyles: normalizedStyles,
       providerCredentials,
-      sceneMode: parsed.sceneMode === '2D' ? '2D' : '3D'
+      sceneMode: parsed.sceneMode === '2D' ? '2D' : '3D',
+      aiBaseUrl: typeof parsed.aiBaseUrl === 'string' && /^https?:\/\/[^\s]+$/i.test(parsed.aiBaseUrl) ? parsed.aiBaseUrl : '',
+      aiModel: typeof parsed.aiModel === 'string' && parsed.aiModel.length <= 120 ? parsed.aiModel : 'deepseek-chat'
     }
   } catch {
     return { ...defaultSettings, providerCredentials: {} }
@@ -425,6 +433,18 @@ function registerIpcHandlers(): void {
       }
       nextSettings.providerStyles = providerStyles
     }
+    if (patch.sceneMode !== undefined) {
+      if (patch.sceneMode !== '2D' && patch.sceneMode !== '3D') throw new Error('无效的场景模式')
+      nextSettings.sceneMode = patch.sceneMode
+    }
+    if (patch.aiBaseUrl !== undefined) {
+      if (typeof patch.aiBaseUrl !== 'string' || patch.aiBaseUrl.length > 300 || (patch.aiBaseUrl !== '' && !/^https?:\/\/[^\s]+$/i.test(patch.aiBaseUrl))) throw new Error('无效的 AI 服务地址')
+      nextSettings.aiBaseUrl = patch.aiBaseUrl
+    }
+    if (patch.aiModel !== undefined) {
+      if (typeof patch.aiModel !== 'string' || patch.aiModel.length > 120) throw new Error('无效的模型名称')
+      nextSettings.aiModel = patch.aiModel
+    }
     settings = nextSettings
     saveSettings()
     return settingsSnapshot()
@@ -460,6 +480,24 @@ function registerIpcHandlers(): void {
     rmSync(join(tileCachePath, safeId(providerId)), { recursive: true, force: true })
   })
   ipcMain.handle('tiles:stats', () => cacheStats())
+  ipcMain.handle('places:search', (_event, query: string) => searchPlaces(query))
+  ipcMain.handle('places:peaks', (_event, bounds: unknown, minElevation: unknown) => findPeaks(bounds, minElevation))
+}
+
+function registerAiHandlers(): void {
+  registerAiIpc({
+    getBaseUrl: () => settings.aiBaseUrl,
+    getModel: () => settings.aiModel,
+    getApiKey: () => readProviderKey('ai-provider'),
+    setApiKey: (apiKey) => {
+      assertEncryptionAvailable()
+      writeFileSync(credentialPath('ai-provider'), safeStorage.encryptString(apiKey))
+    },
+    clearApiKey: () => {
+      const path = credentialPath('ai-provider')
+      if (existsSync(path)) unlinkSync(path)
+    }
+  })
 }
 
 function createWindow(): void {
@@ -499,6 +537,7 @@ app.whenReady().then(() => {
   mkdirSync(tileCachePath, { recursive: true })
   settings = readSettings()
   registerIpcHandlers()
+  registerAiHandlers()
   protocol.handle('guearth-tile', handleTileProtocol)
   createWindow()
 
