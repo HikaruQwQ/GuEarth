@@ -10,9 +10,6 @@ interface PersistedSettings {
   terrainExaggeration: number
   terrainLighting: boolean
   tileCacheEnabled: boolean
-  selectionMode: 'manual' | 'auto'
-  chinaProviderId: string
-  globalProviderId: string
   providerStyles: Record<string, string>
   providerCredentials: Record<string, ProviderCredentialStatus>
   sceneMode: '2D' | '3D'
@@ -24,16 +21,12 @@ const defaultSettings: PersistedSettings = {
   terrainExaggeration: 2,
   terrainLighting: false,
   tileCacheEnabled: true,
-  selectionMode: 'manual',
-  chinaProviderId: 'tianditu',
-  globalProviderId: 'osm',
   providerStyles: {
     osm: 'standard',
     'esri-imagery': 'satellite',
     opentopomap: 'topo',
     amap: 'road',
-    baidu: 'road',
-    tianditu: 'road'
+    baidu: 'road'
   },
   providerCredentials: {},
   sceneMode: '3D'
@@ -85,9 +78,6 @@ function readSettings(): PersistedSettings {
       terrainExaggeration: typeof parsed.terrainExaggeration === 'number' && Number.isFinite(parsed.terrainExaggeration) ? Math.min(5, Math.max(1, parsed.terrainExaggeration)) : defaultSettings.terrainExaggeration,
       terrainLighting: parsed.terrainLighting === true,
       tileCacheEnabled: parsed.tileCacheEnabled !== false,
-      selectionMode: parsed.selectionMode === 'auto' ? 'auto' : 'manual',
-      chinaProviderId: typeof parsed.chinaProviderId === 'string' ? parsed.chinaProviderId : defaultSettings.chinaProviderId,
-      globalProviderId: typeof parsed.globalProviderId === 'string' ? parsed.globalProviderId : defaultSettings.globalProviderId,
       providerStyles: normalizedStyles,
       providerCredentials,
       sceneMode: parsed.sceneMode === '2D' ? '2D' : '3D'
@@ -346,10 +336,6 @@ function tileRemoteUrl(providerId: string, styleId: string, level: number, x: nu
     const sn = computeBaiduSn('/onlinelabel/', `qt=tile&${baseQueryString}&styles=pl&scaler=1&udt=20230101`, sk)
     return `https://online${subdomain}.map.bdimg.com${pathWithQuery}&sn=${sn}`
   }
-  if (providerId === 'tianditu') {
-    const layer = styleId === 'satellite' ? 'img' : 'vec'
-    return `https://t${subdomain}.tianditu.gov.cn/${layer}_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=default&TILEMATRIXSET=w&TILEMATRIX=${level}&TILEROW=${y}&TILECOL=${x}&FORMAT=tiles${key ? `&tk=${encodeURIComponent(key)}` : ''}`
-  }
   return undefined
 }
 
@@ -373,8 +359,7 @@ async function handleTileProtocol(request: Request): Promise<Response> {
     const response = await net.fetch(remoteUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
-        'Referer': 'https://www.tianditu.gov.cn/'
+        'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8'
       }
     })
     if (!response.ok) return new Response(`Tile request failed: ${response.status}`, { status: response.status })
@@ -411,12 +396,6 @@ function registerIpcHandlers(): void {
       if (typeof patch.tileCacheEnabled !== 'boolean') throw new Error('无效的缓存设置')
       nextSettings.tileCacheEnabled = patch.tileCacheEnabled
     }
-    if (patch.selectionMode !== undefined) {
-      if (patch.selectionMode !== 'manual' && patch.selectionMode !== 'auto') throw new Error('无效的区域模式')
-      nextSettings.selectionMode = patch.selectionMode
-    }
-    if (patch.chinaProviderId !== undefined) nextSettings.chinaProviderId = safeId(patch.chinaProviderId)
-    if (patch.globalProviderId !== undefined) nextSettings.globalProviderId = safeId(patch.globalProviderId)
     if (patch.providerStyles !== undefined) {
       if (!isRecord(patch.providerStyles)) throw new Error('无效的影像样式')
       const providerStyles = { ...settings.providerStyles }

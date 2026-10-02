@@ -11,9 +11,6 @@ export interface GuEarthSettings {
   terrainExaggeration: number
   terrainLighting: boolean
   tileCacheEnabled: boolean
-  selectionMode: 'manual' | 'auto'
-  chinaProviderId: string
-  globalProviderId: string
   providerStyles: Record<string, string>
   providerCredentials: Record<string, ProviderCredentialStatus>
   sceneMode: '2D' | '3D'
@@ -25,9 +22,6 @@ export interface GuEarthSettingsPatch {
   terrainExaggeration?: number
   terrainLighting?: boolean
   tileCacheEnabled?: boolean
-  selectionMode?: 'manual' | 'auto'
-  chinaProviderId?: string
-  globalProviderId?: string
   providerStyles?: Record<string, string>
   sceneMode?: '2D' | '3D'
 }
