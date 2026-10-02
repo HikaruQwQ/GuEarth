@@ -13,7 +13,6 @@ import { useCesiumViewer } from '@renderer/composables/useCesiumViewer'
 import { useDrawing, measureShape } from '@renderer/composables/useDrawing'
 import { useThematicLayers } from '@renderer/composables/useThematicLayers'
 import { useTimezoneCompare } from '@renderer/composables/useTimezoneCompare'
-import { useGlobeFraming } from '@renderer/composables/useGlobeFraming'
 import { datePartsOf, dayLength, declinationForDate, formatClock, isValidDate, noonAltitudeDeg, sunTimes } from '@renderer/thematic/solarMath'
 import GlobeToolbar from '@renderer/components/GlobeToolbar.vue'
 import CameraStatus from '@renderer/components/CameraStatus.vue'
@@ -50,7 +49,6 @@ const globeContainer = ref<HTMLDivElement>()
 const { viewer, switchBasemap, setLayerOpacity, flyTo, flyToPlace, toggleLevelView, setTerrain, setTerrainExaggeration, setTerrainLighting } = useCesiumViewer(globeContainer)
 const { flyToShape } = useDrawing(viewer)
 const { comparison: timezoneComparison, clearComparison: clearTimezone } = useTimezoneCompare(viewer)
-useGlobeFraming(viewer)
 const climateStore = useClimateStore()
 const solarStore = useSolarStore()
 const { overlays: thematicOverlays } = storeToRefs(climateStore)
