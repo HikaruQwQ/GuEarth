@@ -67,7 +67,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .month-timeline {
   position: absolute;
-  bottom: 16px;
+  bottom: 80px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;

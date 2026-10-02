@@ -31,7 +31,6 @@ import '@renderer/teaching'
 import GlobeToolbar from '@renderer/components/GlobeToolbar.vue'
 import CameraStatus from '@renderer/components/CameraStatus.vue'
 import LayerPanel from '@renderer/components/LayerPanel.vue'
-import LevelViewSwitcher from '@renderer/components/LevelViewSwitcher.vue'
 import PlaceSearchBox from '@renderer/components/PlaceSearchBox.vue'
 import WindParticles from '@renderer/components/WindParticles.vue'
 import MonthTimeline from '@renderer/components/MonthTimeline.vue'
@@ -627,8 +626,11 @@ async function handleDrop(event: DragEvent): Promise<void> {
     <WindParticles v-if="thematicOverlays['wind-particles']" :viewer="viewer" />
     <GlobeToolbar
       :active-panels="toolbarPanels"
+      :level-view-active="levelViewActive"
+      :level-view-visible="levelSwitcherVisible"
       @open="handleToolbarOpen"
       @home="handleHome"
+      @toggle-level-view="handleLevelViewToggle"
     />
     <PlaceSearchBox @select="flyToPlace" />
     <MonthTimeline />
@@ -637,11 +639,6 @@ async function handleDrop(event: DragEvent): Promise<void> {
     <CameraStatus :camera="camera" :scale-bar="scaleBarReadout" />
     <EoqAssistant />
     <AiSettingsModal />
-    <LevelViewSwitcher
-      :level-view-active="levelViewActive"
-      :visible="levelSwitcherVisible"
-      @toggle="handleLevelViewToggle"
-    />
     <ExportPanel
       :resolve-viewer="() => viewer"
       :scale-bar="scaleBarReadout"
