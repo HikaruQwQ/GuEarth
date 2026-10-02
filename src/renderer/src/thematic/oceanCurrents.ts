@@ -42,6 +42,11 @@ export interface PathPoint {
   direction: [number, number]
 }
 
+function shortestLonDelta(lon0: number, lon1: number): number {
+  const delta = lon1 - lon0
+  return delta > 180 ? delta - 360 : delta < -180 ? delta + 360 : delta
+}
+
 export function pathPointAt(path: Array<[number, number]>, fraction: number): PathPoint {
   if (path.length < 2) return { position: path[0] ?? [0, 0], direction: [1, 0] }
   const weights: number[] = []
@@ -49,8 +54,7 @@ export function pathPointAt(path: Array<[number, number]>, fraction: number): Pa
   for (let i = 1; i < path.length; i += 1) {
     const [lon0, lat0] = path[i - 1]
     const [lon1, lat1] = path[i]
-    let dLon = lon1 - lon0
-    dLon = Math.min(Math.abs(dLon), 360 - Math.abs(dLon)) * Math.sign(dLon)
+    const dLon = shortestLonDelta(lon0, lon1)
     const length = Math.hypot(dLon * Math.cos((lat0 + lat1) * 0.5 * (Math.PI / 180)), lat1 - lat0)
     weights.push(length)
     total += length
@@ -62,13 +66,12 @@ export function pathPointAt(path: Array<[number, number]>, fraction: number): Pa
       const t = weights[i - 1] > 0 ? (target - accumulated) / weights[i - 1] : 0
       const [lon0, lat0] = path[i - 1]
       const [lon1, lat1] = path[i]
-      let dLon = lon1 - lon0
-      dLon = Math.min(Math.abs(dLon), 360 - Math.abs(dLon)) * Math.sign(dLon)
+      const dLon = shortestLonDelta(lon0, lon1)
       const dirX = dLon * Math.cos(((lat0 + lat1) / 2) * (Math.PI / 180))
       const dirY = lat1 - lat0
       const norm = Math.hypot(dirX, dirY) || 1
       return {
-        position: [lon0 + (lon1 - lon0) * t, lat0 + (lat1 - lat0) * t],
+        position: [lon0 + dLon * t, lat0 + (lat1 - lat0) * t],
         direction: [dirX / norm, dirY / norm]
       }
     }

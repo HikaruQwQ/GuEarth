@@ -41,6 +41,7 @@ type LayerLoadResult =
 const DEPTH_TEST_FREE_HEIGHT_FACTOR = 1.3
 const MIN_DEPTH_TEST_FREE_DISTANCE = 10_000
 const MAX_DEPTH_TEST_FREE_DISTANCE = 8_000_000
+const COARSE_DEPTH_TEST_DISTANCE = 100_000_000
 
 function normalizeHeading(radians: number): number {
   const degrees = Cesium.Math.toDegrees(radians) % 360
@@ -73,6 +74,79 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     const height = currentViewer.camera.positionCartographic.height
     const distance = Math.min(Math.max(height * DEPTH_TEST_FREE_HEIGHT_FACTOR, MIN_DEPTH_TEST_FREE_DISTANCE), MAX_DEPTH_TEST_FREE_DISTANCE)
     currentViewer.scene.minimumDisableDepthTestDistance = distance
+  }
+
+  const coarseStampedCollections = new WeakSet<object>()
+
+  function applyCoarseDepthTestDistance(collection: unknown): void {
+    if (!collection || coarseStampedCollections.has(collection)) return
+    coarseStampedCollections.add(collection)
+    ;(collection as { coarseDepthTestDistance: number }).coarseDepthTestDistance = COARSE_DEPTH_TEST_DISTANCE
+  }
+
+  function stampEntityClusterDepthRanges(cluster: Cesium.EntityCluster): void {
+    const slots = cluster as unknown as Record<string, unknown>
+    applyCoarseDepthTestDistance(slots._labelCollection)
+    applyCoarseDepthTestDistance(slots._billboardCollection)
+    applyCoarseDepthTestDistance(slots._clusterLabelCollection)
+    applyCoarseDepthTestDistance(slots._clusterBillboardCollection)
+  }
+
+  function stampCoarseDepthTestDistance(primitives: Cesium.PrimitiveCollection, visited: Set<object>): void {
+    for (let index = 0; index < primitives.length; index += 1) {
+      const primitive = primitives.get(index)
+      if (!primitive || visited.has(primitive)) continue
+      visited.add(primitive)
+      if (primitive instanceof Cesium.PrimitiveCollection) {
+        stampCoarseDepthTestDistance(primitive, visited)
+        continue
+      }
+      if (primitive instanceof Cesium.EntityCluster) {
+        stampEntityClusterDepthRanges(primitive)
+        continue
+      }
+      if (primitive instanceof Cesium.LabelCollection || primitive instanceof Cesium.BillboardCollection) applyCoarseDepthTestDistance(primitive)
+    }
+  }
+
+  function updateCollectionDepthTestDistances(): void {
+    const currentViewer = viewer.value
+    if (!currentViewer || currentViewer.isDestroyed()) return
+    stampCoarseDepthTestDistance(currentViewer.scene.primitives, new Set())
+  }
+
+  const horizonWrappedGraphics = new WeakSet<object>()
+  type EllipsoidalOccluderLike = { cameraPosition: Cesium.Cartesian3; isPointVisible: (point: Cesium.Cartesian3) => boolean }
+  const createEllipsoidalOccluder = Cesium as unknown as { EllipsoidalOccluder: new (ellipsoid: Cesium.Ellipsoid, position: Cesium.Cartesian3) => EllipsoidalOccluderLike }
+  const horizonOccluder = new createEllipsoidalOccluder.EllipsoidalOccluder(Cesium.Ellipsoid.WGS84, Cesium.Cartesian3.ZERO)
+  const horizonScratchPosition = new Cesium.Cartesian3()
+
+  function wrapGraphicsShowForHorizon(graphics: { show?: Cesium.Property }, position: Cesium.PositionProperty | undefined): void {
+    if (!position || horizonWrappedGraphics.has(graphics)) return
+    horizonWrappedGraphics.add(graphics)
+    const original = graphics.show
+    graphics.show = new Cesium.CallbackProperty((time?: Cesium.JulianDate) => {
+      if (original && !original.getValue(time)) return false
+      const currentViewer = viewer.value
+      if (!currentViewer || currentViewer.isDestroyed() || currentViewer.scene.mode !== Cesium.SceneMode.SCENE3D) return true
+      const point = position.getValue(time, horizonScratchPosition)
+      if (!point) return true
+      return horizonOccluder.isPointVisible(point)
+    }, false)
+  }
+
+  function updateHorizonLabelVisibility(): void {
+    const currentViewer = viewer.value
+    if (!currentViewer || currentViewer.isDestroyed()) return
+    horizonOccluder.cameraPosition = currentViewer.camera.positionWC
+    const wrapAll = (entities: Cesium.Entity[]): void => {
+      for (const entity of entities) {
+        if (entity.label) wrapGraphicsShowForHorizon(entity.label, entity.position)
+        if (entity.point) wrapGraphicsShowForHorizon(entity.point, entity.position)
+      }
+    }
+    wrapAll(currentViewer.entities.values)
+    for (let index = 0; index < currentViewer.dataSources.length; index += 1) wrapAll(currentViewer.dataSources.get(index).entities.values)
   }
 
   function applyTerrain(terrain: Cesium.TerrainProvider): void {
@@ -437,6 +511,8 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
         applyTerrainRendering()
         viewer.value.scene.preUpdate.addEventListener(updatePolarCapsVisibility)
         viewer.value.scene.preUpdate.addEventListener(updateDepthTestDistance)
+        viewer.value.scene.preUpdate.addEventListener(updateCollectionDepthTestDistances)
+        viewer.value.scene.preUpdate.addEventListener(updateHorizonLabelVisibility)
         viewer.value.camera.moveEnd.addEventListener(updateCameraState)
         updateCameraState()
         attachTileProgress()
@@ -486,6 +562,8 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     currentViewer.camera.moveEnd.removeEventListener(updateCameraState)
     currentViewer.scene.preUpdate.removeEventListener(updatePolarCapsVisibility)
     currentViewer.scene.preUpdate.removeEventListener(updateDepthTestDistance)
+    currentViewer.scene.preUpdate.removeEventListener(updateCollectionDepthTestDistances)
+    currentViewer.scene.preUpdate.removeEventListener(updateHorizonLabelVisibility)
     currentViewer.destroy()
     viewer.value = undefined
     selectedPlaceMarker = undefined
