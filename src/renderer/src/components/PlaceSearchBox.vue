@@ -123,8 +123,8 @@ function handleSelect(value: string, option: PlaceOption): void {
 .place-search {
   position: absolute;
   top: 16px;
-  left: 78px;
-  width: min(400px, calc(100vw - 94px));
+  left: 16px;
+  width: min(400px, calc(100vw - 32px));
   z-index: 10;
 }
 

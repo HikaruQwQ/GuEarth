@@ -14,7 +14,6 @@ import { useThematicLayers } from '@renderer/composables/useThematicLayers'
 import GlobeToolbar from '@renderer/components/GlobeToolbar.vue'
 import CameraStatus from '@renderer/components/CameraStatus.vue'
 import LayerPanel from '@renderer/components/LayerPanel.vue'
-import LevelViewSwitcher from '@renderer/components/LevelViewSwitcher.vue'
 import AnnotationPanel from '@renderer/components/AnnotationPanel.vue'
 import PlaceSearchBox from '@renderer/components/PlaceSearchBox.vue'
 import WindParticles from '@renderer/components/WindParticles.vue'
@@ -428,12 +427,15 @@ function deleteSelectedShape(): void {
     <GlobeToolbar
       :active-tool="activeTool"
       :shape-count="shapes.length"
+      :level-view-active="levelViewActive"
+      :level-view-visible="levelSwitcherVisible"
       @open-layers="handleOpenLayers"
       @open-annotations="handleOpenAnnotations"
       @open-assistant="handleOpenAssistant"
       @home="handleHome"
       @tool="handleTool"
       @clear-shapes="handleClearShapes"
+      @toggle-level-view="handleLevelViewToggle"
     />
     <PlaceSearchBox @select="flyToPlace" />
     <MonthTimeline />
@@ -442,11 +444,6 @@ function deleteSelectedShape(): void {
     <CameraStatus :camera="camera" />
     <EoqAssistant />
     <AiSettingsModal />
-    <LevelViewSwitcher
-      :level-view-active="levelViewActive"
-      :visible="levelSwitcherVisible"
-      @toggle="handleLevelViewToggle"
-    />
     <AnnotationPanel
       :open="isAnnotationPanelOpen"
       :shapes="shapes"

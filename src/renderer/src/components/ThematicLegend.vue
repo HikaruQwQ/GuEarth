@@ -41,7 +41,7 @@ const zoneEntries = climateZones.map((zone) => ({ name: zone.name, color: zone.c
 <style scoped>
 .thematic-legend {
   position: absolute;
-  bottom: 40px;
+  bottom: 80px;
   left: 16px;
   display: flex;
   flex-direction: column;
