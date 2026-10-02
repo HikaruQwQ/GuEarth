@@ -10,7 +10,7 @@ import {
   PLATE_BOUNDARIES
 } from '@renderer/utils/tectonicData'
 
-const BOUNDARY_ALTITUDE = 2000
+const BOUNDARY_ALTITUDE = 12000
 
 export function useTectonicLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
   const store = useTectonicStore()
@@ -43,7 +43,7 @@ export function useTectonicLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
 
   function buildVolcanoes(viewer: Cesium.Viewer): void {
     const points = viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection())
-    const labels = viewer.scene.primitives.add(new Cesium.LabelCollection())
+    const labels = viewer.scene.primitives.add(new Cesium.LabelCollection({ scene: viewer.scene }))
     if (!points || !labels) return
     volcanoCollection = points
     volcanoLabels = labels
@@ -55,7 +55,7 @@ export function useTectonicLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
         color: Cesium.Color.fromCssColorString('#fa8c16'),
         outlineColor: Cesium.Color.WHITE,
         outlineWidth: 1.5,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
       })
       labels.add({
         position,
@@ -67,14 +67,15 @@ export function useTectonicLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
         outlineWidth: 3,
         pixelOffset: new Cesium.Cartesian2(0, -10),
         scale: 0.9,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
       })
     }
   }
 
   function buildQuakes(viewer: Cesium.Viewer): void {
     const points = viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection())
-    const labels = viewer.scene.primitives.add(new Cesium.LabelCollection())
+    const labels = viewer.scene.primitives.add(new Cesium.LabelCollection({ scene: viewer.scene }))
     if (!points || !labels) return
     quakeCollection = points
     quakeLabels = labels
@@ -86,7 +87,7 @@ export function useTectonicLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
         color: Cesium.Color.fromCssColorString('#d4380d').withAlpha(0.75),
         outlineColor: Cesium.Color.WHITE,
         outlineWidth: 1.5,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
       })
       labels.add({
         position,
@@ -98,17 +99,18 @@ export function useTectonicLayer(viewerRef: Ref<Cesium.Viewer | undefined>) {
         outlineWidth: 3,
         pixelOffset: new Cesium.Cartesian2(0, 14),
         scale: 0.9,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
       })
     }
   }
 
   function build(viewer: Cesium.Viewer): void {
-    built = true
     buildBoundaries(viewer)
     buildVolcanoes(viewer)
     buildQuakes(viewer)
     applyVisibility()
+    built = true
   }
 
   function applyVisibility(): void {
