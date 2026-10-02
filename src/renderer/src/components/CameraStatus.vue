@@ -54,7 +54,7 @@ function formatAngle(angle: number): string {
 <style scoped>
 .camera-status {
   position: absolute;
-  bottom: 80px;
+  bottom: 16px;
   right: 16px;
   display: flex;
   gap: 12px;
