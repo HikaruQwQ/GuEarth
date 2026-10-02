@@ -2,6 +2,7 @@ import { app, shell, BrowserWindow, ipcMain, net, protocol } from 'electron'
 import { join } from 'path'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs'
 import { createHash } from 'crypto'
+import icon from '../../resources/icon.png?asset'
 import type { GeoPosition, GuEarthSettings, GuEarthSettingsPatch, ProviderCredentialStatus, StoredShape, TileCacheEntry, TileCacheStats, TileKey } from '../preload'
 import { assertEncryptionAvailable, assertSafeId, clearProviderKey, hasProviderKey, initKeyVault, readProviderKey, writeProviderKey } from './keyVault'
 import { baiduLngLatToTile, tileCenter, wgs84ToBd09 } from './geo'
@@ -379,6 +380,7 @@ function createWindow(): void {
     show: false,
     autoHideMenuBar: true,
     title: 'GuEarth',
+    icon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
