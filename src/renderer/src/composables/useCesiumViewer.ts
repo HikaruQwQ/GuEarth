@@ -28,6 +28,10 @@ const terrainRegistry: Record<string, () => Promise<Cesium.TerrainProvider>> = {
 
 const terrainName = (id: string): string => terrainCatalog.find((terrain) => terrain.id === id)?.name ?? id
 
+const DEPTH_TEST_FREE_HEIGHT_FACTOR = 1.3
+const MIN_DEPTH_TEST_FREE_DISTANCE = 10_000
+const MAX_DEPTH_TEST_FREE_DISTANCE = 8_000_000
+
 function normalizeHeading(radians: number): number {
   const degrees = Cesium.Math.toDegrees(radians) % 360
   return degrees < 0 ? degrees + 360 : degrees
@@ -44,6 +48,14 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
 
   function updatePolarCapsVisibility(): void {
     if (polarCaps && viewer.value) polarCaps.show = viewer.value.scene.mode === Cesium.SceneMode.SCENE3D
+  }
+
+  function updateDepthTestDistance(): void {
+    const currentViewer = viewer.value
+    if (!currentViewer || currentViewer.isDestroyed()) return
+    const height = currentViewer.camera.positionCartographic.height
+    const distance = Math.min(Math.max(height * DEPTH_TEST_FREE_HEIGHT_FACTOR, MIN_DEPTH_TEST_FREE_DISTANCE), MAX_DEPTH_TEST_FREE_DISTANCE)
+    currentViewer.scene.minimumDisableDepthTestDistance = distance
   }
 
   function applyTerrain(terrain: Cesium.TerrainProvider): void {
@@ -216,8 +228,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
         color: Cesium.Color.fromCssColorString('#1677ff'),
         outlineColor: Cesium.Color.WHITE,
         outlineWidth: 3,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-        disableDepthTestDistance: 10_000
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
       },
       label: {
         text: place.name,
@@ -228,8 +239,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
         style: Cesium.LabelStyle.FILL_AND_OUTLINE,
         verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
         pixelOffset: new Cesium.Cartesian2(0, -16),
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-        disableDepthTestDistance: 10_000
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
       }
     })
     void currentViewer.flyTo(selectedPlaceMarker, {
@@ -250,6 +260,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
         viewer.value.scene.mode = initialMode
         applyTerrainRendering()
         viewer.value.scene.preUpdate.addEventListener(updatePolarCapsVisibility)
+        viewer.value.scene.preUpdate.addEventListener(updateDepthTestDistance)
         viewer.value.camera.moveEnd.addEventListener(updateCameraState)
         updateCameraState()
         const initialLayerId = store.selectedLayerId
@@ -277,6 +288,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     if (!currentViewer || currentViewer.isDestroyed()) return
     currentViewer.camera.moveEnd.removeEventListener(updateCameraState)
     currentViewer.scene.preUpdate.removeEventListener(updatePolarCapsVisibility)
+    currentViewer.scene.preUpdate.removeEventListener(updateDepthTestDistance)
     currentViewer.destroy()
     viewer.value = undefined
     selectedPlaceMarker = undefined
