@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { AiChatEvent, AiSearchReference, AiSettings, AiToolDefinition, StoredAiConversation, StoredAiMessage, StoredAiPart } from '../../../preload'
+import type { AiChatEvent, AiChatTurn, AiContextCompressionResult, AiContextStats, AiSearchReference, AiSettings, AiToolDefinition, StoredAiConversation, StoredAiMessage, StoredAiPart } from '../../../preload'
 import { defaultAiSettings } from '../../../shared/aiSettings'
 
 export interface ToolStep {
@@ -33,6 +33,8 @@ export interface ToolPart {
 
 export type AssistantPart = ReasoningPart | TextPart | ToolPart
 
+export type ContextCompressionStatus = 'idle' | 'compressing' | 'error'
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
@@ -57,6 +59,25 @@ const STREAM_IDLE_TIMEOUT_MS = 120_000
 
 const rendererTools = new Map<string, RendererTool>()
 
+function emptyContextStats(contextWindow = 128_000): AiContextStats {
+  return {
+    usedTokens: 0,
+    contextWindow,
+    usagePercent: 0,
+    categories: [
+      { key: 'system', label: '系统提示词', tokens: 0, ratio: 0 },
+      { key: 'user', label: '用户消息', tokens: 0, ratio: 0 },
+      { key: 'assistant', label: '助手回复', tokens: 0, ratio: 0 },
+      { key: 'tool', label: '工具结果', tokens: 0, ratio: 0 }
+    ]
+  }
+}
+
+function formatContextTokens(tokens: number): string {
+  if (tokens < 1_000) return `${Math.max(0.1, tokens / 1_000).toFixed(1)}k`
+  return `${(tokens / 1_000).toFixed(tokens >= 10_000 ? 0 : 1)}k`
+}
+
 function stripIpcErrorPrefix(message: string): string {
   return message.replace(/^Error invoking remote method '[^']+':?\s*(Error:\s*)?/i, '')
 }
@@ -76,6 +97,10 @@ export const useAiStore = defineStore('ai', () => {
   const isPanelOpen = ref(false)
   const isSettingsOpen = ref(false)
   const hydrated = ref(false)
+  const contextStats = ref<AiContextStats>(emptyContextStats())
+  const contextCompressionStatus = ref<ContextCompressionStatus>('idle')
+  const contextCompressionNotice = ref('')
+  let contextNoticeTimer: ReturnType<typeof setTimeout> | undefined
 
   function currentAssistant(): ChatMessage | undefined {
     for (let index = messages.value.length - 1; index >= 0; index -= 1) {
@@ -83,6 +108,71 @@ export const useAiStore = defineStore('ai', () => {
       if (message.role === 'assistant') return message
     }
     return undefined
+  }
+
+  function clearContextNoticeTimer(): void {
+    if (contextNoticeTimer !== undefined) {
+      clearTimeout(contextNoticeTimer)
+      contextNoticeTimer = undefined
+    }
+  }
+
+  function setContextNotice(message: string, status: ContextCompressionStatus): void {
+    clearContextNoticeTimer()
+    contextCompressionStatus.value = status
+    contextCompressionNotice.value = message
+    if (status !== 'compressing' && message) {
+      contextNoticeTimer = setTimeout(() => {
+        contextCompressionNotice.value = ''
+        contextCompressionStatus.value = 'idle'
+        contextNoticeTimer = undefined
+      }, 4_000)
+    }
+  }
+
+  function conversationTurns(): AiChatTurn[] {
+    return messages.value
+      .filter((message) => message.status !== 'streaming' && message.status !== 'error')
+      .filter((message) => message.content.trim() !== '' || message.role === 'user')
+      .map((message) => ({ role: message.role, content: message.content }))
+  }
+
+  function applyCompressedContext(result: AiContextCompressionResult): void {
+    const streaming = messages.value.find((message) => message.role === 'assistant' && message.status === 'streaming')
+    const completed = messages.value.filter((message) => message !== streaming && message.status !== 'error')
+    const retained: ChatMessage[] = []
+    let cursor = completed.length - 1
+    for (let index = result.retainedTurns.length - 1; index >= 0; index -= 1) {
+      const turn = result.retainedTurns[index]
+      for (; cursor >= 0; cursor -= 1) {
+        const candidate = completed[cursor]
+        if (candidate.role === turn.role && candidate.content === turn.content) {
+          retained.unshift(candidate)
+          cursor -= 1
+          break
+        }
+      }
+    }
+    messageSeq += 1
+    const summary: ChatMessage = {
+      id: `m${messageSeq}`,
+      role: 'assistant',
+      content: `[上下文摘要]\n${result.summary}`,
+      parts: [{ kind: 'text', text: `[上下文摘要]\n${result.summary}` }],
+      status: 'done',
+      error: ''
+    }
+    messages.value = [summary, ...retained, ...(streaming ? [streaming] : [])]
+    contextStats.value = result.stats
+  }
+
+  async function refreshContextStats(): Promise<void> {
+    if (!window.guEarth?.ai) return
+    try {
+      contextStats.value = await window.guEarth.ai.getContextStats(conversationTurns())
+    } catch {
+      return
+    }
   }
 
   function clearIdleWatchdog(): void {
@@ -106,6 +196,32 @@ export const useAiStore = defineStore('ai', () => {
   }
 
   function handleEvent(event: AiChatEvent): void {
+    if (event.type === 'context-stats') {
+      if (event.sessionId === activeSessionId) contextStats.value = event.stats
+      return
+    }
+    if (event.type === 'context-compression-start') {
+      if (event.sessionId === activeSessionId) setContextNotice('正在压缩上下文...', 'compressing')
+      return
+    }
+    if (event.type === 'context-compressed') {
+      if (event.sessionId === activeSessionId) {
+        applyCompressedContext({
+          summary: event.summary,
+          retainedTurns: event.retainedTurns,
+          stats: event.stats,
+          beforeTokens: event.beforeTokens,
+          afterTokens: event.afterTokens
+        })
+        setContextNotice(`已压缩上下文 ${formatContextTokens(event.afterTokens)}`, 'idle')
+        void persistConversation()
+      }
+      return
+    }
+    if (event.type === 'context-compression-error') {
+      if (event.sessionId === activeSessionId) setContextNotice('无法压缩上下文', 'error')
+      return
+    }
     if (event.sessionId !== activeSessionId) return
     if (isStreaming.value) armIdleWatchdog()
     if (event.type === 'reasoning-delta' || event.type === 'text-delta') {
@@ -217,33 +333,24 @@ export const useAiStore = defineStore('ai', () => {
     if (!firstUser) return null
     const existing = conversations.value.find((item) => item.id === currentConversationId.value)
     const now = Date.now()
+    const snapshotted = messages.value.flatMap((message): StoredAiMessage[] => {
+      const status = message.status === 'streaming' ? 'done' : message.status
+      if (message.role === 'assistant' && status !== 'error' && message.content === '' && message.parts.length === 0) return []
+      const clone = JSON.parse(JSON.stringify({ id: message.id, role: message.role, content: message.content, parts: message.parts, error: message.error })) as StoredAiMessage
+      return [{
+        ...clone,
+        status,
+        parts: clone.parts.map((part): StoredAiPart => part.kind === 'tool'
+          ? { kind: 'tool', step: { ...part.step, status: part.step.status === 'running' ? 'ok' : part.step.status, references: part.step.references ?? [] } }
+          : part)
+      }]
+    })
     return {
       id: currentConversationId.value,
       title: firstUser.content.slice(0, 30),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
-      messages: messages.value.flatMap((message): StoredAiMessage[] => {
-        const status = message.status === 'streaming' ? 'done' : message.status
-        if (message.role === 'assistant' && status !== 'error' && message.content === '' && message.parts.length === 0) return []
-        return [{
-          id: message.id,
-          role: message.role,
-          content: message.content,
-          parts: message.parts.flatMap((part): StoredAiPart[] => {
-            if (part.kind !== 'tool') return [part as StoredAiPart]
-            return [{
-              kind: 'tool',
-              step: {
-                ...part.step,
-                status: part.step.status === 'running' ? 'ok' : part.step.status,
-                references: part.step.references ?? []
-              }
-            }]
-          }),
-          status,
-          error: message.error
-        }]
-      })
+      messages: snapshotted
     }
   }
 
@@ -253,8 +360,8 @@ export const useAiStore = defineStore('ai', () => {
     if (!conversation) return
     try {
       conversations.value = await window.guEarth.ai.chatHistory.save(conversation)
-    } catch {
-      return
+    } catch (error) {
+      console.warn('[ai] 会话保存失败', error)
     }
   }
 
@@ -268,6 +375,13 @@ export const useAiStore = defineStore('ai', () => {
 
   async function saveSettings(next: AiSettings): Promise<void> {
     settings.value = await window.guEarth.ai.updateSettings(next)
+    void refreshContextStats()
+  }
+
+  function setSkipDeleteConversationConfirm(value: boolean): void {
+    const next = JSON.parse(JSON.stringify(settings.value)) as AiSettings
+    next.skipDeleteConversationConfirm = value
+    void saveSettings(next)
   }
 
   function activeModelReady(): boolean {
@@ -289,6 +403,7 @@ export const useAiStore = defineStore('ai', () => {
     messageSeq += 1
     messages.value.push({ id: `m${messageSeq}`, role: 'assistant', content: '', parts: [], status: 'streaming', error: '' })
     if (!currentConversationId.value) currentConversationId.value = crypto.randomUUID()
+    void refreshContextStats()
     void persistConversation()
     if (!activeModelReady()) {
       const assistant = currentAssistant()
@@ -304,10 +419,7 @@ export const useAiStore = defineStore('ai', () => {
     const sessionId = activeSessionId
     isStreaming.value = true
     armIdleWatchdog()
-    const turns = messages.value
-      .filter((message) => message.status !== 'streaming' && !message.error)
-      .filter((message) => message.content.trim() !== '' || message.role === 'user')
-      .map((message) => ({ role: message.role, content: message.content }))
+    const turns = conversationTurns()
     try {
       await window.guEarth.ai.chat(sessionId, turns, toolDefinitions())
     } catch (error) {
@@ -339,6 +451,19 @@ export const useAiStore = defineStore('ai', () => {
     await send(question.content)
   }
 
+  async function compressContext(): Promise<void> {
+    if (isStreaming.value || !window.guEarth?.ai) return
+    setContextNotice('正在压缩上下文...', 'compressing')
+    try {
+      const result = await window.guEarth.ai.compressContext(conversationTurns())
+      applyCompressedContext(result)
+      setContextNotice(`已压缩上下文 ${formatContextTokens(result.afterTokens)}`, 'idle')
+      await persistConversation()
+    } catch {
+      setContextNotice('无法压缩上下文', 'error')
+    }
+  }
+
   async function stop(): Promise<void> {
     if (!activeSessionId) return
     await window.guEarth.ai.stop(activeSessionId)
@@ -348,6 +473,8 @@ export const useAiStore = defineStore('ai', () => {
     if (isStreaming.value) return
     currentConversationId.value = ''
     messages.value = []
+    contextStats.value = emptyContextStats(contextStats.value.contextWindow)
+    setContextNotice('', 'idle')
   }
 
   function openConversation(id: string): void {
@@ -356,12 +483,14 @@ export const useAiStore = defineStore('ai', () => {
     if (!conversation || conversation.id === currentConversationId.value) return
     currentConversationId.value = id
     messages.value = JSON.parse(JSON.stringify(conversation.messages)) as ChatMessage[]
+    void refreshContextStats()
   }
 
   async function deleteConversation(id: string): Promise<void> {
     if (currentConversationId.value === id) {
       currentConversationId.value = ''
       messages.value = []
+      contextStats.value = emptyContextStats(contextStats.value.contextWindow)
     }
     if (!window.guEarth?.ai) return
     try {
@@ -373,7 +502,10 @@ export const useAiStore = defineStore('ai', () => {
 
   function setPanelOpen(value: boolean): void {
     isPanelOpen.value = value
-    if (value) void hydrate()
+    if (value) {
+      void hydrate()
+      void refreshContextStats()
+    }
   }
 
   function setSettingsOpen(value: boolean): void {
@@ -381,8 +513,8 @@ export const useAiStore = defineStore('ai', () => {
   }
 
   return {
-    settings, messages, conversations, currentConversationId, isStreaming, isPanelOpen, isSettingsOpen, hydrated,
-    hydrate, registerTool, saveSettings, send, stop, retryLast, newConversation, openConversation, deleteConversation, persistConversation, setPanelOpen, setSettingsOpen,
+    settings, messages, conversations, currentConversationId, isStreaming, isPanelOpen, isSettingsOpen, hydrated, contextStats, contextCompressionStatus, contextCompressionNotice,
+    hydrate, registerTool, saveSettings, setSkipDeleteConversationConfirm, send, stop, retryLast, compressContext, newConversation, openConversation, deleteConversation, persistConversation, setPanelOpen, setSettingsOpen,
     activeModelVisionEnabled
   }
 })

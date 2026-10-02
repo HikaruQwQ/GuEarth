@@ -117,6 +117,28 @@ export interface AiChatTurn {
   content: string
 }
 
+export interface AiContextCategory {
+  key: 'system' | 'user' | 'assistant' | 'tool'
+  label: string
+  tokens: number
+  ratio: number
+}
+
+export interface AiContextStats {
+  usedTokens: number
+  contextWindow: number
+  usagePercent: number
+  categories: AiContextCategory[]
+}
+
+export interface AiContextCompressionResult {
+  summary: string
+  retainedTurns: AiChatTurn[]
+  stats: AiContextStats
+  beforeTokens: number
+  afterTokens: number
+}
+
 export interface AiToolDefinition {
   name: string
   description: string
@@ -129,6 +151,10 @@ export type AiChatEvent =
   | { sessionId: string; type: 'tool-start'; callId: string; name: string; args: unknown }
   | { sessionId: string; type: 'tool-end'; callId: string; ok: boolean; summary: string; result: string; references?: AiSearchReference[] }
   | { sessionId: string; type: 'execute-tool'; callId: string; name: string; args: unknown }
+  | { sessionId: string; type: 'context-stats'; stats: AiContextStats }
+  | { sessionId: string; type: 'context-compression-start' }
+  | { sessionId: string; type: 'context-compressed'; summary: string; retainedTurns: AiChatTurn[]; stats: AiContextStats; beforeTokens: number; afterTokens: number }
+  | { sessionId: string; type: 'context-compression-error'; message: string }
   | { sessionId: string; type: 'done' }
   | { sessionId: string; type: 'error'; message: string }
 
@@ -234,6 +260,8 @@ const api = {
     getSettings: (): Promise<AiSettings> => ipcRenderer.invoke('ai:get-settings'),
     updateSettings: (settings: AiSettings): Promise<AiSettings> => ipcRenderer.invoke('ai:update-settings', settings),
     chat: (sessionId: string, turns: AiChatTurn[], tools: AiToolDefinition[]): Promise<void> => ipcRenderer.invoke('ai:chat', sessionId, turns, tools),
+    getContextStats: (turns: AiChatTurn[]): Promise<AiContextStats> => ipcRenderer.invoke('ai:context-stats', turns),
+    compressContext: (turns: AiChatTurn[]): Promise<AiContextCompressionResult> => ipcRenderer.invoke('ai:compress-context', turns),
     stop: (sessionId: string): Promise<void> => ipcRenderer.invoke('ai:stop', sessionId),
     toolResult: (sessionId: string, callId: string, ok: boolean, result: unknown): Promise<void> => ipcRenderer.invoke('ai:tool-result', sessionId, callId, ok, result),
     chatHistory: {

@@ -6,10 +6,11 @@ import { Bubble, Sender } from 'ant-design-x-vue'
 import { CloseCircleOutlined, CloseOutlined, CompassOutlined, DeleteOutlined, HistoryOutlined, LeftOutlined, PlusOutlined, ReloadOutlined, RightOutlined, SettingOutlined } from '@ant-design/icons-vue'
 import { useAiStore, type ChatMessage, type ReasoningPart, type ToolStep } from '@renderer/stores/ai'
 import type { StoredAiConversation } from '../../../preload'
+import ContextMeter from './ContextMeter.vue'
 import WebSearchStep from './WebSearchStep.vue'
 
 const store = useAiStore()
-const { messages, conversations, currentConversationId, isStreaming, isPanelOpen, isSettingsOpen } = storeToRefs(store)
+const { messages, conversations, currentConversationId, isStreaming, isPanelOpen, isSettingsOpen, contextStats, contextCompressionStatus, contextCompressionNotice } = storeToRefs(store)
 
 const draft = ref('')
 const listRef = ref<HTMLDivElement>()
@@ -50,7 +51,7 @@ function confirmDeleteConversation(): void {
   deleteConfirmOpen.value = false
   deleteTarget.value = null
   if (!target) return
-  if (deleteNoAsk.value) void store.saveSettings({ ...store.settings, skipDeleteConversationConfirm: true })
+  if (deleteNoAsk.value) store.setSkipDeleteConversationConfirm(true)
   void store.deleteConversation(target.id)
 }
 
@@ -336,6 +337,13 @@ watch(currentConversationId, () => {
       </template>
     </div>
 
+    <ContextMeter
+      :stats="contextStats"
+      :status="contextCompressionStatus"
+      :notice="contextCompressionNotice"
+      :disabled="isStreaming"
+      @compress="void store.compressContext()"
+    />
     <Sender
       v-model:value="draft"
       :loading="isStreaming"

@@ -2,6 +2,8 @@ import { ipcMain, net, type IpcMainInvokeEvent, type WebContents } from 'electro
 import type {
   AiChatEvent,
   AiChatTurn,
+  AiContextCompressionResult,
+  AiContextStats,
   AiModelConfig,
   AiProviderConfig,
   AiSearchProviderConfig,
@@ -205,6 +207,45 @@ function estimateTokens(text: string): number {
   return cjk + Math.ceil((text.length - cjk) / 3.5)
 }
 
+function messageTokenCost(message: WireMessage): number {
+  return estimateTokens(message.content) + (message.toolCalls ?? []).reduce((sum, call) => sum + estimateTokens(call.arguments), 0)
+}
+
+function contextStatsForMessages(messages: WireMessage[], contextWindow: number): AiContextStats {
+  const categories: AiContextStats['categories'] = [
+    { key: 'system', label: '系统提示词', tokens: 0, ratio: 0 },
+    { key: 'user', label: '用户消息', tokens: 0, ratio: 0 },
+    { key: 'assistant', label: '助手回复', tokens: 0, ratio: 0 },
+    { key: 'tool', label: '工具结果', tokens: 0, ratio: 0 }
+  ]
+  const categoryByKey = new Map(categories.map((category) => [category.key, category]))
+  let usedTokens = 0
+  for (const message of messages) {
+    const cost = messageTokenCost(message)
+    usedTokens += cost
+    const category = categoryByKey.get(message.role)
+    if (category) category.tokens += cost
+  }
+  for (const category of categories) category.ratio = usedTokens ? Math.round(category.tokens / usedTokens * 100) : 0
+  return {
+    usedTokens,
+    contextWindow,
+    usagePercent: Math.min(100, Math.round(usedTokens / contextWindow * 100)),
+    categories
+  }
+}
+
+function contextStatsForTurns(turns: AiChatTurn[], contextWindow: number): AiContextStats {
+  return contextStatsForMessages([{ role: 'system', content: SYSTEM_PROMPT }, ...turns.map((turn) => ({ role: turn.role, content: turn.content }))], contextWindow)
+}
+
+function retainedTurns(messages: WireMessage[]): AiChatTurn[] {
+  return messages.flatMap((message): AiChatTurn[] => {
+    if (message.role !== 'user' && message.role !== 'assistant') return []
+    return [{ role: message.role, content: message.content }]
+  })
+}
+
 function trimHistory(messages: WireMessage[], contextWindow: number): WireMessage[] {
   const budget = Math.max(2_000, Math.floor(contextWindow * 0.6))
   const system = messages.filter((message) => message.role === 'system')
@@ -213,7 +254,7 @@ function trimHistory(messages: WireMessage[], contextWindow: number): WireMessag
   const kept: WireMessage[] = []
   for (let index = rest.length - 1; index >= 0; index -= 1) {
     const message = rest[index]
-    const cost = estimateTokens(message.content) + (message.toolCalls ?? []).reduce((sum, call) => sum + estimateTokens(call.arguments), 0)
+    const cost = messageTokenCost(message)
     if (kept.length >= 4 && total + cost > budget) break
     kept.unshift(message)
     total += cost
@@ -568,6 +609,62 @@ async function executeTool(sender: WebContents, sessionId: string, name: string,
   return { ...outcome, callId, summary: summarizeToolResult(outcome.content) }
 }
 
+interface CompressedContext {
+  messages: WireMessage[]
+  result: AiContextCompressionResult
+}
+
+async function compressMessages(options: {
+  provider: AiProviderConfig
+  model: AiModelConfig
+  apiKey: string
+  messages: WireMessage[]
+  signal: AbortSignal
+}): Promise<CompressedContext> {
+  const { provider, model, apiKey, messages, signal } = options
+  const beforeStats = contextStatsForMessages(messages, model.contextWindow)
+  const system = messages.find((message) => message.role === 'system')
+  const rest = messages.filter((message) => message.role !== 'system')
+  const keepCount = Math.min(4, rest.length)
+  const older = rest.slice(0, rest.length - keepCount)
+  if (!older.length) throw new Error('无法压缩上下文')
+  const transcript = older.map((message) => {
+    const role = message.role === 'user' ? '用户' : message.role === 'assistant' ? '助手' : '工具'
+    return `${role}：${message.content}`
+  }).join('\n\n').slice(-120_000)
+  const compressionMessages: WireMessage[] = [
+    { role: 'system', content: '你负责压缩地理教学助手的历史上下文。只输出简洁、准确的中文摘要，保留用户目标、关键事实、地点坐标、工具结果和未完成事项，不要输出标题、解释或额外格式。' },
+    { role: 'user', content: `请压缩下面的历史对话，供后续继续回答时使用：\n\n${transcript}` }
+  ]
+  const runTurn = provider.protocol === 'anthropic' ? runAnthropicTurn : runOpenAiTurn
+  const summaryResult = await runTurn({
+    provider,
+    model: { ...model, thinking: false },
+    apiKey,
+    messages: compressionMessages,
+    tools: [],
+    signal,
+    onTextDelta: () => void 0,
+    onReasoningDelta: () => void 0
+  })
+  const summary = summaryResult.text.trim()
+  if (!summary) throw new Error('无法压缩上下文')
+  const summaryMessage: WireMessage = { role: 'assistant', content: `[上下文摘要]\n${summary}` }
+  const kept = rest.slice(-keepCount)
+  const compressedMessages = [...(system ? [system] : []), summaryMessage, ...kept]
+  const afterStats = contextStatsForMessages(compressedMessages, model.contextWindow)
+  return {
+    messages: compressedMessages,
+    result: {
+      summary,
+      retainedTurns: retainedTurns(kept),
+      stats: afterStats,
+      beforeTokens: beforeStats.usedTokens,
+      afterTokens: afterStats.usedTokens
+    }
+  }
+}
+
 async function runAgent(options: {
   provider: AiProviderConfig
   searchProvider?: AiSearchProviderConfig
@@ -588,6 +685,20 @@ async function runAgent(options: {
   const toolset: AiToolDefinition[] = [...tools.filter((tool) => tool.name !== 'search_place' && tool.name !== 'web_search'), SEARCH_PLACE_TOOL, WEB_SEARCH_TOOL]
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
+    const currentStats = contextStatsForMessages(messages, model.contextWindow)
+    send({ sessionId, type: 'context-stats', stats: currentStats })
+    if (currentStats.usagePercent >= 80) {
+      send({ sessionId, type: 'context-compression-start' })
+      try {
+        const compressed = await compressMessages({ provider, model, apiKey, messages, signal })
+        messages.splice(0, messages.length, ...compressed.messages)
+        send({ sessionId, type: 'context-compressed', ...compressed.result })
+        send({ sessionId, type: 'context-stats', stats: compressed.result.stats })
+      } catch {
+        send({ sessionId, type: 'context-compression-error', message: '无法压缩上下文' })
+        throw new Error('无法压缩上下文')
+      }
+    }
     let requestMessages = trimHistory(messages, model.contextWindow)
     const runTurn = provider.protocol === 'anthropic' ? runAnthropicTurn : runOpenAiTurn
     let result: RequestResult
@@ -634,6 +745,7 @@ async function runAgent(options: {
       send({ sessionId, type: 'tool-end', callId: outcome.callId, ok: outcome.ok, summary: outcome.summary, result: outcome.content, references: outcome.references })
       signal.throwIfAborted()
       messages.push({ role: 'tool', content: outcome.content, callId: call.id, name: call.name, isError: !outcome.ok, image: model.vision ? outcome.image : undefined })
+      send({ sessionId, type: 'context-stats', stats: contextStatsForMessages(messages, model.contextWindow) })
     }
   }
   send({ sessionId, type: 'error', message: '工具调用轮次过多，已停止' })
@@ -656,15 +768,19 @@ function summarizeToolResult(content: string): string {
   return '完成'
 }
 
-function validateChatRequest(sessionId: unknown, turns: unknown, tools: unknown): { sessionId: string; turns: AiChatTurn[]; tools: AiToolDefinition[] } {
-  if (typeof sessionId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(sessionId)) throw new Error('无效的会话标识')
+function validateTurns(turns: unknown): AiChatTurn[] {
   if (!Array.isArray(turns)) throw new Error('无效的对话历史')
-  const normalizedTurns = turns.flatMap((turn): AiChatTurn[] => {
+  return turns.flatMap((turn): AiChatTurn[] => {
     if (typeof turn !== 'object' || turn === null) return []
     const record = turn as { role?: unknown; content?: unknown }
     if ((record.role !== 'user' && record.role !== 'assistant') || typeof record.content !== 'string') return []
     return [{ role: record.role, content: record.content.slice(0, 20_000) }]
   })
+}
+
+function validateChatRequest(sessionId: unknown, turns: unknown, tools: unknown): { sessionId: string; turns: AiChatTurn[]; tools: AiToolDefinition[] } {
+  if (typeof sessionId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(sessionId)) throw new Error('无效的会话标识')
+  const normalizedTurns = validateTurns(turns)
   const normalizedTools = Array.isArray(tools) ? tools.flatMap((tool): AiToolDefinition[] => {
     if (typeof tool !== 'object' || tool === null) return []
     const record = tool as { name?: unknown; description?: unknown; parameters?: unknown }
@@ -682,6 +798,29 @@ export function registerAiIpcHandlers(settingsStore: AiSettingsStore, chatHistor
   ipcMain.handle('ai:history-delete', (_event, id: unknown) => {
     if (typeof id !== 'string' || !id) return chatHistoryStore.list()
     return chatHistoryStore.delete(id)
+  })
+  ipcMain.handle('ai:context-stats', (_event, turns: unknown) => {
+    const settings = settingsStore.snapshot()
+    const provider = settings.providers.find((item) => item.id === settings.activeProviderId)
+    const model = provider?.models.find((item) => item.id === settings.activeModelId)
+    return contextStatsForTurns(validateTurns(turns), model?.contextWindow ?? 128_000)
+  })
+  ipcMain.handle('ai:compress-context', async (_event, turns: unknown): Promise<AiContextCompressionResult> => {
+    const settings = settingsStore.snapshot()
+    const provider = settings.providers.find((item) => item.id === settings.activeProviderId)
+    const model = provider?.models.find((item) => item.id === settings.activeModelId)
+    if (!provider || !model) throw new Error('未选择 AI 模型，请先在 AI 设置中添加供应商与模型并设为默认')
+    const apiKey = readProviderKey(`ai-${provider.id}`)
+    if (!apiKey) throw new Error(`未配置「${provider.name}」的 API Key，请在 AI 设置中保存`)
+    const controller = new AbortController()
+    const compressed = await compressMessages({
+      provider,
+      model,
+      apiKey,
+      messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...validateTurns(turns).map((turn) => ({ role: turn.role, content: turn.content }))],
+      signal: controller.signal
+    })
+    return compressed.result
   })
   ipcMain.handle('ai:chat', (event: IpcMainInvokeEvent, sessionId: unknown, turns: unknown, tools: unknown) => {
     const request = validateChatRequest(sessionId, turns, tools)
