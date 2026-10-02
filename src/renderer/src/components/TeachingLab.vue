@@ -50,6 +50,38 @@ const chapters: LabChapter[] = [
         toggle: () => solarStore.setActive(!solarStore.active)
       },
       {
+        key: 'solar-path',
+        name: '太阳视运动轨迹',
+        description: '站在地面看天空：日出日落方位与正午太阳方位',
+        active: () => solarStore.motionPanel === 'solar-path',
+        toggle: () => solarStore.setMotionPanel(solarStore.motionPanel === 'solar-path' ? null : 'solar-path')
+      },
+      {
+        key: 'obliquity',
+        name: '黄赤交角可调探究',
+        description: '拖动交角，观察直射点范围与五带变化',
+        active: () => solarStore.motionPanel === 'obliquity',
+        toggle: () => solarStore.setMotionPanel(solarStore.motionPanel === 'obliquity' ? null : 'obliquity')
+      },
+      {
+        key: 'rotation-speed',
+        name: '自转速度与周期',
+        description: '角速度线速度随纬度变化、恒星日与太阳日',
+        active: () => solarStore.motionPanel === 'rotation-speed',
+        toggle: () => solarStore.setMotionPanel(solarStore.motionPanel === 'rotation-speed' ? null : 'rotation-speed')
+      },
+      {
+        key: 'temperature-zones',
+        name: '五带与直射点回归',
+        description: '五带划分与界线，直射点随日期时刻移动',
+        active: () => climateStore.overlays['temperature-zones'],
+        toggle: () => {
+          const next = !climateStore.overlays['temperature-zones']
+          climateStore.setOverlay('temperature-zones', next)
+          if (next) solarStore.setActive(true)
+        }
+      },
+      {
         key: 'timezone',
         name: '时区对比',
         description: '在地球上选取两地，对比地方时与区时',

@@ -57,6 +57,13 @@ const koppenEntries = koppenZones.map((zone) => ({ name: zone.name, color: zone.
       <div class="legend-item"><span class="swatch" style="background: #1677ff"></span><span>北半球轨迹 · 右偏</span></div>
       <div class="legend-item"><span class="swatch" style="background: #fa8c16"></span><span>南半球轨迹 · 左偏</span></div>
     </div>
+    <div v-if="store.overlays['temperature-zones']" class="legend-group">
+      <div class="legend-item"><span class="swatch" style="background: #fa8c16"></span><span>热带（有直射）</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #52c41a"></span><span>温带（四季分明）</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #1677ff"></span><span>寒带（极昼极夜）</span></div>
+      <div class="legend-item"><span class="swatch swatch-dashed"></span><span>回归线 / 极圈</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #fa8c16; height: 8px; border-radius: 50%"></span><span>太阳直射点</span></div>
+    </div>
     <div v-if="store.overlays['plate-tectonics']" class="legend-group">
       <div class="legend-item"><span class="swatch" style="background: #f5222d"></span><span>消亡边界（碰撞/俯冲）</span></div>
       <div class="legend-item"><span class="swatch" style="background: #1677ff"></span><span>生长边界（张裂）</span></div>

@@ -25,6 +25,9 @@ import PlaceSearchBox from '@renderer/components/PlaceSearchBox.vue'
 import WindParticles from '@renderer/components/WindParticles.vue'
 import MonthTimeline from '@renderer/components/MonthTimeline.vue'
 import SolarTimePanel from '@renderer/components/SolarTimePanel.vue'
+import SolarPathPanel from '@renderer/components/SolarPathPanel.vue'
+import ObliquityPanel from '@renderer/components/ObliquityPanel.vue'
+import RotationSpeedPanel from '@renderer/components/RotationSpeedPanel.vue'
 import TimezonePanel from '@renderer/components/TimezonePanel.vue'
 import ThematicLegend from '@renderer/components/ThematicLegend.vue'
 import FrontalCyclone from '@renderer/components/FrontalCyclone.vue'
@@ -74,7 +77,7 @@ const selectedShape = computed(() => shapes.value.find((shape) => shape.id === s
 const levelSwitcherVisible = computed(() => isGlobeReady.value && camera.value.height < 5000000)
 const showGlobeLoading = computed(() => !isGlobeReady.value && !globeError.value)
 const isLabOpen = ref(false)
-const labActive = computed(() => climateStore.hasActiveOverlay || solarStore.active || activeTool.value === 'timezone')
+const labActive = computed(() => climateStore.hasActiveOverlay || solarStore.active || solarStore.motionPanel !== null || activeTool.value === 'timezone')
 const drawHint = computed(() => {
   if (!activeTool.value) return ''
   if (activeTool.value === 'timezone') return '单击选取两个地点对比地方时 · Esc 退出'
@@ -713,6 +716,9 @@ function deleteSelectedShape(): void {
     <PlaceSearchBox @select="flyToPlace" />
     <MonthTimeline />
     <SolarTimePanel />
+    <SolarPathPanel v-if="solarStore.motionPanel === 'solar-path'" @close="solarStore.setMotionPanel(null)" />
+    <ObliquityPanel v-if="solarStore.motionPanel === 'obliquity'" @close="solarStore.setMotionPanel(null)" />
+    <RotationSpeedPanel v-if="solarStore.motionPanel === 'rotation-speed'" @close="solarStore.setMotionPanel(null)" />
     <TimezonePanel v-if="timezoneComparison" :comparison="timezoneComparison" @clear="clearTimezone" />
     <ThematicLegend />
     <ThematicInfoCard />
