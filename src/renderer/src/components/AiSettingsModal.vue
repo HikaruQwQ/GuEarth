@@ -201,7 +201,8 @@ async function handleSave(): Promise<void> {
     activeProviderId,
     activeModelId,
     searchProviders: draftSearchProviders.value.map((provider) => ({ ...provider })),
-    activeSearchProviderId: activeSearchProviderId.value
+    activeSearchProviderId: activeSearchProviderId.value,
+    skipDeleteConversationConfirm: store.settings.skipDeleteConversationConfirm
   }
   try {
     await store.saveSettings(next)

@@ -7,6 +7,7 @@ import type { AnnotationDocument, AnnotationEntry, GeoPosition, GuEarthSettings,
 import { assertEncryptionAvailable, assertSafeId, clearProviderKey, hasProviderKey, initKeyVault, readProviderKey, writeProviderKey } from './keyVault'
 import { baiduLngLatToTile, tileCenter, wgs84ToBd09 } from './geo'
 import { AiSettingsStore } from './ai/settingsStore'
+import { AiChatHistoryStore } from './ai/chatHistoryStore'
 import { registerAiIpcHandlers } from './ai/agent'
 import { searchPlaces } from './ai/amap'
 import { searchBaiduPlaces } from './ai/baidu'
@@ -48,6 +49,7 @@ let annotationsPath = ''
 let settings: PersistedSettings = { ...defaultSettings, providerCredentials: {} }
 let annotations: AnnotationDocument = { shapes: [], entries: [] }
 const aiSettings = new AiSettingsStore()
+const aiChatHistory = new AiChatHistoryStore()
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'guearth-tile', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } }
@@ -465,8 +467,9 @@ app.whenReady().then(() => {
   settings = readSettings()
   annotations = readAnnotations()
   aiSettings.init(join(userDataPath, 'ai-settings.json'))
+  aiChatHistory.init(join(userDataPath, 'ai-chat-history.json'))
   registerIpcHandlers()
-  registerAiIpcHandlers(aiSettings)
+  registerAiIpcHandlers(aiSettings, aiChatHistory)
   protocol.handle('guearth-tile', async (request) => {
     const response = await handleTileProtocol(request)
     response.headers.set('Access-Control-Allow-Origin', '*')

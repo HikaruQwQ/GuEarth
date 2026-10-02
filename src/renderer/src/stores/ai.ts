@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { AiChatEvent, AiSearchReference, AiSettings, AiToolDefinition } from '../../../preload'
+import type { AiChatEvent, AiSearchReference, AiSettings, AiToolDefinition, StoredAiConversation, StoredAiMessage, StoredAiPart } from '../../../preload'
 import { defaultAiSettings } from '../../../shared/aiSettings'
 
 export interface ToolStep {
@@ -70,6 +70,8 @@ function reportsFailure(result: unknown): boolean {
 export const useAiStore = defineStore('ai', () => {
   const settings = ref<AiSettings>(defaultAiSettings())
   const messages = ref<ChatMessage[]>([])
+  const conversations = ref<StoredAiConversation[]>([])
+  const currentConversationId = ref('')
   const isStreaming = ref(false)
   const isPanelOpen = ref(false)
   const isSettingsOpen = ref(false)
@@ -165,6 +167,7 @@ export const useAiStore = defineStore('ai', () => {
       if (assistant && assistant.status === 'streaming') assistant.status = 'done'
       clearIdleWatchdog()
       isStreaming.value = false
+      void persistConversation()
       return
     }
     if (event.type === 'error') {
@@ -182,6 +185,7 @@ export const useAiStore = defineStore('ai', () => {
       }
       clearIdleWatchdog()
       isStreaming.value = false
+      void persistConversation()
     }
   }
 
@@ -199,6 +203,58 @@ export const useAiStore = defineStore('ai', () => {
       hydrated.value = true
     } catch {
       settings.value = defaultAiSettings()
+    }
+    try {
+      conversations.value = await window.guEarth.ai.chatHistory.list()
+    } catch {
+      conversations.value = []
+    }
+  }
+
+  function conversationSnapshot(): StoredAiConversation | null {
+    if (!currentConversationId.value) return null
+    const firstUser = messages.value.find((message) => message.role === 'user')
+    if (!firstUser) return null
+    const existing = conversations.value.find((item) => item.id === currentConversationId.value)
+    const now = Date.now()
+    return {
+      id: currentConversationId.value,
+      title: firstUser.content.slice(0, 30),
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+      messages: messages.value.flatMap((message): StoredAiMessage[] => {
+        const status = message.status === 'streaming' ? 'done' : message.status
+        if (message.role === 'assistant' && status !== 'error' && message.content === '' && message.parts.length === 0) return []
+        return [{
+          id: message.id,
+          role: message.role,
+          content: message.content,
+          parts: message.parts.flatMap((part): StoredAiPart[] => {
+            if (part.kind !== 'tool') return [part as StoredAiPart]
+            return [{
+              kind: 'tool',
+              step: {
+                ...part.step,
+                status: part.step.status === 'running' ? 'ok' : part.step.status,
+                references: part.step.references ?? []
+              }
+            }]
+          }),
+          status,
+          error: message.error
+        }]
+      })
+    }
+  }
+
+  async function persistConversation(): Promise<void> {
+    if (!window.guEarth?.ai) return
+    const conversation = conversationSnapshot()
+    if (!conversation) return
+    try {
+      conversations.value = await window.guEarth.ai.chatHistory.save(conversation)
+    } catch {
+      return
     }
   }
 
@@ -232,12 +288,15 @@ export const useAiStore = defineStore('ai', () => {
     messages.value.push({ id: `m${messageSeq}`, role: 'user', content: question, parts: [], status: 'done', error: '' })
     messageSeq += 1
     messages.value.push({ id: `m${messageSeq}`, role: 'assistant', content: '', parts: [], status: 'streaming', error: '' })
+    if (!currentConversationId.value) currentConversationId.value = crypto.randomUUID()
+    void persistConversation()
     if (!activeModelReady()) {
       const assistant = currentAssistant()
       if (assistant) {
         assistant.status = 'error'
         assistant.error = '尚未配置 AI 模型：点击右上角设置，添加供应商与模型并保存 API Key'
       }
+      void persistConversation()
       return
     }
     sessionSeq += 1
@@ -259,6 +318,7 @@ export const useAiStore = defineStore('ai', () => {
       }
       clearIdleWatchdog()
       isStreaming.value = false
+      void persistConversation()
     }
   }
 
@@ -284,9 +344,31 @@ export const useAiStore = defineStore('ai', () => {
     await window.guEarth.ai.stop(activeSessionId)
   }
 
-  function clearConversation(): void {
+  function newConversation(): void {
     if (isStreaming.value) return
+    currentConversationId.value = ''
     messages.value = []
+  }
+
+  function openConversation(id: string): void {
+    if (isStreaming.value) return
+    const conversation = conversations.value.find((item) => item.id === id)
+    if (!conversation || conversation.id === currentConversationId.value) return
+    currentConversationId.value = id
+    messages.value = JSON.parse(JSON.stringify(conversation.messages)) as ChatMessage[]
+  }
+
+  async function deleteConversation(id: string): Promise<void> {
+    if (currentConversationId.value === id) {
+      currentConversationId.value = ''
+      messages.value = []
+    }
+    if (!window.guEarth?.ai) return
+    try {
+      conversations.value = await window.guEarth.ai.chatHistory.delete(id)
+    } catch {
+      return
+    }
   }
 
   function setPanelOpen(value: boolean): void {
@@ -299,8 +381,8 @@ export const useAiStore = defineStore('ai', () => {
   }
 
   return {
-    settings, messages, isStreaming, isPanelOpen, isSettingsOpen, hydrated,
-    hydrate, registerTool, saveSettings, send, stop, retryLast, clearConversation, setPanelOpen, setSettingsOpen,
+    settings, messages, conversations, currentConversationId, isStreaming, isPanelOpen, isSettingsOpen, hydrated,
+    hydrate, registerTool, saveSettings, send, stop, retryLast, newConversation, openConversation, deleteConversation, persistConversation, setPanelOpen, setSettingsOpen,
     activeModelVisionEnabled
   }
 })

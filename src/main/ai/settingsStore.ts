@@ -74,7 +74,8 @@ export function normalizeAiSettings(value: unknown): AiSettings {
     activeProviderId: activeProvider?.id ?? '',
     activeModelId,
     searchProviders,
-    activeSearchProviderId
+    activeSearchProviderId,
+    skipDeleteConversationConfirm: source.skipDeleteConversationConfirm === true
   }
 }
 

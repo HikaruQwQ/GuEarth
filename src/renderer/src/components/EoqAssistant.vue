@@ -3,15 +3,56 @@ import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from
 import { storeToRefs } from 'pinia'
 import MarkdownIt from 'markdown-it'
 import { Bubble, Sender } from 'ant-design-x-vue'
-import { ClearOutlined, CloseCircleOutlined, CloseOutlined, CompassOutlined, LeftOutlined, ReloadOutlined, RightOutlined, SettingOutlined } from '@ant-design/icons-vue'
+import { CloseCircleOutlined, CloseOutlined, CompassOutlined, DeleteOutlined, HistoryOutlined, LeftOutlined, PlusOutlined, ReloadOutlined, RightOutlined, SettingOutlined } from '@ant-design/icons-vue'
 import { useAiStore, type ChatMessage, type ReasoningPart, type ToolStep } from '@renderer/stores/ai'
+import type { StoredAiConversation } from '../../../preload'
 import WebSearchStep from './WebSearchStep.vue'
 
 const store = useAiStore()
-const { messages, isStreaming, isPanelOpen, isSettingsOpen } = storeToRefs(store)
+const { messages, conversations, currentConversationId, isStreaming, isPanelOpen, isSettingsOpen } = storeToRefs(store)
 
 const draft = ref('')
 const listRef = ref<HTMLDivElement>()
+const historyOpen = ref(false)
+const deleteConfirmOpen = ref(false)
+const deleteTarget = ref<StoredAiConversation | null>(null)
+const deleteNoAsk = ref(false)
+
+function formatConversationTime(timestamp: number): string {
+  const date = new Date(timestamp)
+  const time = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  if (date.toDateString() === new Date().toDateString()) return time
+  if (date.getFullYear() === new Date().getFullYear()) {
+    return `${date.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })} ${time}`
+  }
+  return date.toLocaleDateString('zh-CN', { year: 'numeric', month: 'numeric', day: 'numeric' })
+}
+
+function handleHistoryMenuClick(info: { key: string | number }): void {
+  historyOpen.value = false
+  store.openConversation(String(info.key))
+}
+
+function handleDeleteConversation(event: Event, conversation: StoredAiConversation): void {
+  event.stopPropagation()
+  historyOpen.value = false
+  if (store.settings.skipDeleteConversationConfirm) {
+    void store.deleteConversation(conversation.id)
+    return
+  }
+  deleteTarget.value = conversation
+  deleteNoAsk.value = false
+  deleteConfirmOpen.value = true
+}
+
+function confirmDeleteConversation(): void {
+  const target = deleteTarget.value
+  deleteConfirmOpen.value = false
+  deleteTarget.value = null
+  if (!target) return
+  if (deleteNoAsk.value) void store.saveSettings({ ...store.settings, skipDeleteConversationConfirm: true })
+  void store.deleteConversation(target.id)
+}
 
 const suggestions = [
   { label: '找典型流水侵蚀地貌', description: '讲解成因并带我去看', prompt: '找典型流水侵蚀地貌并讲解成因' },
@@ -161,6 +202,12 @@ watch(
     }
   }
 )
+
+watch(currentConversationId, () => {
+  reasonTouched.clear()
+  reasonOpen.clear()
+  openTools.clear()
+})
 </script>
 
 <template>
@@ -178,9 +225,26 @@ watch(
       <div class="panel-title">
         <h2>EOQ 智能助手</h2>
         <div class="title-actions">
-          <a-tooltip title="清空对话">
-            <a-button type="text" aria-label="清空对话" :disabled="isStreaming || messages.length === 0" @click="store.clearConversation()"><ClearOutlined /></a-button>
+          <a-tooltip v-if="messages.length > 0" title="新建会话">
+            <a-button type="text" aria-label="新建会话" :disabled="isStreaming" @click="store.newConversation()"><PlusOutlined /></a-button>
           </a-tooltip>
+          <a-dropdown v-else v-model:open="historyOpen" :trigger="['click']" placement="bottomRight" :overlay-style="{ width: '300px' }">
+            <a-button type="text" aria-label="历史会话" aria-haspopup="menu" :aria-expanded="historyOpen"><HistoryOutlined /></a-button>
+            <template #overlay>
+              <a-menu class="history-menu" @click="handleHistoryMenuClick">
+                <a-menu-item v-if="conversations.length === 0" key="history-empty" disabled class="history-empty">暂无历史会话</a-menu-item>
+                <a-menu-item v-for="conversation in conversations" :key="conversation.id" class="history-item" :class="{ 'history-item-active': conversation.id === currentConversationId }">
+                  <div class="history-item-body">
+                    <span class="history-item-title" :title="conversation.title">{{ conversation.title }}</span>
+                    <span class="history-item-time">{{ formatConversationTime(conversation.updatedAt) }}</span>
+                    <a-tooltip title="删除会话">
+                      <a-button type="text" size="small" danger class="history-delete" :aria-label="`删除会话 ${conversation.title}`" @click="handleDeleteConversation($event, conversation)"><DeleteOutlined /></a-button>
+                    </a-tooltip>
+                  </div>
+                </a-menu-item>
+              </a-menu>
+            </template>
+          </a-dropdown>
           <a-tooltip title="AI 设置">
             <a-button type="text" aria-label="AI 设置" @click="store.setSettingsOpen(true)"><SettingOutlined /></a-button>
           </a-tooltip>
@@ -282,12 +346,34 @@ watch(
     />
     <p class="ai-disclaimer" title="内容由 AI 生成，咕咕地球不为其生成的内容负责，请谨慎甄别">内容由 AI 生成，咕咕地球不为其生成的内容负责，请谨慎甄别</p>
   </a-drawer>
+
+  <a-modal
+    v-model:open="deleteConfirmOpen"
+    title="删除会话"
+    :width="400"
+    ok-text="删除"
+    :ok-button-props="{ danger: true }"
+    cancel-text="取消"
+    @ok="confirmDeleteConversation"
+  >
+    <p class="delete-confirm-text">删除后「{{ deleteTarget?.title }}」将无法恢复。</p>
+    <a-checkbox v-model:checked="deleteNoAsk">不再提示</a-checkbox>
+  </a-modal>
 </template>
 
 <style scoped>
 .panel-title{display:flex;align-items:center;justify-content:space-between;width:100%}
 h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28px}
 .title-actions{display:flex;align-items:center;gap:4px}
+.history-menu{max-height:320px;overflow-y:auto}
+.history-item :deep(.ant-dropdown-menu-title-content){display:flex;align-items:center;width:100%}
+.history-item-active{background:rgba(0,0,0,.04)}
+.history-item-body{flex:1;min-width:0;display:flex;align-items:center;gap:4px}
+.history-item-title{flex:1;min-width:0;color:rgba(0,0,0,.88);font-size:14px;line-height:22px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.history-item-time{flex-shrink:0;color:rgba(0,0,0,.45);font-size:12px;line-height:20px}
+.history-delete{flex-shrink:0;height:24px}
+.history-empty{color:rgba(0,0,0,.45)}
+.delete-confirm-text{margin:0 0 12px;color:rgba(0,0,0,.65);font-size:14px;line-height:22px}
 .empty-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:16px 8px}
 .empty-icon{font-size:38px;color:rgba(0,0,0,.25)}
 .empty-text{margin:0;color:rgba(0,0,0,.65);font-size:14px;line-height:22px;text-align:center}

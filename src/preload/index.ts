@@ -109,6 +109,7 @@ export interface AiSettings {
   activeModelId: string
   searchProviders: AiSearchProviderConfig[]
   activeSearchProviderId: string
+  skipDeleteConversationConfirm: boolean
 }
 
 export interface AiChatTurn {
@@ -130,6 +131,38 @@ export type AiChatEvent =
   | { sessionId: string; type: 'execute-tool'; callId: string; name: string; args: unknown }
   | { sessionId: string; type: 'done' }
   | { sessionId: string; type: 'error'; message: string }
+
+export interface StoredAiToolStep {
+  callId: string
+  name: string
+  args: Record<string, unknown>
+  status: 'running' | 'ok' | 'error'
+  summary: string
+  result: string
+  references: AiSearchReference[]
+}
+
+export type StoredAiPart =
+  | { kind: 'reasoning'; id: string; text: string; ms: number; startedAt: number }
+  | { kind: 'text'; text: string }
+  | { kind: 'tool'; step: StoredAiToolStep }
+
+export interface StoredAiMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  parts: StoredAiPart[]
+  status: 'done' | 'error'
+  error: string
+}
+
+export interface StoredAiConversation {
+  id: string
+  title: string
+  createdAt: number
+  updatedAt: number
+  messages: StoredAiMessage[]
+}
 
 export interface PlaceSuggestion {
   name: string
@@ -203,6 +236,11 @@ const api = {
     chat: (sessionId: string, turns: AiChatTurn[], tools: AiToolDefinition[]): Promise<void> => ipcRenderer.invoke('ai:chat', sessionId, turns, tools),
     stop: (sessionId: string): Promise<void> => ipcRenderer.invoke('ai:stop', sessionId),
     toolResult: (sessionId: string, callId: string, ok: boolean, result: unknown): Promise<void> => ipcRenderer.invoke('ai:tool-result', sessionId, callId, ok, result),
+    chatHistory: {
+      list: (): Promise<StoredAiConversation[]> => ipcRenderer.invoke('ai:history-list'),
+      save: (conversation: StoredAiConversation): Promise<StoredAiConversation[]> => ipcRenderer.invoke('ai:history-save', conversation),
+      delete: (id: string): Promise<StoredAiConversation[]> => ipcRenderer.invoke('ai:history-delete', id)
+    },
     onEvent: (listener: (event: AiChatEvent) => void): (() => void) => {
       const wrapped = (_event: Electron.IpcRendererEvent, payload: AiChatEvent): void => listener(payload)
       ipcRenderer.on('ai:event', wrapped)

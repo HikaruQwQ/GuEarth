@@ -11,6 +11,7 @@ import type {
 import { readProviderKey } from '../keyVault'
 import { searchPlaces } from './amap'
 import { searchWeb } from './search'
+import type { AiChatHistoryStore } from './chatHistoryStore'
 import type { AiSettingsStore } from './settingsStore'
 
 const SYSTEM_PROMPT = [
@@ -647,9 +648,15 @@ function validateChatRequest(sessionId: unknown, turns: unknown, tools: unknown)
   return { sessionId, turns: normalizedTurns, tools: normalizedTools }
 }
 
-export function registerAiIpcHandlers(settingsStore: AiSettingsStore): void {
+export function registerAiIpcHandlers(settingsStore: AiSettingsStore, chatHistoryStore: AiChatHistoryStore): void {
   ipcMain.handle('ai:get-settings', () => settingsStore.snapshot())
   ipcMain.handle('ai:update-settings', (_event, value: unknown) => settingsStore.update(value))
+  ipcMain.handle('ai:history-list', () => chatHistoryStore.list())
+  ipcMain.handle('ai:history-save', (_event, value: unknown) => chatHistoryStore.save(value))
+  ipcMain.handle('ai:history-delete', (_event, id: unknown) => {
+    if (typeof id !== 'string' || !id) return chatHistoryStore.list()
+    return chatHistoryStore.delete(id)
+  })
   ipcMain.handle('ai:chat', (event: IpcMainInvokeEvent, sessionId: unknown, turns: unknown, tools: unknown) => {
     const request = validateChatRequest(sessionId, turns, tools)
     searchFailuresBySession.delete(request.sessionId)
