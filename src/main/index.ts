@@ -2,9 +2,10 @@ import { app, shell, BrowserWindow, ipcMain, safeStorage, net, protocol } from '
 import { join } from 'path'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs'
 import { createHash } from 'crypto'
-import type { GuEarthSettings, GuEarthSettingsPatch, ProviderCredentialStatus, TileCacheEntry, TileCacheStats, TileKey } from '../preload'
+import type { AnnotationData, GuEarthSettings, GuEarthSettingsPatch, ProviderCredentialStatus, TileCacheEntry, TileCacheStats, TileKey } from '../preload'
 import { findPeaks, searchPlaces } from './places'
 import { registerAiIpc } from './ai'
+import { deleteAnnotation, initAnnotationsStore, listAnnotations, saveAnnotation } from './annotations'
 
 interface PersistedSettings {
   selectedImageryProviderId: string
@@ -482,6 +483,9 @@ function registerIpcHandlers(): void {
   ipcMain.handle('tiles:stats', () => cacheStats())
   ipcMain.handle('places:search', (_event, query: string) => searchPlaces(query))
   ipcMain.handle('places:peaks', (_event, bounds: unknown, minElevation: unknown) => findPeaks(bounds, minElevation))
+  ipcMain.handle('annotations:list', () => listAnnotations())
+  ipcMain.handle('annotations:add', (_event, annotation: unknown) => saveAnnotation(annotation as AnnotationData))
+  ipcMain.handle('annotations:remove', (_event, id: string) => deleteAnnotation(id))
 }
 
 function registerAiHandlers(): void {
@@ -533,6 +537,7 @@ app.whenReady().then(() => {
   settingsPath = join(app.getPath('userData'), 'settings.json')
   credentialsPath = join(app.getPath('userData'), 'credentials')
   tileCachePath = join(app.getPath('userData'), 'tile-cache')
+  initAnnotationsStore(app.getPath('userData'))
   mkdirSync(credentialsPath, { recursive: true })
   mkdirSync(tileCachePath, { recursive: true })
   settings = readSettings()

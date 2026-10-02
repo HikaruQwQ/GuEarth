@@ -104,3 +104,15 @@ export interface AiConfigPatch {
   model?: string
   apiKey?: string
 }
+
+export type AnnotationKind = 'point' | 'line' | 'polygon'
+
+export interface AnnotationData {
+  id: string
+  kind: AnnotationKind
+  name: string
+  points: Array<[number, number]>
+  distanceKm: number | null
+  areaKm2: number | null
+  createdAt: number
+}

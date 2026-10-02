@@ -4,6 +4,7 @@ import type {
   AiChunkEvent,
   AiConfigInfo,
   AiConfigPatch,
+  AnnotationData,
   GeoBounds,
   GuEarthSettings,
   GuEarthSettingsPatch,
@@ -21,6 +22,8 @@ export type {
   AiChunkEvent,
   AiConfigInfo,
   AiConfigPatch,
+  AnnotationData,
+  AnnotationKind,
   GeoBounds,
   GuEarthSettings,
   GuEarthSettingsPatch,
@@ -54,6 +57,11 @@ const api = {
   places: {
     search: (query: string): Promise<PlaceResult[]> => ipcRenderer.invoke('places:search', query),
     peaks: (bounds: GeoBounds, minElevation?: number): Promise<PeakResult[]> => ipcRenderer.invoke('places:peaks', bounds, minElevation)
+  },
+  annotations: {
+    list: (): Promise<AnnotationData[]> => ipcRenderer.invoke('annotations:list'),
+    add: (annotation: AnnotationData): Promise<AnnotationData[]> => ipcRenderer.invoke('annotations:add', annotation),
+    remove: (id: string): Promise<AnnotationData[]> => ipcRenderer.invoke('annotations:remove', id)
   },
   ai: {
     getConfig: (): Promise<AiConfigInfo> => ipcRenderer.invoke('ai:get-config'),

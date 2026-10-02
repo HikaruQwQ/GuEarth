@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AimOutlined, AppstoreOutlined, CloudOutlined, FireOutlined, GlobalOutlined, HomeOutlined, RobotOutlined } from '@ant-design/icons-vue'
+import { AimOutlined, AppstoreOutlined, CloudOutlined, EditOutlined, FireOutlined, GlobalOutlined, HomeOutlined, RobotOutlined } from '@ant-design/icons-vue'
 
 defineProps<{
   active: string[]
@@ -8,6 +8,7 @@ defineProps<{
 defineEmits<{
   openLayers: []
   openTerrainLab: []
+  openDraw: []
   openMonsoon: []
   openSolar: []
   openTectonic: []
@@ -26,6 +27,11 @@ defineEmits<{
     <a-tooltip title="地形实验室（框选区域生成 3D 地形与剖面）" placement="right">
       <a-button type="text" :class="['toolbar-btn', { active: active.includes('terrain') }]" aria-label="地形实验室" @click="$emit('openTerrainLab')">
         <AimOutlined />
+      </a-button>
+    </a-tooltip>
+    <a-tooltip title="教学标注（点线面 · 测距测面积）" placement="right">
+      <a-button type="text" :class="['toolbar-btn', { active: active.includes('draw') }]" aria-label="教学标注量测" @click="$emit('openDraw')">
+        <EditOutlined />
       </a-button>
     </a-tooltip>
     <a-tooltip title="季风 · 洋流 · 气候（随月份联动）" placement="right">
