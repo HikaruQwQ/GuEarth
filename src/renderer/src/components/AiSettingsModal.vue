@@ -2,8 +2,9 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { message } from 'ant-design-vue'
 import { DeleteOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons-vue'
-import type { AiModelConfig, AiProviderConfig, AiSettings, AiThinkingLevel, ProviderCredentialStatus } from '../../../preload'
+import type { AiModelConfig, AiProviderConfig, AiSearchProviderConfig, AiSettings, AiThinkingLevel, ProviderCredentialStatus } from '../../../preload'
 import { useAiStore } from '@renderer/stores/ai'
+import SearchProviderSettings from './SearchProviderSettings.vue'
 
 interface ProviderDraft extends AiProviderConfig {
   key: string
@@ -25,6 +26,9 @@ const activeChoice = ref('')
 const credentialStatuses = ref<Record<string, ProviderCredentialStatus>>({})
 const selectedProviderId = ref('')
 const apiKeyDraft = ref('')
+const activeTab = ref('llm')
+const draftSearchProviders = ref<AiSearchProviderConfig[]>([])
+const activeSearchProviderId = ref('')
 
 const baseUrlPlaceholder = computed(() => (selectedProvider.value?.protocol ?? 'openai') === 'anthropic'
   ? 'https://api.anthropic.com'
@@ -66,9 +70,15 @@ async function refreshCredentialStatuses(): Promise<void> {
   credentialStatuses.value = Object.fromEntries(entries)
 }
 
-watch(visible, (open) => {
+watch(visible, async (open) => {
+  apiKeyDraft.value = ''
   if (!open) return
+  await store.hydrate()
+  if (!visible.value) return
+  activeTab.value = 'llm'
   draftProviders.value = store.settings.providers.map(toProviderDraft)
+  draftSearchProviders.value = store.settings.searchProviders.map((provider) => ({ ...provider }))
+  activeSearchProviderId.value = store.settings.activeSearchProviderId
   activeChoice.value = store.settings.activeProviderId && store.settings.activeModelId
     ? `${store.settings.activeProviderId}:${store.settings.activeModelId}`
     : ''
@@ -162,6 +172,7 @@ function validate(): string {
 async function handleSave(): Promise<void> {
   const problem = validate()
   if (problem) {
+    activeTab.value = 'llm'
     message.warning(problem)
     return
   }
@@ -188,7 +199,9 @@ async function handleSave(): Promise<void> {
         }))
     })),
     activeProviderId,
-    activeModelId
+    activeModelId,
+    searchProviders: draftSearchProviders.value.map((provider) => ({ ...provider })),
+    activeSearchProviderId: activeSearchProviderId.value
   }
   try {
     await store.saveSettings(next)
@@ -206,8 +219,10 @@ async function handleSave(): Promise<void> {
     title="AI 设置"
     :width="760"
     :footer="null"
-    :body-style="{ paddingTop: '12px' }"
+    :body-style="{ paddingTop: '12px', maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' }"
   >
+    <a-tabs v-model:active-key="activeTab">
+    <a-tab-pane key="llm" tab="LLM 供应商">
     <section class="section">
       <div class="section-heading">默认模型</div>
       <a-select
@@ -308,6 +323,11 @@ async function handleSave(): Promise<void> {
       <div v-else class="provider-editor provider-editor-empty">先在左侧添加一个供应商。</div>
     </section>
 
+    </a-tab-pane>
+    <a-tab-pane key="search" tab="搜索供应商">
+      <SearchProviderSettings v-if="visible" v-model:active-provider-id="activeSearchProviderId" :providers="draftSearchProviders" />
+    </a-tab-pane>
+    </a-tabs>
     <div class="modal-footer">
       <a-button @click="visible = false">取消</a-button>
       <a-button type="primary" @click="handleSave">保存设置</a-button>
@@ -345,4 +365,12 @@ async function handleSave(): Promise<void> {
 .level-select{width:76px}
 .provider-danger{margin-top:8px;display:flex;justify-content:flex-end}
 .modal-footer{display:flex;justify-content:flex-end;gap:8px;padding-top:8px;border-top:1px solid rgba(5,5,5,.06)}
+@media(max-width:640px){
+  .provider-layout{flex-direction:column}
+  .provider-rail{width:100%}
+  .field-row{align-items:flex-start;flex-direction:column;gap:8px}
+  .key-row{width:100%;flex-wrap:wrap}
+  .key-row :deep(.ant-input-password){flex-basis:100%}
+  .model-row{flex-wrap:wrap}
+}
 </style>

@@ -80,10 +80,26 @@ export interface AiProviderConfig {
   models: AiModelConfig[]
 }
 
+export interface AiSearchProviderConfig {
+  id: string
+  name: string
+  kind: 'baidu'
+}
+
+export interface AiSearchReference {
+  title: string
+  url: string
+  content: string
+  website: string
+  date: string
+}
+
 export interface AiSettings {
   providers: AiProviderConfig[]
   activeProviderId: string
   activeModelId: string
+  searchProviders: AiSearchProviderConfig[]
+  activeSearchProviderId: string
 }
 
 export interface AiChatTurn {
@@ -101,7 +117,7 @@ export type AiChatEvent =
   | { sessionId: string; type: 'reasoning-delta'; text: string }
   | { sessionId: string; type: 'text-delta'; text: string }
   | { sessionId: string; type: 'tool-start'; callId: string; name: string; args: unknown }
-  | { sessionId: string; type: 'tool-end'; callId: string; ok: boolean; summary: string; result: string }
+  | { sessionId: string; type: 'tool-end'; callId: string; ok: boolean; summary: string; result: string; references?: AiSearchReference[] }
   | { sessionId: string; type: 'execute-tool'; callId: string; name: string; args: unknown }
   | { sessionId: string; type: 'done' }
   | { sessionId: string; type: 'error'; message: string }

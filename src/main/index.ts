@@ -392,7 +392,7 @@ function createWindow(): void {
   win.on('ready-to-show', () => win.show())
 
   win.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    if (/^https?:\/\//i.test(details.url)) void shell.openExternal(details.url)
     return { action: 'deny' }
   })
 

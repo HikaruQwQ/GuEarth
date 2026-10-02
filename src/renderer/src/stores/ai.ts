@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { AiChatEvent, AiSettings, AiToolDefinition } from '../../../preload'
+import type { AiChatEvent, AiSearchReference, AiSettings, AiToolDefinition } from '../../../preload'
+import { defaultAiSettings } from '../../../shared/aiSettings'
 
 export interface ToolStep {
   callId: string
@@ -9,6 +10,7 @@ export interface ToolStep {
   status: 'running' | 'ok' | 'error'
   summary: string
   result: string
+  references?: AiSearchReference[]
 }
 
 export interface ReasoningPart {
@@ -63,7 +65,7 @@ function reportsFailure(result: unknown): boolean {
 }
 
 export const useAiStore = defineStore('ai', () => {
-  const settings = ref<AiSettings>({ providers: [], activeProviderId: '', activeModelId: '' })
+  const settings = ref<AiSettings>(defaultAiSettings())
   const messages = ref<ChatMessage[]>([])
   const isStreaming = ref(false)
   const isPanelOpen = ref(false)
@@ -114,6 +116,7 @@ export const useAiStore = defineStore('ai', () => {
         step.status = event.ok ? 'ok' : 'error'
         step.summary = event.summary
         step.result = event.result
+        step.references = event.references
       }
       return
     }
@@ -144,6 +147,13 @@ export const useAiStore = defineStore('ai', () => {
       if (assistant && assistant.status === 'streaming') {
         assistant.status = 'error'
         assistant.error = event.message
+        for (const part of assistant.parts) {
+          if (part.kind === 'tool' && part.step.name === 'web_search' && part.step.status === 'running') {
+            part.step.status = 'error'
+            part.step.summary = event.message
+            part.step.result = JSON.stringify({ error: event.message })
+          }
+        }
       }
       isStreaming.value = false
     }
@@ -162,7 +172,7 @@ export const useAiStore = defineStore('ai', () => {
       settings.value = await window.guEarth.ai.getSettings()
       hydrated.value = true
     } catch {
-      settings.value = { providers: [], activeProviderId: '', activeModelId: '' }
+      settings.value = defaultAiSettings()
     }
   }
 

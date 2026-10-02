@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'fs'
-import type { AiModelConfig, AiProviderConfig, AiProtocol, AiSettings, AiThinkingLevel } from '../../preload'
+import type { AiModelConfig, AiProviderConfig, AiProtocol, AiSearchProviderConfig, AiSettings, AiThinkingLevel } from '../../preload'
+import { defaultAiSettings, defaultSearchProviders } from '../../shared/aiSettings'
 
 const thinkingLevels: AiThinkingLevel[] = ['low', 'medium', 'high']
 const protocols: AiProtocol[] = ['openai', 'anthropic']
@@ -54,16 +55,32 @@ export function normalizeAiSettings(value: unknown): AiSettings {
   const activeModelId = activeProvider?.models.some((model) => model.id === source.activeModelId)
     ? source.activeModelId as string
     : activeProvider?.models[0]?.id ?? ''
+  const seenSearchIds = new Set<string>()
+  const searchProviders = Array.isArray(source.searchProviders)
+    ? source.searchProviders.flatMap((value): AiSearchProviderConfig[] => {
+        if (!isRecord(value) || value.kind !== 'baidu' || typeof value.id !== 'string') return []
+        if (!/^[a-z0-9][a-z0-9_-]{0,53}$/i.test(value.id) || seenSearchIds.has(value.id)) return []
+        seenSearchIds.add(value.id)
+        const name = typeof value.name === 'string' && value.name.trim() ? value.name.trim().slice(0, 80) : '百度千帆'
+        return [{ id: value.id, name, kind: 'baidu' }]
+      }).slice(0, 16)
+    : []
+  if (!searchProviders.length) searchProviders.push(...defaultSearchProviders())
+  const activeSearchProviderId = searchProviders.some((provider) => provider.id === source.activeSearchProviderId)
+    ? source.activeSearchProviderId as string
+    : searchProviders[0].id
   return {
     providers,
     activeProviderId: activeProvider?.id ?? '',
-    activeModelId
+    activeModelId,
+    searchProviders,
+    activeSearchProviderId
   }
 }
 
 export class AiSettingsStore {
   private path = ''
-  private settings: AiSettings = { providers: [], activeProviderId: '', activeModelId: '' }
+  private settings: AiSettings = defaultAiSettings()
 
   init(path: string): void {
     this.path = path
@@ -71,11 +88,11 @@ export class AiSettingsStore {
   }
 
   private read(): AiSettings {
-    if (!this.path || !existsSync(this.path)) return { providers: [], activeProviderId: '', activeModelId: '' }
+    if (!this.path || !existsSync(this.path)) return defaultAiSettings()
     try {
       return normalizeAiSettings(JSON.parse(readFileSync(this.path, 'utf8')))
     } catch {
-      return { providers: [], activeProviderId: '', activeModelId: '' }
+      return defaultAiSettings()
     }
   }
 

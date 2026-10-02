@@ -5,6 +5,7 @@ import MarkdownIt from 'markdown-it'
 import { Bubble, Sender } from 'ant-design-x-vue'
 import { ClearOutlined, CloseCircleOutlined, CloseOutlined, CompassOutlined, LeftOutlined, RightOutlined, SettingOutlined } from '@ant-design/icons-vue'
 import { useAiStore, type ChatMessage, type ReasoningPart, type ToolStep } from '@renderer/stores/ai'
+import WebSearchStep from './WebSearchStep.vue'
 
 const store = useAiStore()
 const { messages, isStreaming, isPanelOpen, isSettingsOpen } = storeToRefs(store)
@@ -73,6 +74,12 @@ function toolLabel(name: string): string {
 }
 
 const md = new MarkdownIt({ breaks: true, linkify: true })
+md.validateLink = (url) => /^https?:\/\//i.test(url)
+md.renderer.rules.link_open = (tokens, index, options, _env, self) => {
+  tokens[index].attrSet('target', '_blank')
+  tokens[index].attrSet('rel', 'noopener noreferrer')
+  return self.renderToken(tokens, index, options)
+}
 
 function renderMarkdown(text: string): string {
   return md.render(text)
@@ -218,6 +225,14 @@ watch(
               </a-collapse-panel>
             </a-collapse>
             <div v-else-if="part.kind === 'text'" class="answer-text" v-html="renderMarkdown(part.text)"></div>
+            <WebSearchStep
+              v-else-if="part.step.name === 'web_search'"
+              :step="part.step"
+              :busy="isStreaming"
+              :open="openTools.has(part.step.callId)"
+              @toggle="onToolChange(part.step, $event)"
+              @retry="submit(`请重新联网搜索：${$event}`)"
+            />
             <a-collapse
               v-else
               ghost
