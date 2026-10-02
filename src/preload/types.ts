@@ -56,3 +56,73 @@ export interface PeakResult {
   lat: number
   elevation: number
 }
+
+export type AnnotationKind = 'point' | 'line' | 'polygon'
+
+export type AnnotationIcon = 'circle' | 'triangle' | 'star' | 'pin'
+
+export interface AnnotationStyle {
+  color: string
+  lineWidth: number
+  fillOpacity: number
+  icon: AnnotationIcon
+  iconScale: number
+}
+
+export interface AnnotationData {
+  id: string
+  kind: AnnotationKind
+  name: string
+  points: Array<[number, number]>
+  distanceKm: number | null
+  areaKm2: number | null
+  createdAt: number
+  groupId: string | null
+  visible: boolean
+  style: AnnotationStyle | null
+}
+
+export interface AnnotationGroup {
+  id: string
+  name: string
+  createdAt: number
+}
+
+export interface GroundOverlayData {
+  id: string
+  name: string
+  assetDir: string | null
+  fileName: string | null
+  remoteUrl: string | null
+  west: number
+  south: number
+  east: number
+  north: number
+  opacity: number
+  visible: boolean
+  createdAt: number
+}
+
+export interface AnnotationStoreData {
+  groups: AnnotationGroup[]
+  annotations: AnnotationData[]
+  overlays: GroundOverlayData[]
+}
+
+export interface GeoImportAsset {
+  href: string
+  assetUrl: string
+}
+
+export interface GeoImportPayload {
+  fileName: string
+  format: 'kml' | 'gpx'
+  text: string
+  assets: GeoImportAsset[]
+}
+
+export interface KmlExportAsset {
+  assetDir: string
+  fileName: string
+  zipPath: string
+}

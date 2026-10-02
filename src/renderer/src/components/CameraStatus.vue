@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import type { CameraReadout } from '@renderer/stores/globe'
+import type { ScaleBarReadout } from '@renderer/composables/useScaleBar'
 
 defineProps<{
   camera: CameraReadout
+  scaleBar: ScaleBarReadout | null
 }>()
 
 function formatCoordinate(value: number, isLongitude: boolean): string {
@@ -48,6 +50,13 @@ function formatAngle(angle: number): string {
       <span class="label">Pitch</span>
       <span class="value">{{ formatAngle(camera.pitch) }}</span>
     </div>
+    <div v-if="scaleBar" class="status-item scale-item">
+      <span class="label">Scale</span>
+      <div class="scale-body">
+        <div class="scale-line" :style="{ width: `${Math.min(scaleBar.widthPx, 140)}px` }" />
+        <span class="value">{{ scaleBar.label }}</span>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -68,6 +77,23 @@ function formatAngle(angle: number): string {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.scale-item {
+  justify-content: flex-end;
+}
+
+.scale-body {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.scale-line {
+  height: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.65);
+  border-top: none;
+  min-width: 24px;
 }
 
 .label {

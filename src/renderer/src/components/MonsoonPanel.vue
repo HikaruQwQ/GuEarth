@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { CaretRightOutlined, CloseOutlined, PauseOutlined } from '@ant-design/icons-vue'
+import { CaretRightOutlined, PauseOutlined } from '@ant-design/icons-vue'
 import { useMonsoonStore } from '@renderer/stores/monsoon'
 
 const store = useMonsoonStore()
@@ -28,11 +28,7 @@ const seasonHint = computed(() => {
 </script>
 
 <template>
-  <div v-if="store.panelOpen" class="monsoon-panel">
-    <div class="panel-title">
-      <div><div class="panel-kicker">MONSOON · OCEAN · CLIMATE</div><h2>季风 · 洋流 · 气候</h2></div>
-      <a-button type="text" aria-label="关闭季风气候面板" @click="store.setPanelOpen(false)"><CloseOutlined /></a-button>
-    </div>
+  <div class="monsoon-pane">
     <div class="timeline-row">
       <a-button type="primary" size="small" :aria-label="store.playing ? '暂停时间轴' : '播放时间轴'" @click="store.togglePlay()">
         <CaretRightOutlined v-if="!store.playing" /><PauseOutlined v-else />
@@ -51,40 +47,6 @@ const seasonHint = computed(() => {
 </template>
 
 <style scoped>
-.monsoon-panel {
-  position: absolute;
-  left: 76px;
-  bottom: 16px;
-  z-index: 90;
-  width: 430px;
-  background: #ffffff;
-  border: 1px solid rgba(5, 5, 5, 0.06);
-  border-radius: 8px;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
-  padding: 12px 16px;
-}
-
-.panel-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.panel-kicker {
-  color: rgba(0, 0, 0, 0.45);
-  font-size: 12px;
-  line-height: 20px;
-  letter-spacing: 0.08em;
-}
-
-h2 {
-  margin: 0;
-  color: rgba(0, 0, 0, 0.88);
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 24px;
-}
-
 .timeline-row {
   display: flex;
   align-items: center;

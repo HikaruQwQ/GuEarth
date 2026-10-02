@@ -1,38 +1,50 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
-import { Modal } from 'ant-design-vue'
 import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { useGlobeStore } from '@renderer/stores/globe'
-import { useDrawingStore, type DrawTool } from '@renderer/stores/drawing'
 import { useAiStore } from '@renderer/stores/ai'
 import { useTerrainLabStore } from '@renderer/stores/terrainLab'
 import { useMonsoonStore } from '@renderer/stores/monsoon'
 import { useSolarStore } from '@renderer/stores/solar'
 import { useTectonicStore } from '@renderer/stores/tectonic'
+import { useLabStore } from '@renderer/stores/lab'
+import { useDrawStore } from '@renderer/stores/draw'
+import { useTeachingStore } from '@renderer/stores/teaching'
 import { useCesiumViewer } from '@renderer/composables/useCesiumViewer'
-import { useDrawing } from '@renderer/composables/useDrawing'
+import { useDrawLayer } from '@renderer/composables/useDrawLayer'
 import { useRegionTerrain } from '@renderer/composables/useRegionTerrain'
 import { useMonsoonLayer } from '@renderer/composables/useMonsoonLayer'
 import { usePressureWindLayer } from '@renderer/composables/usePressureWindLayer'
 import { useSolarLayer } from '@renderer/composables/useSolarLayer'
 import { useTectonicLayer } from '@renderer/composables/useTectonicLayer'
+import { useTyphoonMarker } from '@renderer/composables/useTyphoonMarker'
+import { useScaleBar } from '@renderer/composables/useScaleBar'
 import { climateRegionAt, latitudeZoneName } from '@renderer/utils/climateData'
+import { findTeachingLayer } from '@renderer/teaching/registry'
+import '@renderer/teaching'
 import GlobeToolbar from '@renderer/components/GlobeToolbar.vue'
 import CameraStatus from '@renderer/components/CameraStatus.vue'
 import LayerPanel from '@renderer/components/LayerPanel.vue'
 import LevelViewSwitcher from '@renderer/components/LevelViewSwitcher.vue'
-import AnnotationPanel from '@renderer/components/AnnotationPanel.vue'
 import PlaceSearchBox from '@renderer/components/PlaceSearchBox.vue'
 import EoqAssistant from '@renderer/components/EoqAssistant.vue'
 import AiSettingsModal from '@renderer/components/AiSettingsModal.vue'
-import TerrainLabPanel from '@renderer/components/TerrainLabPanel.vue'
-import MonsoonPanel from '@renderer/components/MonsoonPanel.vue'
-import SolarPanel from '@renderer/components/SolarPanel.vue'
-import TectonicPanel from '@renderer/components/TectonicPanel.vue'
+import LegendBar from '@renderer/components/LegendBar.vue'
+import ExportPanel from '@renderer/components/ExportPanel.vue'
+import DrawPanel from '@renderer/components/DrawPanel.vue'
+import LabPanel from '@renderer/components/LabPanel.vue'
 
 const store = useGlobeStore()
+const terrainLabStore = useTerrainLabStore()
+const monsoonStore = useMonsoonStore()
+const solarStore = useSolarStore()
+const tectonicStore = useTectonicStore()
+const labStore = useLabStore()
+const drawStore = useDrawStore()
+const aiStore = useAiStore()
+const teachingStore = useTeachingStore()
 const {
   isLayerPanelOpen,
   layers,
@@ -52,36 +64,28 @@ const {
 
 const globeContainer = ref<HTMLDivElement>()
 const { viewer, switchBasemap, setLayerOpacity, flyTo, flyToPlace, toggleLevelView, setTerrain, setTerrainExaggeration, setTerrainLighting } = useCesiumViewer(globeContainer)
-const { flyToShape } = useDrawing(viewer)
-
-const terrainLabStore = useTerrainLabStore()
-const monsoonStore = useMonsoonStore()
-const solarStore = useSolarStore()
-const tectonicStore = useTectonicStore()
+const { scale: scaleBarReadout } = useScaleBar(viewer)
+const exportOpen = ref(false)
+const levelSwitcherVisible = computed(() => isGlobeReady.value && camera.value.height < 5000000)
 const regionTerrain = useRegionTerrain(viewer)
 useMonsoonLayer(viewer)
 usePressureWindLayer(viewer)
 useSolarLayer(viewer)
 useTectonicLayer(viewer)
+useTyphoonMarker(viewer)
+useDrawLayer(viewer)
+teachingStore.bindViewer(viewer)
+teachingStore.refreshDefinitions()
+drawStore.registerFly(flyTo)
+tectonicStore.registerFly(flyTo)
 terrainLabStore.registerLab(regionTerrain)
-
-const drawingStore = useDrawingStore()
-const { activeTool, shapes, selectedShapeId } = storeToRefs(drawingStore)
-const aiStore = useAiStore()
-const isAnnotationPanelOpen = ref(false)
-const annotationDraft = ref('')
-const selectedShape = computed(() => shapes.value.find((shape) => shape.id === selectedShapeId.value) ?? null)
-const levelSwitcherVisible = computed(() => isGlobeReady.value && camera.value.height < 5000000)
-const drawHint = computed(() => (activeTool.value ? (activeTool.value === 'point' ? '在地球上单击以放置点' : '单击加点 · 双击或右键完成 · Esc 取消') : ''))
 
 const toolbarPanels = computed(() => {
   const active: string[] = []
   if (isLayerPanelOpen.value) active.push('layers')
-  if (isAnnotationPanelOpen.value) active.push('annotations')
-  if (terrainLabStore.panelOpen) active.push('terrain')
-  if (monsoonStore.panelOpen) active.push('monsoon')
-  if (solarStore.panelOpen) active.push('solar')
-  if (tectonicStore.panelOpen) active.push('tectonic')
+  if (drawStore.panelOpen) active.push('annotations')
+  if (labStore.panelOpen) active.push('lab')
+  if (exportOpen.value) active.push('export')
   if (aiStore.isPanelOpen) active.push('assistant')
   return active
 })
@@ -213,8 +217,34 @@ aiStore.registerTool({
     const month = Math.round(Number(args.month))
     if (!Number.isFinite(month) || month < 1 || month > 12) return { error: 'month 参数无效，需要 1-12 的整数' }
     monsoonStore.setMonth(month)
-    monsoonStore.setPanelOpen(true)
+    labStore.openTab('monsoon')
     return { status: 'ok', month, message: `季风气候实验室已切换到 ${month} 月` }
+  }
+})
+
+aiStore.registerTool({
+  definition: {
+    name: 'open_layer',
+    description: '打开或关闭教学专题图层，并可自动飞到该图层区域。可用图层包括：经纬网、九大商品粮基地、南水北调、西气东输、西电东送通道、石油进口海上通道、中国主要核电站、主要梯级水电站、资源型城市案例、历史台风路径等。讲解资源配置、产业布局、能源安全等话题时优先用它配合讲解。',
+    parameters: {
+      type: 'object',
+      properties: {
+        layer: { type: 'string', description: '图层 id 或中文名称' },
+        visible: { type: 'boolean', description: 'true 开启（默认），false 关闭' }
+      },
+      required: ['layer']
+    }
+  },
+  execute: async (args) => {
+    const key = String(args.layer ?? '')
+    const definition = findTeachingLayer(key)
+    if (!definition) {
+      return { error: '未找到该图层', available: teachingStore.definitions.map((item) => ({ id: item.id, name: item.name })) }
+    }
+    const visible = args.visible === undefined ? true : args.visible === true
+    teachingStore.setLayerVisible(definition.id, visible)
+    if (visible && definition.flyTo) flyTo(definition.flyTo.longitude, definition.flyTo.latitude, definition.flyTo.height)
+    return { status: 'ok', layer: definition.id, name: definition.name, visible }
   }
 })
 
@@ -251,13 +281,36 @@ aiStore.registerTool({
   }
 })
 
-watch(selectedShape, (shape) => {
-  annotationDraft.value = shape?.annotation ?? ''
-})
+function handleToolbarOpen(id: string): void {
+  if (id === 'layers') handleOpenLayers()
+  else if (id === 'annotations') handleOpenAnnotations()
+  else if (id === 'lab') handleOpenLab()
+  else if (id === 'export') handleOpenExport()
+  else if (id === 'assistant') handleOpenAssistant()
+}
+
+function closeLeftPanels(): void {
+  drawStore.setPanelOpen(false)
+  labStore.setPanelOpen(false)
+}
 
 function handleOpenLayers(): void {
   aiStore.setPanelOpen(false)
   store.setLayerPanelOpen(true)
+}
+
+function handleOpenAnnotations(): void {
+  labStore.setPanelOpen(false)
+  drawStore.setPanelOpen(true)
+}
+
+function handleOpenLab(): void {
+  drawStore.setPanelOpen(false)
+  labStore.setPanelOpen(true)
+}
+
+function handleOpenExport(): void {
+  exportOpen.value = true
 }
 
 function handleOpenAssistant(): void {
@@ -332,55 +385,33 @@ function handleLevelViewToggle(): void {
   toggleLevelView()
 }
 
-function handleTool(tool: DrawTool): void {
-  drawingStore.setActiveTool(activeTool.value === tool ? null : tool)
-}
-
-function handleOpenAnnotations(): void {
-  isAnnotationPanelOpen.value = true
-}
-
-function handleClearShapes(): void {
-  Modal.confirm({ title: '清除全部标注？', okText: '清除', okButtonProps: { danger: true }, cancelText: '取消', onOk: () => drawingStore.clearAll() })
-}
-
-function handleFlyShape(id: string): void {
-  const shape = shapes.value.find((item) => item.id === id)
-  if (shape) flyToShape(shape)
-}
-
-function saveSelectedAnnotation(): void {
-  if (!selectedShape.value) return
-  drawingStore.updateAnnotation(selectedShape.value.id, annotationDraft.value.trim())
-  drawingStore.setSelectedShapeId(null)
-}
-
-function deleteSelectedShape(): void {
-  if (selectedShape.value) drawingStore.removeShape(selectedShape.value.id)
+async function handleDrop(event: DragEvent): Promise<void> {
+  const file = event.dataTransfer?.files?.[0]
+  if (!file) return
+  if (!/\.(kml|kmz|gpx)$/i.test(file.name)) return
+  const filePath = window.guEarth.pathForFile(file)
+  if (!filePath) return
+  closeLeftPanels()
+  drawStore.setPanelOpen(true)
+  try {
+    await drawStore.importFromPath(filePath)
+  } catch (cause) {
+    store.setGlobeError(cause instanceof Error ? cause.message : '导入失败')
+  }
 }
 </script>
 
 <template>
-  <div class="app">
-    <div ref="globeContainer" class="globe" :class="{ drawing: activeTool }"></div>
+  <div class="app" @dragover.prevent @drop.prevent="handleDrop">
+    <div ref="globeContainer" class="globe"></div>
     <GlobeToolbar
-      :active-tool="activeTool"
-      :shape-count="shapes.length"
       :active-panels="toolbarPanels"
-      @open-layers="handleOpenLayers"
-      @open-annotations="handleOpenAnnotations"
-      @open-terrain-lab="terrainLabStore.setPanelOpen(true)"
-      @open-monsoon="monsoonStore.setPanelOpen(true)"
-      @open-solar="solarStore.setPanelOpen(true)"
-      @open-tectonic="tectonicStore.setPanelOpen(true)"
-      @open-assistant="handleOpenAssistant"
+      @open="handleToolbarOpen"
       @home="handleHome"
-      @tool="handleTool"
-      @clear-shapes="handleClearShapes"
     />
     <PlaceSearchBox @select="flyToPlace" />
-    <div v-if="drawHint" class="draw-hint">{{ drawHint }}</div>
-    <CameraStatus :camera="camera" />
+    <LegendBar />
+    <CameraStatus :camera="camera" :scale-bar="scaleBarReadout" />
     <EoqAssistant />
     <AiSettingsModal />
     <LevelViewSwitcher
@@ -388,27 +419,13 @@ function deleteSelectedShape(): void {
       :visible="levelSwitcherVisible"
       @toggle="handleLevelViewToggle"
     />
-    <AnnotationPanel
-      :open="isAnnotationPanelOpen"
-      :shapes="shapes"
-      :selected-shape-id="selectedShapeId"
-      @close="isAnnotationPanelOpen = false"
-      @select="drawingStore.setSelectedShapeId"
-      @fly="handleFlyShape"
-      @remove="drawingStore.removeShape"
+    <ExportPanel
+      :resolve-viewer="() => viewer"
+      :scale-bar="scaleBarReadout"
+      :heading="camera.heading"
+      :open="exportOpen"
+      @close="exportOpen = false"
     />
-    <a-modal :open="Boolean(selectedShape)" title="编辑标注" :width="380" @cancel="drawingStore.setSelectedShapeId(null)">
-      <a-input v-model:value="annotationDraft" :maxlength="200" placeholder="标注名称" @press-enter="saveSelectedAnnotation" />
-      <template #footer>
-        <a-button danger @click="deleteSelectedShape">删除</a-button>
-        <a-button @click="drawingStore.setSelectedShapeId(null)">取消</a-button>
-        <a-button type="primary" @click="saveSelectedAnnotation">保存</a-button>
-      </template>
-    </a-modal>
-    <TerrainLabPanel />
-    <MonsoonPanel />
-    <SolarPanel />
-    <TectonicPanel />
     <LayerPanel
       :open="isLayerPanelOpen"
       :layers="layers"
@@ -432,6 +449,8 @@ function deleteSelectedShape(): void {
       @credential-save="handleCredentialSave"
       @credential-clear="handleCredentialClear"
     />
+    <DrawPanel />
+    <LabPanel />
   </div>
 </template>
 
@@ -446,23 +465,5 @@ function deleteSelectedShape(): void {
 .globe {
   width: 100%;
   height: 100%;
-}
-
-.globe.drawing :deep(canvas) {
-  cursor: crosshair;
-}
-
-.draw-hint {
-  position: absolute;
-  top: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 4px 12px;
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.72);
-  color: rgba(255, 255, 255, 0.92);
-  font-size: 12px;
-  line-height: 20px;
-  pointer-events: none;
 }
 </style>

@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { GridBounds, ProfileSample } from '@renderer/utils/geo'
+import type { ContourLine, GridBounds, ProfileSample } from '@renderer/utils/geo'
 
 export type TerrainLabPhase = 'idle' | 'selecting' | 'sampling' | 'ready' | 'drawingProfile'
 
@@ -12,6 +12,7 @@ export interface TerrainLabApi {
   clearProfile: () => void
   removeModel: () => void
   resample: () => void
+  getContours: () => ContourLine[]
 }
 
 export interface TerrainLabStats {
@@ -29,6 +30,7 @@ export const useTerrainLabStore = defineStore('terrainLab', () => {
   const stats = ref<TerrainLabStats | null>(null)
   const exaggeration = ref(2)
   const contourInterval = ref(0)
+  const slopeAnalysis = ref(false)
   const profilePoints = ref<Array<[number, number]>>([])
   const profile = ref<ProfileSample[] | null>(null)
   const error = ref('')
@@ -123,10 +125,14 @@ export const useTerrainLabStore = defineStore('terrainLab', () => {
     lab?.resample()
   }
 
+  function getContours(): ContourLine[] {
+    return lab?.getContours() ?? []
+  }
+
   return {
-    panelOpen, phase, bounds, stats, exaggeration, contourInterval, profilePoints, profile, error,
+    panelOpen, phase, bounds, stats, exaggeration, contourInterval, slopeAnalysis, profilePoints, profile, error,
     registerLab, setPanelOpen, beginSelection, setBounds, setStats, setError, setReady,
     startSelection, cancelSelection, startProfile, addProfilePoint, finishProfile, cancelProfile,
-    setProfile, clearProfile, removeModel, resample
+    setProfile, clearProfile, removeModel, resample, getContours
   }
 })

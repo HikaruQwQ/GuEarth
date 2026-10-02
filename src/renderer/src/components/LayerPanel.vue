@@ -2,6 +2,24 @@
 import { computed, ref, watch } from 'vue'
 import { CloseOutlined, DeleteOutlined, MoreOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons-vue'
 import { basemapCategories, providerCatalog, credentialOnlyProviders, terrainCatalog, type LayerMeta, type ProviderMeta } from '@renderer/stores/globe'
+import { useTeachingStore } from '@renderer/stores/teaching'
+import type { TeachingLayerCategory } from '@renderer/teaching/registry'
+
+const teachingStore = useTeachingStore()
+
+const TEACHING_CATEGORY_LABELS: Record<TeachingLayerCategory, string> = {
+  skills: '地理技能',
+  nature: '自然专题',
+  human: '人文专题'
+}
+
+const teachingGroups = computed(() => {
+  const groups = new Map<TeachingLayerCategory, typeof teachingStore.definitions>()
+  for (const definition of teachingStore.definitions) {
+    groups.set(definition.category, [...(groups.get(definition.category) ?? []), definition])
+  }
+  return [...groups.entries()].map(([category, items]) => ({ category, label: TEACHING_CATEGORY_LABELS[category], items }))
+})
 
 interface CredentialStatus {
   configured: boolean
@@ -153,6 +171,23 @@ function clearCredential(): void {
         </div>
       </section>
 
+      <section v-for="group in teachingGroups" :key="group.category" class="panel-section">
+        <div class="section-heading"><span>{{ group.label }}</span></div>
+        <div class="teaching-list">
+          <label v-for="definition in group.items" :key="definition.id" class="teaching-item">
+            <a-checkbox
+              :checked="teachingStore.isLayerVisible(definition.id)"
+              :aria-label="definition.name"
+              @change="(event: Event) => teachingStore.setLayerVisible(definition.id, (event.target as HTMLInputElement).checked)"
+            />
+            <div class="teaching-copy">
+              <div class="teaching-name">{{ definition.name }}</div>
+              <div v-if="definition.description" class="teaching-description">{{ definition.description }}</div>
+            </div>
+          </label>
+        </div>
+      </section>
+
       <section class="panel-section">
         <div class="section-heading"><span>3D 地形</span></div>
         <a-select :value="terrainProviderId" class="full-select" @change="(value: string) => emit('terrain', value)">
@@ -227,5 +262,5 @@ function clearCredential(): void {
 </template>
 
 <style scoped>
-.panel-title{display:flex;align-items:center;justify-content:space-between;width:100%}h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28px}.panel-alert{margin-bottom:16px}.layer-spin{display:block;min-height:168px}.panel-section{padding:0 0 16px;margin:0 0 16px;border-bottom:1px solid rgba(5,5,5,.06)}.panel-section:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none}.section-heading{display:flex;align-items:center;justify-content:space-between;margin:0 0 8px;color:rgba(0,0,0,.65);font-size:12px;line-height:20px}.full-select{width:100%}.cache-row{display:flex;align-items:center;justify-content:space-between}.terrain-slider-head{display:flex;align-items:center;justify-content:space-between;margin-top:12px;color:rgba(0,0,0,.65);font-size:13px;line-height:20px}.terrain-lighting-row{display:flex;align-items:center;justify-content:space-between;margin-top:4px;color:rgba(0,0,0,.65);font-size:13px;line-height:20px}.terrain-alert{margin-top:8px}.key-input{margin-top:8px}.credential-hint{margin-top:8px}.key-actions{display:flex;gap:8px;margin-top:8px}.basemap-item{display:flex;align-items:center;gap:4px;min-height:48px;padding:6px 8px;border-radius:6px;cursor:pointer}.basemap-item.selected{background:rgba(22,119,255,.06)}.basemap-copy{flex:1;min-width:0;margin-left:4px}.basemap-name{color:rgba(0,0,0,.88);font-size:14px;line-height:22px}.basemap-description{overflow:hidden;color:rgba(0,0,0,.45);font-size:12px;line-height:20px;text-overflow:ellipsis;white-space:nowrap}.more-button{color:rgba(0,0,0,.45)}.modal-block{margin-bottom:16px}.setting-head{display:flex;align-items:center;justify-content:space-between;color:rgba(0,0,0,.65);font-size:12px;line-height:20px}.provider-group{display:flex;flex-direction:column;gap:8px;width:100%;margin-top:8px}.provider-radio{display:flex;align-items:flex-start;margin:0}.provider-radio :deep(.ant-radio){margin-top:1px}.provider-copy{min-width:0}.provider-name{color:rgba(0,0,0,.88);font-size:14px;line-height:22px}.provider-description{color:rgba(0,0,0,.45);font-size:12px;line-height:20px}
+.panel-title{display:flex;align-items:center;justify-content:space-between;width:100%}h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28px}.panel-alert{margin-bottom:16px}.layer-spin{display:block;min-height:168px}.panel-section{padding:0 0 16px;margin:0 0 16px;border-bottom:1px solid rgba(5,5,5,.06)}.panel-section:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none}.section-heading{display:flex;align-items:center;justify-content:space-between;margin:0 0 8px;color:rgba(0,0,0,.65);font-size:12px;line-height:20px}.full-select{width:100%}.cache-row{display:flex;align-items:center;justify-content:space-between}.terrain-slider-head{display:flex;align-items:center;justify-content:space-between;margin-top:12px;color:rgba(0,0,0,.65);font-size:13px;line-height:20px}.terrain-lighting-row{display:flex;align-items:center;justify-content:space-between;margin-top:4px;color:rgba(0,0,0,.65);font-size:13px;line-height:20px}.terrain-alert{margin-top:8px}.key-input{margin-top:8px}.credential-hint{margin-top:8px}.key-actions{display:flex;gap:8px;margin-top:8px}.basemap-item{display:flex;align-items:center;gap:4px;min-height:48px;padding:6px 8px;border-radius:6px;cursor:pointer}.basemap-item.selected{background:rgba(22,119,255,.06)}.basemap-copy{flex:1;min-width:0;margin-left:4px}.basemap-name{color:rgba(0,0,0,.88);font-size:14px;line-height:22px}.basemap-description{overflow:hidden;color:rgba(0,0,0,.45);font-size:12px;line-height:20px;text-overflow:ellipsis;white-space:nowrap}.more-button{color:rgba(0,0,0,.45)}.modal-block{margin-bottom:16px}.teaching-list{display:flex;flex-direction:column;gap:2px}.teaching-item{display:flex;align-items:flex-start;gap:4px;padding:4px 0;cursor:pointer}.teaching-copy{flex:1;min-width:0;margin-left:4px}.teaching-name{color:rgba(0,0,0,.88);font-size:13px;line-height:22px}.teaching-description{color:rgba(0,0,0,.45);font-size:12px;line-height:18px}.setting-head{display:flex;align-items:center;justify-content:space-between;color:rgba(0,0,0,.65);font-size:12px;line-height:20px}.provider-group{display:flex;flex-direction:column;gap:8px;width:100%;margin-top:8px}.provider-radio{display:flex;align-items:flex-start;margin:0}.provider-radio :deep(.ant-radio){margin-top:1px}.provider-copy{min-width:0}.provider-name{color:rgba(0,0,0,.88);font-size:14px;line-height:22px}.provider-description{color:rgba(0,0,0,.45);font-size:12px;line-height:20px}
 </style>

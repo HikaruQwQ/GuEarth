@@ -54,3 +54,40 @@ export function autoAnnotationName(kind: 'point' | 'line' | 'polygon', index: nu
   const prefix = kind === 'point' ? '标注点' : kind === 'line' ? '测距线' : '量算面'
   return `${prefix} ${index}`
 }
+
+export function initialBearingDeg(start: LonLat, end: LonLat): number {
+  const lat1 = toRadians(start[1])
+  const lat2 = toRadians(end[1])
+  const dLon = toRadians(end[0] - start[0])
+  const y = Math.sin(dLon) * Math.cos(lat2)
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon)
+  return (Math.atan2(y, x) * 180) / Math.PI
+}
+
+export function bearingText(start: LonLat, end: LonLat): string {
+  const bearing = (initialBearingDeg(start, end) + 360) % 360
+  const compass = bearing < 22.5 || bearing >= 337.5 ? '正北'
+    : bearing < 67.5 ? '北偏东'
+    : bearing < 112.5 ? '正东'
+    : bearing < 157.5 ? '南偏东'
+    : bearing < 202.5 ? '正南'
+    : bearing < 247.5 ? '南偏西'
+    : bearing < 292.5 ? '正西'
+    : '北偏西'
+  if (compass.startsWith('正')) return compass
+  const deviation = Math.round(bearing < 90 ? bearing : bearing < 180 ? 180 - bearing : bearing < 270 ? bearing - 180 : 360 - bearing)
+  if (deviation === 0) return compass
+  return `${compass}${deviation}°`
+}
+
+export function formatDms(value: number, isLongitude: boolean): string {
+  const hemisphere = isLongitude ? (value >= 0 ? 'E' : 'W') : value >= 0 ? 'N' : 'S'
+  const absolute = Math.abs(value)
+  const degrees = Math.floor(absolute)
+  const minutesFloat = (absolute - degrees) * 60
+  const minutes = Math.floor(minutesFloat)
+  const seconds = Math.round((minutesFloat - minutes) * 60)
+  const normalizedSeconds = seconds === 60 ? 0 : seconds
+  const normalizedMinutes = seconds === 60 ? minutes + 1 : minutes
+  return `${hemisphere}${degrees}°${String(normalizedMinutes).padStart(2, '0')}′${String(normalizedSeconds).padStart(2, '0')}″`
+}

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { CaretRightOutlined, CloseOutlined, PauseOutlined } from '@ant-design/icons-vue'
+import { CaretRightOutlined, PauseOutlined } from '@ant-design/icons-vue'
 import { useSolarStore, parseIsoDate } from '@renderer/stores/solar'
 import {
   dayLengthHours,
@@ -46,14 +46,45 @@ const toggles = computed(() => [
   { key: 'subsolar' as const, label: '太阳直射点', value: store.showSubsolar },
   { key: 'lighting' as const, label: '昼夜光照', value: store.showLighting }
 ])
+
+interface ZoneCard {
+  offset: number
+  name: string
+  localText: string
+  dateLabel: string
+  beijing: boolean
+}
+
+function zoneName(offset: number): string {
+  if (offset === 0) return '中时区'
+  if (offset === 12) return '东十二区'
+  if (offset === -12) return '西十二区'
+  return offset > 0 ? `东${offset}区` : `西${-offset}区`
+}
+
+const zoneCards = computed<ZoneCard[]>(() => {
+  const cards: ZoneCard[] = []
+  for (let offset = 12; offset >= -12; offset--) {
+    const total = store.utcHours + offset
+    const dayShift = Math.floor(total / 24)
+    const localHours = ((total % 24) + 24) % 24
+    const hours = Math.floor(localHours)
+    const minutes = Math.round((localHours - hours) * 60)
+    const normalized = minutes === 60 ? { h: (hours + 1) % 24, m: 0 } : { h: hours, m: minutes }
+    cards.push({
+      offset,
+      name: zoneName(offset),
+      localText: `${String(normalized.h).padStart(2, '0')}:${String(normalized.m).padStart(2, '0')}`,
+      dateLabel: dayShift === 0 ? '今天' : dayShift === 1 ? '明天' : '昨天',
+      beijing: offset === 8
+    })
+  }
+  return cards
+})
 </script>
 
 <template>
-  <div v-if="store.panelOpen" class="solar-panel">
-    <div class="panel-title">
-      <div><div class="panel-kicker">SOLAR · TERMINATOR · DAYLIGHT</div><h2>昼夜光照 · 晨昏线</h2></div>
-      <a-button type="text" aria-label="关闭昼夜光照面板" @click="store.setPanelOpen(false)"><CloseOutlined /></a-button>
-    </div>
+  <div class="solar-pane">
     <div class="date-row">
       <a-date-picker :value="store.dateISO" value-format="YYYY-MM-DD" size="small" class="date-picker" aria-label="模拟日期" @change="(value: string) => store.setDate(value ?? store.dateISO)" />
       <span class="declination-readout">直射纬度 {{ declinationText }}</span>
@@ -84,44 +115,22 @@ const toggles = computed(() => [
     </div>
     <LatitudeChart title="昼长随纬度分布" unit="小时" :y-max="24" :points="dayLengthPoints" />
     <LatitudeChart title="正午太阳高度随纬度分布" unit="度" :y-max="90" :points="elevationPoints" />
+    <div class="zone-section">
+      <div class="zone-heading"><span>时区与日期（随上方时刻联动）</span></div>
+      <div class="zone-strip">
+        <div v-for="card in zoneCards" :key="card.offset" :class="['zone-card', { beijing: card.beijing, tomorrow: card.dateLabel === '明天', yesterday: card.dateLabel === '昨天' }]">
+          <span class="zone-name">{{ card.name }}</span>
+          <span class="zone-time">{{ card.localText }}</span>
+          <span class="zone-date">{{ card.dateLabel }}</span>
+          <span v-if="card.beijing" class="zone-tag">北京时间</span>
+        </div>
+      </div>
+      <p class="zone-note">180° 经线为日界线：东十二区（西侧）总比西十二区（东侧）早一天。</p>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.solar-panel {
-  position: absolute;
-  left: 76px;
-  bottom: 16px;
-  z-index: 90;
-  width: 430px;
-  background: #ffffff;
-  border: 1px solid rgba(5, 5, 5, 0.06);
-  border-radius: 8px;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
-  padding: 12px 16px;
-}
-
-.panel-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.panel-kicker {
-  color: rgba(0, 0, 0, 0.45);
-  font-size: 12px;
-  line-height: 20px;
-  letter-spacing: 0.08em;
-}
-
-h2 {
-  margin: 0;
-  color: rgba(0, 0, 0, 0.88);
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 24px;
-}
-
 .date-row {
   display: flex;
   align-items: center;
@@ -203,5 +212,81 @@ h2 {
   font-size: 13px;
   line-height: 22px;
   cursor: pointer;
+}
+
+.zone-section {
+  margin-top: 12px;
+}
+
+.zone-heading {
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 12px;
+  line-height: 20px;
+  margin-bottom: 6px;
+}
+
+.zone-strip {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.zone-card {
+  flex: none;
+  width: 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 4px 0;
+  border: 1px solid rgba(5, 5, 5, 0.06);
+  border-radius: 6px;
+  background: rgba(22, 119, 255, 0.03);
+}
+
+.zone-card.beijing {
+  border-color: #1677ff;
+  background: rgba(22, 119, 255, 0.08);
+}
+
+.zone-card.tomorrow {
+  border-color: rgba(82, 196, 26, 0.45);
+}
+
+.zone-card.yesterday {
+  border-color: rgba(250, 140, 22, 0.45);
+}
+
+.zone-name {
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.zone-time {
+  color: rgba(0, 0, 0, 0.88);
+  font-size: 13px;
+  line-height: 18px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+}
+
+.zone-date {
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.zone-tag {
+  color: #1677ff;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.zone-note {
+  margin: 6px 0 0;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  line-height: 20px;
 }
 </style>

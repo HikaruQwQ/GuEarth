@@ -41,14 +41,36 @@ function mixHex(a: string, b: string, t: number): string {
   return `rgb(${to(r0, r1)}, ${to(g0, g1)}, ${to(b0, b1)})`
 }
 
-function rampColor(t: number): string {
+function rampColor(stops: Array<[number, string]>, t: number): string {
   const clamped = Math.min(1, Math.max(0, t))
-  for (let i = 1; i < HYPSOMETRIC_STOPS.length; i++) {
-    const [t0, c0] = HYPSOMETRIC_STOPS[i - 1]
-    const [t1, c1] = HYPSOMETRIC_STOPS[i]
+  for (let i = 1; i < stops.length; i++) {
+    const [t0, c0] = stops[i - 1]
+    const [t1, c1] = stops[i]
     if (clamped <= t1) return mixHex(c0, c1, (clamped - t0) / (t1 - t0 || 1))
   }
-  return HYPSOMETRIC_STOPS[HYPSOMETRIC_STOPS.length - 1][1]
+  return stops[stops.length - 1][1]
+}
+
+const SLOPE_STOPS: Array<[number, string]> = [
+  [0, '#52c41a'],
+  [0.22, '#a0d911'],
+  [0.45, '#fadb14'],
+  [0.7, '#fa8c16'],
+  [0.87, '#f5222d'],
+  [1, '#a8071a']
+]
+
+function gradientTextureUrl(stops: Array<[number, string]>): string {
+  const canvas = document.createElement('canvas')
+  canvas.width = 4
+  canvas.height = 256
+  const context = canvas.getContext('2d')
+  if (!context) return ''
+  for (let y = 0; y < 256; y++) {
+    context.fillStyle = rampColor(stops, y / 255)
+    context.fillRect(0, y, 4, 1)
+  }
+  return canvas.toDataURL()
 }
 
 function hypsometricTextureUrl(): string {
@@ -58,10 +80,14 @@ function hypsometricTextureUrl(): string {
   const context = canvas.getContext('2d')
   if (!context) return ''
   for (let y = 0; y < 256; y++) {
-    context.fillStyle = rampColor(1 - y / 255)
+    context.fillStyle = rampColor(HYPSOMETRIC_STOPS, 1 - y / 255)
     context.fillRect(0, y, 4, 1)
   }
   return canvas.toDataURL()
+}
+
+function slopeTextureUrl(): string {
+  return gradientTextureUrl(SLOPE_STOPS)
 }
 
 function gridDimensions(bounds: GridBounds): { cols: number; rows: number } {
@@ -80,11 +106,23 @@ interface MeshGeometryData {
   boundingSphere: Cesium.BoundingSphere
 }
 
-function buildMeshGeometry(grid: ElevationGrid, exaggeration: number, baseAltitude: number): MeshGeometryData {
+function buildMeshGeometry(grid: ElevationGrid, exaggeration: number, baseAltitude: number, slopeMode: boolean): MeshGeometryData {
   const { cols, rows, bounds, min, max, values } = grid
   const valueRange = max - min || 1
   const gridVertexCount = cols * rows
   const surfaceHeight = (value: number): number => baseAltitude + value * exaggeration
+  const centerLatRad = (((bounds.north + bounds.south) / 2) * Math.PI) / 180
+  const lonSpacingM = (111320 * Math.cos(centerLatRad) * (bounds.east - bounds.west)) / (cols - 1)
+  const latSpacingM = (110574 * (bounds.north - bounds.south)) / (rows - 1)
+  const slopeAt = (row: number, col: number): number => {
+    const r0 = Math.max(0, row - 1)
+    const r1 = Math.min(rows - 1, row + 1)
+    const c0 = Math.max(0, col - 1)
+    const c1 = Math.min(cols - 1, col + 1)
+    const dzdx = (values[row * cols + c1] - values[row * cols + c0]) / Math.max(1, (c1 - c0) * lonSpacingM)
+    const dzdy = (values[r0 * cols + col] - values[r1 * cols + col]) / Math.max(1, (r0 - r1) * latSpacingM)
+    return Math.min(1, Math.atan(Math.sqrt(dzdx * dzdx + dzdy * dzdy)) / (Math.PI / 4))
+  }
   const positions: Cesium.Cartesian3[] = new Array(gridVertexCount)
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
@@ -126,7 +164,7 @@ function buildMeshGeometry(grid: ElevationGrid, exaggeration: number, baseAltitu
       normalArray[index * 3 + 1] = normal.y
       normalArray[index * 3 + 2] = normal.z
       stArray[index * 2] = col / (cols - 1)
-      stArray[index * 2 + 1] = (values[index] - min) / valueRange
+      stArray[index * 2 + 1] = slopeMode ? slopeAt(row, col) : (values[index] - min) / valueRange
     }
   }
   borderRing.forEach((surfaceIndex, ringIndex) => {
@@ -179,6 +217,7 @@ export function useRegionTerrain(viewerRef: Ref<Cesium.Viewer | undefined>) {
   let provisionalEntity: Cesium.Entity | null = null
   let profileWall: Cesium.Entity | null = null
   let meshPrimitive: Cesium.Primitive | null = null
+  let peakMarker: Cesium.Entity | null = null
   let contourCollection: Cesium.PolylineCollection | null = null
   let profileCollection: Cesium.PolylineCollection | null = null
   let grid: ElevationGrid | null = null
@@ -360,8 +399,9 @@ export function useRegionTerrain(viewerRef: Ref<Cesium.Viewer | undefined>) {
       viewer.scene.primitives.remove(meshPrimitive)
       meshPrimitive = null
     }
+    removePeakMarker()
     baseAltitude = grid.max * store.exaggeration + 1500
-    const data = buildMeshGeometry(grid, store.exaggeration, baseAltitude)
+    const data = buildMeshGeometry(grid, store.exaggeration, baseAltitude, store.slopeAnalysis)
     if (expected !== generation) return
     const geometry = new Cesium.Geometry({
       attributes: {
@@ -373,7 +413,7 @@ export function useRegionTerrain(viewerRef: Ref<Cesium.Viewer | undefined>) {
       primitiveType: Cesium.PrimitiveType.TRIANGLES,
       boundingSphere: data.boundingSphere
     })
-    const material = Cesium.Material.fromType('Image', { image: hypsometricTextureUrl() })
+    const material = Cesium.Material.fromType('Image', { image: store.slopeAnalysis ? slopeTextureUrl() : hypsometricTextureUrl() })
     const appearance = new Cesium.MaterialAppearance({
       material,
       flat: false,
@@ -387,6 +427,41 @@ export function useRegionTerrain(viewerRef: Ref<Cesium.Viewer | undefined>) {
         asynchronous: false
       })
     )
+    if (store.slopeAnalysis) addPeakMarker()
+  }
+
+  function removePeakMarker(): void {
+    const viewer = currentViewer()
+    if (peakMarker && viewer) viewer.entities.remove(peakMarker)
+    peakMarker = null
+  }
+
+  function addPeakMarker(): void {
+    const viewer = currentViewer()
+    if (!viewer || !grid) return
+    const { cols, rows, bounds, values } = grid
+    let bestIndex = 0
+    for (let index = 1; index < values.length; index++) {
+      if (values[index] > values[bestIndex]) bestIndex = index
+    }
+    const col = bestIndex % cols
+    const row = Math.floor(bestIndex / cols)
+    const lon = bounds.west + ((bounds.east - bounds.west) * col) / (cols - 1)
+    const lat = bounds.north - ((bounds.north - bounds.south) * row) / (rows - 1)
+    peakMarker = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(lon, lat, baseAltitude + values[bestIndex] * store.exaggeration + 40),
+      point: { pixelSize: 10, color: Cesium.Color.fromCssColorString('#f5222d'), outlineColor: Cesium.Color.WHITE, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      label: {
+        text: `山峰 ${Math.round(values[bestIndex])} m`,
+        font: '12px sans-serif',
+        fillColor: Cesium.Color.fromCssColorString('#f5222d'),
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        outlineColor: Cesium.Color.WHITE.withAlpha(0.9),
+        outlineWidth: 3,
+        pixelOffset: new Cesium.Cartesian2(0, -14),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
+      }
+    })
   }
 
   function rebuildContours(): void {
@@ -488,6 +563,12 @@ export function useRegionTerrain(viewerRef: Ref<Cesium.Viewer | undefined>) {
     await sampleAndBuild(viewer, bounds)
   }
 
+  function getContours(): import('@renderer/utils/geo').ContourLine[] {
+    if (!grid) return []
+    const interval = store.contourInterval > 0 ? store.contourInterval : niceContourInterval(grid.max - grid.min)
+    return extractContours(grid, interval)
+  }
+
   function removeModel(): void {
     generation++
     const viewer = currentViewer()
@@ -498,6 +579,7 @@ export function useRegionTerrain(viewerRef: Ref<Cesium.Viewer | undefined>) {
       if (profileWall) viewer.entities.remove(profileWall)
       if (provisionalEntity) viewer.entities.remove(provisionalEntity)
       if (selectionEntity) viewer.entities.remove(selectionEntity)
+      if (peakMarker) viewer.entities.remove(peakMarker)
     }
     meshPrimitive = null
     contourCollection = null
@@ -505,6 +587,7 @@ export function useRegionTerrain(viewerRef: Ref<Cesium.Viewer | undefined>) {
     profileWall = null
     provisionalEntity = null
     selectionEntity = null
+    peakMarker = null
     grid = null
     lastProfileLine = null
     lastProfileHeights = null
@@ -601,6 +684,12 @@ export function useRegionTerrain(viewerRef: Ref<Cesium.Viewer | undefined>) {
     rebuildContours()
   })
 
+  watch(() => store.slopeAnalysis, () => {
+    if (!grid) return
+    const expected = ++generation
+    rebuildMesh(expected)
+  })
+
   onBeforeUnmount(() => {
     generation++
     const viewer = currentViewer()
@@ -618,6 +707,7 @@ export function useRegionTerrain(viewerRef: Ref<Cesium.Viewer | undefined>) {
     finishProfile,
     clearProfile,
     removeModel,
-    resample
+    resample,
+    getContours
   }
 }

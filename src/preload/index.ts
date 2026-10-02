@@ -1,8 +1,12 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
+  AnnotationData,
+  AnnotationStoreData,
   GeoBounds,
+  GeoImportPayload,
   GuEarthSettings,
   GuEarthSettingsPatch,
+  KmlExportAsset,
   PeakResult,
   ProviderCredentialStatus,
   TileCacheEntry,
@@ -11,29 +15,25 @@ import type {
 } from './types'
 
 export type {
+  AnnotationData,
+  AnnotationGroup,
+  AnnotationIcon,
+  AnnotationKind,
+  AnnotationStoreData,
+  AnnotationStyle,
   GeoBounds,
+  GeoImportAsset,
+  GeoImportPayload,
+  GroundOverlayData,
   GuEarthSettings,
   GuEarthSettingsPatch,
+  KmlExportAsset,
   PeakResult,
   ProviderCredentialStatus,
   TileCacheEntry,
   TileCacheStats,
   TileKey
 } from './types'
-
-export interface GeoPosition {
-  longitude: number
-  latitude: number
-  height: number
-}
-
-export interface StoredShape {
-  id: string
-  kind: 'point' | 'polyline' | 'polygon'
-  positions: GeoPosition[]
-  annotation: string
-  createdAt: number
-}
 
 export type AiProtocol = 'openai' | 'anthropic'
 export type AiThinkingLevel = 'low' | 'medium' | 'high'
@@ -118,15 +118,25 @@ const api = {
     clear: (providerId?: string): Promise<void> => ipcRenderer.invoke('tiles:clear', providerId),
     stats: (): Promise<TileCacheStats> => ipcRenderer.invoke('tiles:stats')
   },
-  annotations: {
-    list: (): Promise<StoredShape[]> => ipcRenderer.invoke('annotations:list'),
-    save: (shape: StoredShape): Promise<void> => ipcRenderer.invoke('annotations:save', shape),
-    remove: (id: string): Promise<void> => ipcRenderer.invoke('annotations:remove', id)
-  },
   places: {
     search: (keyword: string): Promise<PlaceSearchResult> => ipcRenderer.invoke('places:search', keyword),
     peaks: (bounds: GeoBounds, minElevation?: number): Promise<PeakResult[]> => ipcRenderer.invoke('places:peaks', bounds, minElevation)
   },
+  annotations: {
+    list: (): Promise<AnnotationStoreData> => ipcRenderer.invoke('annotations:list'),
+    add: (annotation: AnnotationData): Promise<AnnotationStoreData> => ipcRenderer.invoke('annotations:add', annotation),
+    update: (annotation: AnnotationData): Promise<AnnotationStoreData> => ipcRenderer.invoke('annotations:update', annotation),
+    remove: (id: string): Promise<AnnotationStoreData> => ipcRenderer.invoke('annotations:remove', id),
+    saveAll: (store: AnnotationStoreData): Promise<AnnotationStoreData> => ipcRenderer.invoke('annotations:save-all', store),
+    removeOverlayAssets: (assetDir: string): Promise<void> => ipcRenderer.invoke('geoio:remove-overlay-assets', assetDir)
+  },
+  geoio: {
+    pickImport: (): Promise<GeoImportPayload | null> => ipcRenderer.invoke('geoio:pick-import'),
+    readFile: (filePath: string): Promise<GeoImportPayload> => ipcRenderer.invoke('geoio:read-file', filePath),
+    saveKml: (defaultName: string, kmlText: string, assets: KmlExportAsset[]): Promise<string | null> => ipcRenderer.invoke('geoio:save-kml', defaultName, kmlText, assets),
+    saveBinary: (defaultName: string, base64: string, extension: string, mime: string): Promise<string | null> => ipcRenderer.invoke('geoio:save-binary', defaultName, base64, extension, mime)
+  },
+  pathForFile: (file: File): string => webUtils.getPathForFile(file),
   ai: {
     getSettings: (): Promise<AiSettings> => ipcRenderer.invoke('ai:get-settings'),
     updateSettings: (settings: AiSettings): Promise<AiSettings> => ipcRenderer.invoke('ai:update-settings', settings),

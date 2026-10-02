@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { AimOutlined, CloseOutlined, DeleteOutlined, LineOutlined, ReloadOutlined } from '@ant-design/icons-vue'
+import { AimOutlined, DeleteOutlined, DownloadOutlined, FileImageOutlined, LineOutlined, ReloadOutlined, TableOutlined } from '@ant-design/icons-vue'
+import { message } from 'ant-design-vue'
 import { useTerrainLabStore } from '@renderer/stores/terrainLab'
 import { formatElevation, formatKm } from '@renderer/utils/geo'
+import { drawProfileChart } from '@renderer/utils/profileChart'
+import { contoursToGeoJson, profileToCsv } from '@renderer/utils/vectorFiles'
+import { blobToBase64 } from '@renderer/utils/capture'
 import ProfileChart from '@renderer/components/ProfileChart.vue'
 
 const store = useTerrainLabStore()
@@ -22,17 +26,67 @@ const boundsText = computed(() => {
   const { west, east, south, north } = store.bounds
   return `${west.toFixed(2)}°~${east.toFixed(2)}°E · ${south.toFixed(2)}°~${north.toFixed(2)}°N`
 })
+const hasProfile = computed(() => (store.profile?.length ?? 0) > 1)
+
+async function saveText(defaultName: string, text: string, extension: string, mime: string): Promise<void> {
+  try {
+    const base64 = btoa(unescape(encodeURIComponent(text)))
+    const saved = await window.guEarth.geoio.saveBinary(defaultName, base64, extension, mime)
+    if (saved) message.success('导出成功')
+  } catch (cause) {
+    message.error(cause instanceof Error ? cause.message : '导出失败')
+  }
+}
+
+async function handleExportProfilePng(): Promise<void> {
+  const profile = store.profile
+  if (!profile || profile.length < 2) return
+  try {
+    const width = 1200
+    const height = 620
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('画布不可用')
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, width, height)
+    ctx.fillStyle = 'rgba(0,0,0,0.88)'
+    ctx.font = "600 20px -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
+    ctx.fillText('地形剖面图', 32, 40)
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'
+    ctx.font = "400 13px -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
+    ctx.fillText(boundsText.value, 32, 64)
+    ctx.translate(32, 88)
+    drawProfileChart(ctx, profile, width - 64, height - 120)
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
+    if (!blob) throw new Error('生成图片失败')
+    const base64 = await blobToBase64(blob)
+    const saved = await window.guEarth.geoio.saveBinary('地形剖面图', base64, 'png', 'image/png')
+    if (saved) message.success('导出成功')
+  } catch (cause) {
+    message.error(cause instanceof Error ? cause.message : '导出失败')
+  }
+}
+
+function handleExportProfileCsv(): void {
+  const profile = store.profile
+  if (!profile || profile.length < 2) return
+  void saveText('地形剖面数据', profileToCsv(profile), 'csv', 'text/csv')
+}
+
+function handleExportContours(): void {
+  const contours = store.getContours()
+  if (contours.length === 0) {
+    message.warning('没有可导出的等高线')
+    return
+  }
+  void saveText('等高线', contoursToGeoJson(contours), 'geojson', 'application/geo+json')
+}
 </script>
 
 <template>
-  <a-drawer :open="store.panelOpen" placement="left" :width="340" :mask="false" :closable="false" :body-style="{ padding: '16px' }" @close="store.setPanelOpen(false)">
-    <template #title>
-      <div class="panel-title">
-        <div><div class="panel-kicker">TERRAIN LAB</div><h2>地形实验室</h2></div>
-        <a-button type="text" aria-label="关闭地形实验室" @click="store.setPanelOpen(false)"><CloseOutlined /></a-button>
-      </div>
-    </template>
-
+  <div class="terrain-pane">
     <a-alert v-if="store.error" type="error" show-icon :message="store.error" class="panel-alert">
       <template #action><a-button type="text" size="small" @click="store.resample()"><ReloadOutlined />重试</a-button></template>
     </a-alert>
@@ -62,6 +116,15 @@ const boundsText = computed(() => {
         <div class="slider-row"><span>等高距</span><a-select :value="store.contourInterval" size="small" class="interval-select" aria-label="等高距" @change="(value: number) => (store.contourInterval = value)">
           <a-select-option v-for="option in intervalOptions" :key="option.value" :value="option.value">{{ option.label }}</a-select-option>
         </a-select></div>
+        <div class="terrain-lighting-row"><span>坡度分析</span><a-switch size="small" :checked="store.slopeAnalysis" aria-label="坡度分析" @change="(value: boolean) => (store.slopeAnalysis = value === true)" /></div>
+        <div v-if="store.slopeAnalysis" class="slope-legend">
+          <span class="slope-item"><span class="slope-swatch" style="background:#52c41a"></span>&lt;10°</span>
+          <span class="slope-item"><span class="slope-swatch" style="background:#a0d911"></span>10–20°</span>
+          <span class="slope-item"><span class="slope-swatch" style="background:#fadb14"></span>20–30°</span>
+          <span class="slope-item"><span class="slope-swatch" style="background:#fa8c16"></span>30–38°</span>
+          <span class="slope-item"><span class="slope-swatch" style="background:#f5222d"></span>&gt;38°</span>
+          <span class="slope-item"><span class="slope-dot"></span>山峰</span>
+        </div>
       </section>
 
       <section class="panel-section">
@@ -83,19 +146,25 @@ const boundsText = computed(() => {
         </div>
       </section>
 
+      <section class="panel-section">
+        <div class="section-heading"><span>导出</span></div>
+        <div class="export-actions">
+          <a-button size="small" :disabled="!hasProfile" @click="handleExportProfilePng"><FileImageOutlined />剖面图 PNG</a-button>
+          <a-button size="small" :disabled="!hasProfile" @click="handleExportProfileCsv"><TableOutlined />剖面数据 CSV</a-button>
+          <a-button size="small" @click="handleExportContours"><DownloadOutlined />等高线 GeoJSON</a-button>
+        </div>
+      </section>
+
       <section class="panel-section model-actions">
         <a-button size="small" @click="store.startSelection()"><AimOutlined />重新框选</a-button>
         <a-button size="small" @click="store.resample()"><ReloadOutlined />重新采样</a-button>
         <a-button size="small" danger @click="store.removeModel()"><DeleteOutlined />移除模型</a-button>
       </section>
     </template>
-  </a-drawer>
+  </div>
 </template>
 
 <style scoped>
-.panel-title{display:flex;align-items:center;justify-content:space-between;width:100%}
-.panel-kicker{color:rgba(0,0,0,.45);font-size:12px;line-height:20px;letter-spacing:.08em}
-h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28px}
 .panel-alert{margin-bottom:16px}
 .panel-section{padding:0 0 16px;margin:0 0 16px;border-bottom:1px solid rgba(5,5,5,.06)}
 .hint{color:rgba(0,0,0,.65);font-size:12px;line-height:20px;margin:8px 0 12px}
@@ -108,7 +177,13 @@ h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28p
 .slider-row>span:first-child{flex:none;width:110px}
 .slider-row :deep(.ant-slider){flex:1;margin:0}
 .interval-select{width:90px}
+.terrain-lighting-row{display:flex;align-items:center;justify-content:space-between;margin-top:6px;color:rgba(0,0,0,.65);font-size:13px;line-height:20px}
+.slope-legend{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px}
+.slope-item{display:flex;align-items:center;gap:4px;color:rgba(0,0,0,.65);font-size:12px;line-height:18px}
+.slope-swatch{width:14px;height:4px;border-radius:2px}
+.slope-dot{width:8px;height:8px;border-radius:50%;background:#f5222d}
 .profile-actions{display:flex;gap:8px;margin-top:8px}
+.export-actions{display:flex;flex-wrap:wrap;gap:8px}
 .profile-summary{justify-content:space-between}
 .model-actions{display:flex;gap:8px;border-bottom:none;margin-bottom:0}
 </style>

@@ -2,13 +2,15 @@ import { app, shell, BrowserWindow, ipcMain, net, protocol } from 'electron'
 import { join } from 'path'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs'
 import { createHash } from 'crypto'
-import type { GeoPosition, GuEarthSettings, GuEarthSettingsPatch, ProviderCredentialStatus, StoredShape, TileCacheEntry, TileCacheStats, TileKey } from '../preload'
+import type { AnnotationData, AnnotationStoreData, GuEarthSettings, GuEarthSettingsPatch, ProviderCredentialStatus, TileCacheEntry, TileCacheStats, TileKey } from '../preload'
 import { assertEncryptionAvailable, assertSafeId, clearProviderKey, hasProviderKey, initKeyVault, readProviderKey, writeProviderKey } from './keyVault'
 import { baiduLngLatToTile, tileCenter, wgs84ToBd09 } from './geo'
 import { AiSettingsStore } from './ai/settingsStore'
 import { registerAiIpcHandlers } from './ai/agent'
 import { searchPlaces } from './ai/amap'
 import { findPeaks } from './places'
+import { deleteAnnotation, initAnnotationsStore, listAnnotationStore, saveAnnotation, saveAnnotationStore, updateAnnotation } from './annotations'
+import { handleAssetProtocol, initGeoio, registerGeoioIpc } from './geoio'
 
 interface PersistedSettings {
   selectedImageryProviderId: string
@@ -39,13 +41,12 @@ const defaultSettings: PersistedSettings = {
 
 let settingsPath = ''
 let tileCachePath = ''
-let annotationsPath = ''
 let settings: PersistedSettings = { ...defaultSettings, providerCredentials: {} }
-let shapes: StoredShape[] = []
 const aiSettings = new AiSettingsStore()
 
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'guearth-tile', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } }
+  { scheme: 'guearth-tile', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
+  { scheme: 'guearth-asset', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }
 ])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -242,51 +243,6 @@ async function handleTileProtocol(request: Request): Promise<Response> {
   }
 }
 
-function normalizeShape(value: unknown): StoredShape {
-  if (!isRecord(value)) throw new Error('无效的标注数据')
-  const id = safeId(value.id)
-  if (value.kind !== 'point' && value.kind !== 'polyline' && value.kind !== 'polygon') throw new Error('无效的标注类型')
-  if (!Array.isArray(value.positions)) throw new Error('无效的标注坐标')
-  const positions: GeoPosition[] = value.positions.map((item) => {
-    if (!isRecord(item)) throw new Error('无效的标注坐标')
-    const { longitude, latitude, height } = item
-    if (typeof longitude !== 'number' || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) throw new Error('无效的标注坐标')
-    if (typeof latitude !== 'number' || !Number.isFinite(latitude) || latitude < -90 || latitude > 90) throw new Error('无效的标注坐标')
-    if (typeof height !== 'number' || !Number.isFinite(height) || height < -11000 || height > 20000) throw new Error('无效的标注坐标')
-    return { longitude, latitude, height }
-  })
-  const minimum = value.kind === 'point' ? 1 : value.kind === 'polyline' ? 2 : 3
-  if (positions.length < minimum || positions.length > 500) throw new Error('无效的标注坐标')
-  return {
-    id,
-    kind: value.kind,
-    positions,
-    annotation: typeof value.annotation === 'string' ? value.annotation.slice(0, 200) : '',
-    createdAt: typeof value.createdAt === 'number' && Number.isFinite(value.createdAt) ? value.createdAt : Date.now()
-  }
-}
-
-function readShapes(): StoredShape[] {
-  if (!existsSync(annotationsPath)) return []
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(annotationsPath, 'utf8'))
-    if (!Array.isArray(parsed)) return []
-    return parsed.flatMap((item) => {
-      try {
-        return [normalizeShape(item)]
-      } catch {
-        return []
-      }
-    })
-  } catch {
-    return []
-  }
-}
-
-function saveShapes(): void {
-  writeFileSync(annotationsPath, JSON.stringify(shapes), 'utf8')
-}
-
 function registerIpcHandlers(): void {
   ipcMain.handle('settings:get', () => settingsSnapshot())
   ipcMain.handle('settings:update', (_event, patch: GuEarthSettingsPatch): GuEarthSettings => {
@@ -358,18 +314,11 @@ function registerIpcHandlers(): void {
   })
   ipcMain.handle('tiles:stats', () => cacheStats())
   ipcMain.handle('places:peaks', (_event, bounds: unknown, minElevation: unknown) => findPeaks(bounds, minElevation))
-  ipcMain.handle('annotations:list', (): StoredShape[] => shapes)
-  ipcMain.handle('annotations:save', (_event, shape: unknown): void => {
-    const stored = normalizeShape(shape)
-    const index = shapes.findIndex((item) => item.id === stored.id)
-    if (index === -1) shapes.push(stored)
-    else shapes[index] = stored
-    saveShapes()
-  })
-  ipcMain.handle('annotations:remove', (_event, id: string): void => {
-    shapes = shapes.filter((item) => item.id !== safeId(id))
-    saveShapes()
-  })
+  ipcMain.handle('annotations:list', (): AnnotationStoreData => listAnnotationStore())
+  ipcMain.handle('annotations:add', (_event, annotation: unknown) => saveAnnotation(annotation as AnnotationData))
+  ipcMain.handle('annotations:update', (_event, annotation: unknown) => updateAnnotation(annotation as AnnotationData))
+  ipcMain.handle('annotations:remove', (_event, id: string) => deleteAnnotation(id))
+  ipcMain.handle('annotations:save-all', (_event, store: unknown) => saveAnnotationStore(store as AnnotationStoreData))
 }
 
 function createWindow(): void {
@@ -405,19 +354,21 @@ app.whenReady().then(() => {
   const userDataPath = app.getPath('userData')
   settingsPath = join(userDataPath, 'settings.json')
   tileCachePath = join(userDataPath, 'tile-cache')
-  annotationsPath = join(userDataPath, 'annotations.json')
+  initAnnotationsStore(userDataPath)
   initKeyVault(join(userDataPath, 'credentials'))
+  initGeoio(userDataPath)
   mkdirSync(tileCachePath, { recursive: true })
   settings = readSettings()
-  shapes = readShapes()
   aiSettings.init(join(userDataPath, 'ai-settings.json'))
   registerIpcHandlers()
+  registerGeoioIpc(() => BrowserWindow.getAllWindows()[0] ?? null)
   registerAiIpcHandlers(aiSettings)
   protocol.handle('guearth-tile', async (request) => {
     const response = await handleTileProtocol(request)
     response.headers.set('Access-Control-Allow-Origin', '*')
     return response
   })
+  protocol.handle('guearth-asset', handleAssetProtocol)
   createWindow()
 
   app.on('activate', () => {
