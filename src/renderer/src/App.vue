@@ -99,7 +99,12 @@ assistantStore.registerTools({
     monsoonStore.setMonth(month)
     monsoonStore.setPanelOpen(true)
   },
-  dropMarker: markers.dropMarker
+  dropMarker: markers.dropMarker,
+  terrainAt: (lon, lat) => {
+    const currentViewer = viewer.value
+    if (!currentViewer || currentViewer.isDestroyed()) return null
+    return currentViewer.scene.globe.getHeight(Cesium.Cartographic.fromDegrees(lon, lat)) ?? null
+  }
 })
 
 function handleOpenLayers(): void {

@@ -86,6 +86,21 @@ const AI_TOOLS = [
         required: ['month']
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'explain_climate',
+      description: '获取某个地点的气候背景（所属气候区、纬度带、海拔、当前演示月份），用于解释气候成因、比较气候差异。回答气候成因类问题前应调用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          longitude: { type: 'number', description: '经度，-180 到 180' },
+          latitude: { type: 'number', description: '纬度，-90 到 90' }
+        },
+        required: ['longitude', 'latitude']
+      }
+    }
   }
 ]
 
@@ -95,6 +110,7 @@ const SYSTEM_PROMPT = [
   '当用户想看某个地方时，先用 search_places 找到坐标，再用 fly_to 飞过去；',
   '当用户想找山峰、火山或按地形特征选点时，先让用户把视野缩放到目标区域，再用 find_peaks；',
   '当话题涉及季节变化（季风、雨带、气候）时，用 set_month 切换月份演示。',
+  '当用户问"为什么这里是这种气候/降水"或要求比较两地气候时，先对相关地点调用 explain_climate 取得气候区、纬度带与海拔背景，再结合纬度位置、海陆位置、大气环流（气压带风带）、地形与洋流解释成因。',
   '回答用简体中文，简明、面向教学，主动补充与地形/气候相关的地理知识点。',
   '数值（坐标、海拔）保持精确。无法完成的请求要给出明确解释。'
 ].join('\n')

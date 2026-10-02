@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { AiChatMessage, AiChatToolCall, AiChunkEvent, AiConfigInfo, GeoBounds, PeakResult, PlaceResult } from '../../../preload/types'
 import { useMonsoonStore } from '@renderer/stores/monsoon'
+import { climateRegionAt, latitudeZoneName } from '@renderer/utils/climateData'
 
 export interface AssistantToolChip {
   name: string
@@ -31,6 +32,7 @@ export interface AssistantTools {
   camera: () => { longitude: number; latitude: number; height: number }
   setMonth: (month: number) => void
   dropMarker: (lon: number, lat: number, name: string) => void
+  terrainAt: (lon: number, lat: number) => number | null
 }
 
 const TOOL_LABELS: Record<string, string> = {
@@ -38,7 +40,8 @@ const TOOL_LABELS: Record<string, string> = {
   search_places: '搜索地名',
   find_peaks: '地貌选点',
   get_current_view: '读取视野',
-  set_month: '切换月份'
+  set_month: '切换月份',
+  explain_climate: '气候成因'
 }
 
 const MAX_TOOL_ROUNDS = 4
@@ -209,6 +212,22 @@ export const useAssistantStore = defineStore('assistant', () => {
         useMonsoonStore().setPanelOpen(true)
         patchChip(messageId, call.name, `${clamped} 月`)
         return `已把季风气候实验室切换到 ${clamped} 月`
+      }
+      if (call.name === 'explain_climate') {
+        const lon = Number(args.longitude)
+        const lat = Number(args.latitude)
+        if (!Number.isFinite(lon) || !Number.isFinite(lat) || Math.abs(lon) > 180 || Math.abs(lat) > 90) return 'explain_climate 参数无效'
+        const region = climateRegionAt(lon, lat)
+        const elevation = tools.terrainAt(lon, lat)
+        patchChip(messageId, call.name, `${lat.toFixed(2)}, ${lon.toFixed(2)}`)
+        return JSON.stringify({
+          longitude: lon,
+          latitude: lat,
+          latitudeZone: latitudeZoneName(lat),
+          climateRegion: region ? `${region.name}（柯本 ${region.koppen}）` : '未收录的典型气候区，请按纬度带和海陆位置推断',
+          elevationMeters: elevation === null ? '未知' : Math.round(elevation),
+          currentDemoMonth: useMonsoonStore().month
+        })
       }
       return `未知工具 ${call.name}`
     } catch (cause) {
