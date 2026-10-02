@@ -1,6 +1,8 @@
 import { onBeforeUnmount, onMounted, watch, type Ref } from 'vue'
 import * as Cesium from 'cesium'
 import { useDrawingStore, type DrawTool, type DrawnShape, type GeoPosition } from '@renderer/stores/drawing'
+import { thematicLayerCatalog } from '@renderer/stores/climate'
+import { useFeatureFocusStore, type FocusedFeature } from '@renderer/stores/featureFocus'
 
 const SHAPE_COLOR = Cesium.Color.fromCssColorString('#1677ff')
 const LABEL_FONT = '13px SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace'
@@ -88,6 +90,7 @@ export function measureShape(shape: DrawnShape): string {
 
 export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
   const store = useDrawingStore()
+  const focusStore = useFeatureFocusStore()
   const entities = new Map<string, Cesium.Entity>()
   let handler: Cesium.ScreenSpaceEventHandler | undefined
   let draft: Cesium.Cartesian3[] = []
@@ -210,12 +213,38 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
     store.setActiveTool(null)
   }
 
+  function thematicFeatureOf(entity: Cesium.Entity): FocusedFeature | null {
+    if (!(entity.properties instanceof Cesium.PropertyBag)) return null
+    const values = entity.properties.getValue(Cesium.JulianDate.now()) as Record<string, unknown>
+    const name = typeof values.name === 'string' ? values.name : ''
+    const layerId = typeof values.layerId === 'string' ? values.layerId : ''
+    const summary = typeof values.summary === 'string' ? values.summary : ''
+    if (!name || !layerId || !summary) return null
+    const layerName = thematicLayerCatalog.find((layer) => layer.id === layerId)?.name ?? layerId
+    return { name, layerName, summary }
+  }
+
   function handleClick(movement: { position: Cesium.Cartesian2 }): void {
     if (!tool) {
       const current = currentViewer()
       if (!current) return
       const picked = current.scene.pick(movement.position)
-      store.setSelectedShapeId(picked && picked.id instanceof Cesium.Entity && entities.has(picked.id.id) ? picked.id.id : null)
+      if (picked && picked.id instanceof Cesium.Entity) {
+        const entity = picked.id
+        if (entities.has(entity.id)) {
+          store.setSelectedShapeId(entity.id)
+          focusStore.clearFocus()
+          return
+        }
+        const feature = thematicFeatureOf(entity)
+        if (feature) {
+          focusStore.setFocus(feature)
+          store.setSelectedShapeId(null)
+          return
+        }
+      }
+      store.setSelectedShapeId(null)
+      focusStore.clearFocus()
       return
     }
     if (tool === 'timezone') return

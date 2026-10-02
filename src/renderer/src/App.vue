@@ -24,6 +24,8 @@ import MonthTimeline from '@renderer/components/MonthTimeline.vue'
 import SolarTimePanel from '@renderer/components/SolarTimePanel.vue'
 import TimezonePanel from '@renderer/components/TimezonePanel.vue'
 import ThematicLegend from '@renderer/components/ThematicLegend.vue'
+import FrontalCyclone from '@renderer/components/FrontalCyclone.vue'
+import ThematicInfoCard from '@renderer/components/ThematicInfoCard.vue'
 import EoqAssistant from '@renderer/components/EoqAssistant.vue'
 import AiSettingsModal from '@renderer/components/AiSettingsModal.vue'
 
@@ -515,6 +517,7 @@ function deleteSelectedShape(): void {
   <div class="app">
     <div ref="globeContainer" class="globe" :class="{ drawing: activeTool }"></div>
     <WindParticles v-if="thematicOverlays['wind-particles']" :viewer="viewer" />
+    <FrontalCyclone v-if="thematicOverlays['frontal-cyclone']" :viewer="viewer" />
     <GlobeToolbar
       :active-tool="activeTool"
       :shape-count="shapes.length"
@@ -535,6 +538,7 @@ function deleteSelectedShape(): void {
     <SolarTimePanel />
     <TimezonePanel v-if="timezoneComparison" :comparison="timezoneComparison" @clear="clearTimezone" />
     <ThematicLegend />
+    <ThematicInfoCard />
     <div v-if="drawHint" class="draw-hint">{{ drawHint }}</div>
     <CameraStatus :camera="camera" />
     <EoqAssistant />

@@ -2,7 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { summerFactor, winterFactor } from '@renderer/thematic/windField'
 
-export type ThematicLayerId = 'wind-particles' | 'rain-belt' | 'summer-monsoon' | 'winter-monsoon' | 'ocean-currents' | 'climate-zones' | 'coriolis-demo'
+export type ThematicLayerId = 'wind-particles' | 'pressure-belts' | 'koppen-zones' | 'frontal-cyclone' | 'rain-belt' | 'summer-monsoon' | 'winter-monsoon' | 'ocean-currents' | 'climate-zones' | 'coriolis-demo'
 
 export interface ThematicLayerMeta {
   id: ThematicLayerId
@@ -12,6 +12,9 @@ export interface ThematicLayerMeta {
 
 export const thematicLayerCatalog: ThematicLayerMeta[] = [
   { id: 'wind-particles', name: '季风粒子动画', description: '示意风场随月份演变' },
+  { id: 'pressure-belts', name: '气压带与风带', description: '七压六风及其季节移动（1月/7月）' },
+  { id: 'koppen-zones', name: '世界气候类型', description: '全球气候类型分布示意（可点击查看成因）' },
+  { id: 'frontal-cyclone', name: '锋面气旋', description: '北半球温带气旋结构示意' },
   { id: 'rain-belt', name: '降水雨带', description: '东部雨带随月份推进' },
   { id: 'summer-monsoon', name: '夏季风风向', description: '偏南气流路径' },
   { id: 'winter-monsoon', name: '冬季风风向', description: '偏北气流路径' },
@@ -28,6 +31,9 @@ export const useClimateStore = defineStore('climate', () => {
   const isPlaying = ref(false)
   const overlays = ref<Record<ThematicLayerId, boolean>>({
     'wind-particles': false,
+    'pressure-belts': false,
+    'koppen-zones': false,
+    'frontal-cyclone': false,
     'rain-belt': false,
     'summer-monsoon': false,
     'winter-monsoon': false,

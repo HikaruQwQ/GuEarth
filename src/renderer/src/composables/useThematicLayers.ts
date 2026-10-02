@@ -6,6 +6,8 @@ import { summerMonsoonArrows, winterMonsoonArrows, type MonsoonArrow } from '@re
 import { oceanCurrents, pathPointAt } from '@renderer/thematic/oceanCurrents'
 import { climateZones } from '@renderer/thematic/climateZones'
 import { coriolisDemos, sampleTrack } from '@renderer/thematic/coriolis'
+import { beltCenter, beltRingDegrees, pressureBelts, windBeltLatitude, windBelts, type PressureBeltSpec, type WindBeltSpec } from '@renderer/thematic/pressureBelts'
+import { koppenZones } from '@renderer/thematic/koppenZones'
 
 const WARM_COLOR = '#f5222d'
 const COLD_COLOR = '#1677ff'
@@ -13,6 +15,11 @@ const RAIN_BELT_COLOR = '#1677ff'
 const CORIOLIS_NORTH_COLOR = '#1677ff'
 const CORIOLIS_SOUTH_COLOR = '#fa8c16'
 const CORIOLIS_INERTIAL_COLOR = 'rgba(0, 0, 0, 0.45)'
+const WIND_BELT_COLOR = '#722ed1'
+const FRONTAL_CYCLONE_LON = 125
+const FRONTAL_CYCLONE_LAT = 34
+const BELT_LABEL_LON = 150
+const WIND_ARROW_LONS = [-150, -90, -30, 30, 90, 150]
 const LABEL_FONT_FAMILY = '"Microsoft YaHei", "PingFang SC", sans-serif'
 
 interface LayerView {
@@ -311,8 +318,156 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     }
   }
 
+  const beltLinks: Array<{ entity: Cesium.Entity; spec: PressureBeltSpec }> = []
+  const windArrowLinks: Array<{ entity: Cesium.Entity; spec: WindBeltSpec; lon: number }> = []
+  const windLabelLinks: Array<{ entity: Cesium.Entity; spec: WindBeltSpec }> = []
+
+  function clearPressureBeltLinks(): void {
+    beltLinks.length = 0
+    windArrowLinks.length = 0
+    windLabelLinks.length = 0
+  }
+
+  function refreshPressureBeltGeometry(month: number): void {
+    for (const link of beltLinks) {
+      const cartesians = Cesium.Cartesian3.fromDegreesArray(beltRingDegrees(link.spec, month))
+      if (link.entity.polygon) link.entity.polygon.hierarchy = new Cesium.ConstantProperty(new Cesium.PolygonHierarchy(cartesians))
+      if (link.entity.polyline) link.entity.polyline.positions = new Cesium.ConstantProperty(cartesians)
+      link.entity.position = new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(BELT_LABEL_LON, beltCenter(link.spec, month)))
+    }
+    for (const link of windArrowLinks) {
+      const latitude = windBeltLatitude(link.spec, month)
+      const from: [number, number] = [link.lon + link.spec.tailOffset[0], latitude + link.spec.tailOffset[1]]
+      const to: [number, number] = [link.lon + link.spec.headOffset[0], latitude + link.spec.headOffset[1]]
+      const cartesians = Cesium.Cartesian3.fromDegreesArray([from[0], from[1], to[0], to[1]])
+      if (link.entity.polyline) link.entity.polyline.positions = new Cesium.ConstantProperty(cartesians)
+      if (link.entity.polygon) link.entity.polygon.hierarchy = new Cesium.ConstantProperty(new Cesium.PolygonHierarchy(arrowHeadPositions(from, to, 1.6)))
+    }
+    for (const link of windLabelLinks) {
+      link.entity.position = new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(BELT_LABEL_LON, windBeltLatitude(link.spec, month)))
+    }
+  }
+
+  function buildPressureBelts(dataSource: Cesium.CustomDataSource): void {
+    for (const spec of pressureBelts) {
+      const color = Cesium.Color.fromCssColorString(spec.kind === 'low' ? COLD_COLOR : WARM_COLOR)
+      beltLinks.push({
+        spec,
+        entity: dataSource.entities.add({
+          properties: new Cesium.PropertyBag({ name: spec.name, layerId: 'pressure-belts', summary: spec.summary }),
+          polygon: {
+            hierarchy: new Cesium.PolygonHierarchy([]),
+            material: new Cesium.ColorMaterialProperty(color.withAlpha(spec.kind === 'low' ? 0.14 : 0.1))
+          },
+          polyline: {
+            positions: [],
+            clampToGround: true,
+            width: 1.5,
+            material: color.withAlpha(0.55)
+          },
+          position: Cesium.Cartesian3.fromDegrees(BELT_LABEL_LON, 0),
+          label: {
+            text: spec.name,
+            font: labelFont(13, 600),
+            fillColor: color,
+            outlineColor: Cesium.Color.WHITE,
+            outlineWidth: 2,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            disableDepthTestDistance: 10_000
+          }
+        })
+      })
+    }
+    for (const spec of windBelts) {
+      const color = Cesium.Color.fromCssColorString(WIND_BELT_COLOR)
+      const properties = new Cesium.PropertyBag({ name: spec.name, layerId: 'pressure-belts', summary: spec.summary })
+      for (const lon of WIND_ARROW_LONS) {
+        windArrowLinks.push({
+          spec,
+          lon,
+          entity: dataSource.entities.add({
+            properties,
+            polyline: { positions: [], clampToGround: true, width: 3, material: color.withAlpha(0.85) },
+            polygon: { hierarchy: new Cesium.PolygonHierarchy([]), material: color.withAlpha(0.9) }
+          })
+        })
+      }
+      windLabelLinks.push({
+        spec,
+        entity: dataSource.entities.add({
+          properties,
+          position: Cesium.Cartesian3.fromDegrees(BELT_LABEL_LON, 0),
+          label: {
+            text: spec.name,
+            font: labelFont(12, 600),
+            fillColor: color,
+            outlineColor: Cesium.Color.WHITE,
+            outlineWidth: 2,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            disableDepthTestDistance: 10_000
+          }
+        })
+      })
+    }
+    refreshPressureBeltGeometry(Math.round(store.month * 4) / 4)
+  }
+
+  function buildKoppenZones(dataSource: Cesium.CustomDataSource): void {
+    for (const zone of koppenZones) {
+      const fillColor = Cesium.Color.fromCssColorString(zone.color)
+      const edgeColor = Cesium.Color.fromCssColorString(zone.borderColor ?? zone.color)
+      const properties = new Cesium.PropertyBag({ name: zone.name, layerId: 'koppen-zones', summary: zone.summary })
+      for (const [west, east, south, north] of zone.boxes) {
+        const ring: Array<[number, number]> = [[west, south], [east, south], [east, north], [west, north]]
+        dataSource.entities.add({
+          properties,
+          polygon: { hierarchy: new Cesium.PolygonHierarchy(toCartesians(ring)), material: new Cesium.ColorMaterialProperty(fillColor.withAlpha(0.3)) },
+          polyline: { positions: toCartesians([...ring, ring[0]]), clampToGround: true, width: 1.5, material: edgeColor.withAlpha(0.85) }
+        })
+      }
+      dataSource.entities.add({
+        properties,
+        position: Cesium.Cartesian3.fromDegrees(zone.labelAt[0], zone.labelAt[1]),
+        label: {
+          text: zone.name,
+          font: labelFont(13, 600),
+          fillColor: edgeColor,
+          showBackground: true,
+          backgroundColor: Cesium.Color.WHITE.withAlpha(0.72),
+          backgroundPadding: new Cesium.Cartesian2(7, 4),
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: 10_000
+        }
+      })
+    }
+  }
+
+  function buildFrontalCyclone(dataSource: Cesium.CustomDataSource): void {
+    dataSource.entities.add({
+      properties: new Cesium.PropertyBag({
+        name: '锋面气旋（北半球温带气旋）',
+        layerId: 'frontal-cyclone',
+        summary: '温带气旋多形成于中纬西风带的极锋上：冷暖空气相遇形成锋面，锋面上产生波动并发展为低压中心，北半球气流逆时针向中心辐合，波动东段为暖锋、西南段为冷锋。暖锋前暖气团沿锋面爬升，形成连续性降水的宽阔雨带；冷锋锋后冷空气推动锋面快速东移，多大风与阵性降水、雨带狭窄。气旋整体自西向东移动，先后经历：暖锋过境（连续性降水）→ 暖气团控制（气温升、气压降）→ 冷锋过境（大风、雨雪）→ 冷气团控制（气温降、气压升）。'
+      }),
+      position: Cesium.Cartesian3.fromDegrees(FRONTAL_CYCLONE_LON, FRONTAL_CYCLONE_LAT),
+      point: {
+        pixelSize: 7,
+        color: Cesium.Color.fromCssColorString(WIND_BELT_COLOR),
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 2,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: 10_000
+      }
+    })
+  }
+
   const builders: Record<ThematicLayerId, (dataSource: Cesium.CustomDataSource) => void> = {
     'wind-particles': () => undefined,
+    'pressure-belts': buildPressureBelts,
+    'koppen-zones': buildKoppenZones,
+    'frontal-cyclone': buildFrontalCyclone,
     'rain-belt': buildRainBelt,
     'summer-monsoon': (dataSource) => buildMonsoonArrows(dataSource, 'summer'),
     'winter-monsoon': (dataSource) => buildMonsoonArrows(dataSource, 'winter'),
@@ -322,6 +477,9 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
   }
 
   const enableViews: Partial<Record<ThematicLayerId, LayerView>> = {
+    'pressure-belts': { longitude: 150, latitude: 8, height: 17000000 },
+    'koppen-zones': { longitude: 25, latitude: 12, height: 17000000 },
+    'frontal-cyclone': { longitude: 125, latitude: 30, height: 4800000 },
     'rain-belt': { longitude: 112, latitude: 30, height: 4500000 },
     'summer-monsoon': { longitude: 96, latitude: 24, height: 7500000 },
     'winter-monsoon': { longitude: 108, latitude: 32, height: 7500000 },
@@ -346,13 +504,18 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
         current.dataSources.remove(existing, true)
         sources.delete(layer.id)
         if (layer.id === 'coriolis-demo') stopCoriolis()
+        if (layer.id === 'pressure-belts') clearPressureBeltLinks()
       }
     }
   }
 
   watch(() => store.overlays, syncOverlays, { deep: true })
+  watch(() => Math.round(store.month * 4) / 4, (month) => refreshPressureBeltGeometry(month))
   watch(viewer, (previous) => {
-    if (previous && !previous.isDestroyed()) sources.clear()
+    if (previous && !previous.isDestroyed()) {
+      sources.clear()
+      clearPressureBeltLinks()
+    }
     syncOverlays()
   })
 

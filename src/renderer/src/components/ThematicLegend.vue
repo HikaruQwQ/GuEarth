@@ -2,12 +2,14 @@
 import { computed } from 'vue'
 import { useClimateStore } from '@renderer/stores/climate'
 import { climateZones } from '@renderer/thematic/climateZones'
+import { koppenZones } from '@renderer/thematic/koppenZones'
 import { windRampStops } from '@renderer/thematic/windField'
 
 const store = useClimateStore()
 
 const windGradient = computed(() => `linear-gradient(90deg, ${windRampStops.join(', ')})`)
 const zoneEntries = climateZones.map((zone) => ({ name: zone.name, color: zone.color }))
+const koppenEntries = koppenZones.map((zone) => ({ name: zone.name, color: zone.borderColor ?? zone.color }))
 </script>
 
 <template>
@@ -25,6 +27,21 @@ const zoneEntries = climateZones.map((zone) => ({ name: zone.name, color: zone.c
     </div>
     <div v-if="store.overlays['winter-monsoon']" class="legend-item">
       <span class="swatch" style="background: #1677ff"></span><span>冬季风（偏北气流）</span>
+    </div>
+    <div v-if="store.overlays['pressure-belts']" class="legend-group">
+      <div class="legend-item"><span class="swatch" style="background: #1677ff"></span><span>低压带</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #f5222d"></span><span>高压带</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #722ed1"></span><span>风带箭头</span></div>
+    </div>
+    <div v-if="store.overlays['koppen-zones']" class="legend-group">
+      <div v-for="zone in koppenEntries" :key="zone.name" class="legend-item">
+        <span class="swatch" :style="{ background: zone.color }"></span><span>{{ zone.name }}</span>
+      </div>
+    </div>
+    <div v-if="store.overlays['frontal-cyclone']" class="legend-group">
+      <div class="legend-item"><span class="swatch" style="background: #f5222d"></span><span>暖锋</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #1677ff"></span><span>冷锋</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #69b1ff"></span><span>雨区</span></div>
     </div>
     <div v-if="store.overlays['ocean-currents']" class="legend-group">
       <div class="legend-item"><span class="swatch" style="background: #f5222d"></span><span>暖流</span></div>
@@ -53,6 +70,8 @@ const zoneEntries = climateZones.map((zone) => ({ name: zone.name, color: zone.c
   gap: 4px;
   min-width: 148px;
   max-width: 208px;
+  max-height: 340px;
+  overflow-y: auto;
   padding: 8px 12px;
   background: #ffffff;
   border: 1px solid rgba(5, 5, 5, 0.06);
