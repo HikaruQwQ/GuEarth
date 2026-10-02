@@ -37,7 +37,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div v-if="store.hasActiveOverlay" class="month-timeline" role="group" aria-label="月份时间轴">
+  <div v-if="store.hasSeasonalOverlay" class="month-timeline" role="group" aria-label="月份时间轴">
     <a-button
       :type="isPlaying ? 'primary' : 'default'"
       shape="circle"
