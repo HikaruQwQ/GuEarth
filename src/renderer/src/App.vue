@@ -15,7 +15,6 @@ import LayerPanel from '@renderer/components/LayerPanel.vue'
 import LevelViewSwitcher from '@renderer/components/LevelViewSwitcher.vue'
 import AnnotationPanel from '@renderer/components/AnnotationPanel.vue'
 import PlaceSearchBox from '@renderer/components/PlaceSearchBox.vue'
-import type { PlaceSuggestion } from '../../preload'
 import EoqAssistant from '@renderer/components/EoqAssistant.vue'
 import AiSettingsModal from '@renderer/components/AiSettingsModal.vue'
 
@@ -38,7 +37,7 @@ const {
   storeToRefs(store)
 
 const globeContainer = ref<HTMLDivElement>()
-const { viewer, switchBasemap, setLayerOpacity, flyTo, toggleLevelView, setTerrain, setTerrainExaggeration, setTerrainLighting } = useCesiumViewer(globeContainer)
+const { viewer, switchBasemap, setLayerOpacity, flyTo, flyToPlace, toggleLevelView, setTerrain, setTerrainExaggeration, setTerrainLighting } = useCesiumViewer(globeContainer)
 const { flyToShape } = useDrawing(viewer)
 
 const drawingStore = useDrawingStore()
@@ -172,6 +171,9 @@ async function handleCredentialSave(id: string, apiKey: string, securityKey?: st
     if (securityKey) {
       const securityStatus = await window.guEarth.settings.setProviderApiKey(`${id}-sk`, securityKey)
       store.setCredentialStatus(`${id}-sk`, securityStatus)
+    } else if (id === 'amap') {
+      const securityStatus = await window.guEarth.settings.clearProviderApiKey(`${id}-sk`)
+      store.setCredentialStatus(`${id}-sk`, securityStatus)
     }
   } catch {
     store.setGlobeError('密钥保存失败')
@@ -191,11 +193,6 @@ async function handleCredentialClear(id: string): Promise<void> {
 
 function handleHome(): void {
   flyTo(105, 35, 15000000)
-}
-
-function handleFlyPlace(place: PlaceSuggestion): void {
-  const height = place.district || place.address ? 30000 : place.city ? 120000 : 400000
-  flyTo(place.longitude, place.latitude, height)
 }
 
 function handleRetry(): void {
@@ -247,7 +244,7 @@ function deleteSelectedShape(): void {
       @tool="handleTool"
       @clear-shapes="handleClearShapes"
     />
-    <PlaceSearchBox @select="handleFlyPlace" />
+    <PlaceSearchBox @select="flyToPlace" />
     <div v-if="drawHint" class="draw-hint">{{ drawHint }}</div>
     <CameraStatus :camera="camera" />
     <EoqAssistant />

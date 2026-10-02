@@ -37,7 +37,7 @@ function statusOption(text: string, isError: boolean): PlaceOption {
 
 function placeOption(place: PlaceSuggestion, index: number): PlaceOption {
   return {
-    value: place.name,
+    value: `${place.name}:${place.longitude},${place.latitude}:${index}`,
     key: `${place.name}:${place.longitude},${place.latitude}:${index}`,
     place,
     label: h('div', { class: 'guearth-place-option' }, [
@@ -78,10 +78,10 @@ watch(keyword, (text) => {
     suppressWatch = false
     return
   }
+  requestSeq += 1
+  options.value = []
   const query = text.trim()
   if (!query) {
-    requestSeq += 1
-    options.value = []
     return
   }
   debounceTimer = setTimeout(() => {
@@ -109,6 +109,7 @@ function handleSelect(value: string, option: PlaceOption): void {
       v-model:value="keyword"
       :options="options"
       :filter-option="false"
+      popup-class-name="guearth-place-dropdown"
       @select="handleSelect"
     >
       <a-input allow-clear placeholder="搜索地点，如：珠穆朗玛峰" aria-label="搜索地点">
@@ -167,5 +168,9 @@ function handleSelect(value: string, option: PlaceOption): void {
 
 .guearth-place-status-error {
   color: #ff4d4f;
+}
+
+.guearth-place-dropdown .ant-select-item-option-content {
+  white-space: normal;
 }
 </style>

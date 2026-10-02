@@ -93,7 +93,7 @@ const selectedSecurityCredentialStatus = computed(() => props.providerCredential
 const selectedProvider = computed(() => [...providerCatalog, ...credentialOnlyProviders].find((provider) => provider.id === credentialProviderId.value))
 const supportsSecurityKey = computed(() => Boolean(selectedProvider.value?.requiresSk || selectedProvider.value?.requiresSecurityKey))
 const requiresSecurityKey = computed(() => Boolean((selectedProvider.value?.requiresSecurityKey && !selectedProvider.value?.securityKeyOptional) || (selectedProvider.value?.requiresSk && !selectedProvider.value?.skOptional)))
-const securityKeyPlaceholder = computed(() => selectedProvider.value?.requiresSecurityKey ? '输入安全密钥' : '输入 SK (签名密钥，可选)')
+const securityKeyPlaceholder = computed(() => selectedProvider.value?.requiresSecurityKey ? '输入签名私钥（可选）' : '输入 SK (签名密钥，可选)')
 
 watch(keyProviders, (providers) => {
   if (!providers.some((provider) => provider.id === credentialProviderId.value)) credentialProviderId.value = providers[0]?.id ?? ''
@@ -179,9 +179,9 @@ function clearCredential(): void {
       <section v-if="keyProviders.length" class="panel-section">
         <div class="section-heading"><span>供应商密钥</span><a-tag v-if="selectedCredentialStatus?.configured && (!requiresSecurityKey || selectedSecurityCredentialStatus?.configured)" color="green">已配置</a-tag></div>
         <a-select v-model:value="credentialProviderId" class="full-select"><a-select-option v-for="provider in keyProviders" :key="provider.id" :value="provider.id">{{ provider.name }}</a-select-option></a-select>
-        <a-input v-model:value="credentialDraft" type="password" size="small" :placeholder="supportsSecurityKey ? '输入 AK (访问密钥)' : '输入 API Key'" class="key-input" @press-enter="saveCredential" />
+        <a-input v-model:value="credentialDraft" type="password" size="small" :placeholder="credentialProviderId === 'amap' ? '输入 Web 服务 API Key' : supportsSecurityKey ? '输入 AK (访问密钥)' : '输入 API Key'" class="key-input" @press-enter="saveCredential" />
         <a-input v-if="supportsSecurityKey" v-model:value="credentialSkDraft" type="password" size="small" :placeholder="securityKeyPlaceholder" class="key-input" @press-enter="saveCredential" />
-        <a-alert v-if="supportsSecurityKey && !requiresSecurityKey" type="info" message="若使用签名鉴权，需填写有效签名密钥" show-icon class="credential-hint" />
+        <a-alert v-if="supportsSecurityKey && !requiresSecurityKey" type="info" :message="credentialProviderId === 'amap' ? '仅在高德控制台开启数字签名时填写签名私钥' : '若使用签名鉴权，需填写有效签名密钥'" show-icon class="credential-hint" />
         <div class="key-actions">
           <a-button type="primary" size="small" :disabled="!credentialDraft.trim() || (requiresSecurityKey && !credentialSkDraft.trim())" @click="saveCredential"><SaveOutlined />保存</a-button>
           <a-button size="small" :disabled="!selectedCredentialStatus?.configured && !selectedSecurityCredentialStatus?.configured" @click="clearCredential"><DeleteOutlined />清除</a-button>
