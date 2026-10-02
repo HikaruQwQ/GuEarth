@@ -113,7 +113,33 @@ const SEARCH_FAILURE_GUIDANCE = [
 const searchFailuresBySession = new Map<string, number>()
 
 const sessions = new Map<string, AgentSession>()
-const pendingRendererTools = new Map<string, { resolve: (outcome: ToolOutcome) => void; timer: NodeJS.Timeout }>()
+const pendingRendererTools = new Map<string, { sender: WebContents; resolve: (outcome: ToolOutcome) => void; timer: NodeJS.Timeout }>()
+
+const watchedSenders = new WeakSet<WebContents>()
+
+function abortSenderWork(sender: WebContents): void {
+  for (const [sessionId, session] of sessions) {
+    if (session.sender !== sender) continue
+    session.controller.abort()
+    sessions.delete(sessionId)
+  }
+  for (const [callId, entry] of pendingRendererTools) {
+    if (entry.sender !== sender) continue
+    clearTimeout(entry.timer)
+    pendingRendererTools.delete(callId)
+    entry.resolve({ ok: false, content: JSON.stringify({ error: '页面已关闭或刷新，工具执行中止' }) })
+  }
+}
+
+function watchSenderLifecycle(sender: WebContents): void {
+  if (watchedSenders.has(sender)) return
+  watchedSenders.add(sender)
+  sender.on('destroyed', () => abortSenderWork(sender))
+  sender.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
+    if (isInPlace || !isMainFrame) return
+    abortSenderWork(sender)
+  })
+}
 
 function safeParseJson(text: string): Record<string, unknown> {
   try {
@@ -506,7 +532,7 @@ async function dispatchRendererTool(sender: WebContents, sessionId: string, call
       pendingRendererTools.delete(callId)
       resolve({ ok: false, content: JSON.stringify({ error: `工具 ${name} 执行超时` }) })
     }, RENDERER_TOOL_TIMEOUT_MS)
-    pendingRendererTools.set(callId, { resolve, timer })
+    pendingRendererTools.set(callId, { sender, resolve, timer })
     emit(sender, { sessionId, type: 'execute-tool', callId, name, args })
   })
 }
@@ -670,8 +696,9 @@ export function registerAiIpcHandlers(settingsStore: AiSettingsStore, chatHistor
     const existing = sessions.get(request.sessionId)
     existing?.controller.abort()
     const controller = new AbortController()
-    sessions.set(request.sessionId, { controller, sender: event.sender })
     const sender = event.sender
+    watchSenderLifecycle(sender)
+    sessions.set(request.sessionId, { controller, sender })
     void runAgent({ provider, searchProvider, model, apiKey, sender, sessionId: request.sessionId, signal: controller.signal, turns: request.turns, tools: request.tools })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === 'AbortError') {
