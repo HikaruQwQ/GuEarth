@@ -112,7 +112,7 @@ function handleSelect(value: string, option: PlaceOption): void {
       popup-class-name="guearth-place-dropdown"
       @select="handleSelect"
     >
-      <a-input allow-clear placeholder="搜索地点，如：珠穆朗玛峰" aria-label="搜索地点">
+      <a-input allow-clear size="large" placeholder="输入关键词以搜索" aria-label="搜索地点">
         <template #prefix><SearchOutlined class="place-search-icon" /></template>
       </a-input>
     </a-auto-complete>
@@ -122,9 +122,9 @@ function handleSelect(value: string, option: PlaceOption): void {
 <style scoped>
 .place-search {
   position: absolute;
-  top: 24px;
-  left: 72px;
-  width: 300px;
+  top: 16px;
+  left: 78px;
+  width: min(400px, calc(100vw - 94px));
   z-index: 10;
 }
 
