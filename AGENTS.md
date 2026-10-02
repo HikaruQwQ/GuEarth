@@ -14,9 +14,10 @@ map data providers, an AI globe assistant ("EOQ agent"), and teaching/drawing to
 | --- | --- | --- |
 | Shell | Electron + electron-vite | contextIsolation on, nodeIntegration off, typed preload IPC (`window.guEarth`) |
 | Renderer | Vue 3 + Pinia + **Ant Design Vue** | UI framework is Ant Design Vue — see [DESIGN.md](./DESIGN.md) |
+| Charts | ECharts via `vue-echarts` | modular imports (`echarts/core` + SVGRenderer) wrapped in `src/renderer/src/components/charts/LineChart.vue` |
 | 3D / Map | CesiumJS | Static assets (Workers/ThirdParty/Assets/Widgets) served from `cesium/` by the inline plugin in `electron.vite.config.ts`; `CESIUM_BASE_URL=./cesium/`. The renderer CSP must keep `'unsafe-eval'` — Cesium's bundled Knockout calls `eval` at module load, so without it the whole entry module aborts and the window is blank |
 | AI | OpenAI-compatible streaming client in the main process | Provider-agnostic (DeepSeek/Qwen/OpenAI…); API keys live **only** in the main process via `safeStorage`, never in the renderer |
-| Storage | better-sqlite3 + electron-store | Annotations, bookmarks, lessons; settings |
+| Storage | JSON files in `userData` (`settings.json`, `annotations.json`, `ai-settings.json`) | credentials via `safeStorage` KeyVault; no SQLite yet |
 | Packaging | electron-builder | Windows NSIS first |
 
 **Pinned versions — do not bump casually:**
@@ -47,14 +48,26 @@ src/renderer/   Vue app: globe view, layer registry, drawing tools, EOQ assistan
 
 ## Roadmap
 
+Core platform:
+
 | Phase | Scope | Status |
 | --- | --- | --- |
 | 0 | Scaffold: electron-vite + TS + Vue + Cesium build | Done (`1a61c43`) |
-| 1 | Globe core: viewer, camera, fly-to, basemap layers, layer-manager skeleton | Pending |
-| 2 | Multi-provider layers, API-key settings (encrypted), terrain providers, tile cache | Pending |
-| 3 | Teaching tools: draw point/line/polygon, measure distance/area, annotations, persistence | Pending |
-| 4 | EOQ agent: provider-agnostic AI settings, streaming chat, tool-calling bridge | Pending |
+| 1 | Globe core: viewer, camera, fly-to, basemap layers, layer-manager skeleton | Done |
+| 2 | Multi-provider layers, API-key settings (encrypted), terrain providers, tile cache | Done |
+| 3 | Teaching tools: draw point/line/polygon, measure distance/area, annotations, persistence | Done |
+| 4 | EOQ agent: provider-agnostic AI settings, streaming chat, tool-calling bridge | Done |
 | 5 | Packaging, auto-update stub, offline groundwork, performance | Pending |
+
+Teaching modules (人教版选择性必修一 mapping; thematic layers live in `src/renderer/src/thematic/`, registered in `useThematicLayers.ts`):
+
+| Module | Scope | Status |
+| --- | --- | --- |
+| M1 | Earth's motion: solar terminator timeline (date/hour, solstice/equinox presets), day-length & noon-altitude charts, Coriolis demo layer, timezone compare tool, `set_sim_time`/`query_solar` AI tools | Done |
+| M2 | Atmosphere: pressure/wind belt layer (Jan/Jul shift), global Köppen zones, thematic-entity picking + AI explain, frontal-cyclone anchored overlay, `set_layer` tool | Planned |
+| M3 | Landforms: plate boundaries + USGS earthquakes/volcanoes (dataset fetch + cache in main process), `explain_landform` tool | Planned |
+| M4 | Ocean: ENSO phase layer (El Niño / La Niña SST anomaly + Walker circulation overlay) | Planned |
+| M5 | Integrality/zonation: `find_peaks`, mountain vertical zonation profile, guided transect flights (`fly_transect`) | Planned |
 
 ## Commands
 

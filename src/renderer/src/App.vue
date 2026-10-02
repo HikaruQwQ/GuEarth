@@ -8,9 +8,13 @@ import { useGlobeStore } from '@renderer/stores/globe'
 import { useDrawingStore, type DrawTool, type GeoPosition } from '@renderer/stores/drawing'
 import { useAiStore } from '@renderer/stores/ai'
 import { useClimateStore } from '@renderer/stores/climate'
+import { useSolarStore } from '@renderer/stores/solar'
 import { useCesiumViewer } from '@renderer/composables/useCesiumViewer'
 import { useDrawing, measureShape } from '@renderer/composables/useDrawing'
 import { useThematicLayers } from '@renderer/composables/useThematicLayers'
+import { useTimezoneCompare } from '@renderer/composables/useTimezoneCompare'
+import { useGlobeFraming } from '@renderer/composables/useGlobeFraming'
+import { datePartsOf, dayLength, declinationForDate, formatClock, isValidDate, noonAltitudeDeg, sunTimes } from '@renderer/thematic/solarMath'
 import GlobeToolbar from '@renderer/components/GlobeToolbar.vue'
 import CameraStatus from '@renderer/components/CameraStatus.vue'
 import LayerPanel from '@renderer/components/LayerPanel.vue'
@@ -18,6 +22,8 @@ import AnnotationPanel from '@renderer/components/AnnotationPanel.vue'
 import PlaceSearchBox from '@renderer/components/PlaceSearchBox.vue'
 import WindParticles from '@renderer/components/WindParticles.vue'
 import MonthTimeline from '@renderer/components/MonthTimeline.vue'
+import SolarTimePanel from '@renderer/components/SolarTimePanel.vue'
+import TimezonePanel from '@renderer/components/TimezonePanel.vue'
 import ThematicLegend from '@renderer/components/ThematicLegend.vue'
 import EoqAssistant from '@renderer/components/EoqAssistant.vue'
 import AiSettingsModal from '@renderer/components/AiSettingsModal.vue'
@@ -43,7 +49,10 @@ const {
 const globeContainer = ref<HTMLDivElement>()
 const { viewer, switchBasemap, setLayerOpacity, flyTo, flyToPlace, toggleLevelView, setTerrain, setTerrainExaggeration, setTerrainLighting } = useCesiumViewer(globeContainer)
 const { flyToShape } = useDrawing(viewer)
+const { comparison: timezoneComparison, clearComparison: clearTimezone } = useTimezoneCompare(viewer)
+useGlobeFraming(viewer)
 const climateStore = useClimateStore()
+const solarStore = useSolarStore()
 const { overlays: thematicOverlays } = storeToRefs(climateStore)
 useThematicLayers(viewer)
 
@@ -54,7 +63,11 @@ const isAnnotationPanelOpen = ref(false)
 const annotationDraft = ref('')
 const selectedShape = computed(() => shapes.value.find((shape) => shape.id === selectedShapeId.value) ?? null)
 const levelSwitcherVisible = computed(() => isGlobeReady.value && camera.value.height < 5000000)
-const drawHint = computed(() => (activeTool.value ? (activeTool.value === 'point' ? '在地球上单击以放置点' : '单击加点 · 双击或右键完成 · Esc 取消') : ''))
+const drawHint = computed(() => {
+  if (!activeTool.value) return ''
+  if (activeTool.value === 'timezone') return '单击选取两个地点对比地方时 · Esc 退出'
+  return activeTool.value === 'point' ? '在地球上单击以放置点' : '单击加点 · 双击或右键完成 · Esc 取消'
+})
 
 aiStore.registerTool({
   definition: {
@@ -311,6 +324,82 @@ aiStore.registerTool({
   }
 })
 
+aiStore.registerTool({
+  definition: {
+    name: 'set_sim_time',
+    description: '设置太阳光照模拟的日期与时刻（北京时间）并开启昼夜光照渲染，用于演示晨昏线、昼夜交替、极昼极夜与太阳直射点季节移动。',
+    parameters: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: '模拟日期，格式 YYYY-MM-DD，如 2026-06-22（夏至）。省略保持当前日期' },
+        hour: { type: 'number', description: '模拟时刻（北京时间，0-24 的小时数，可用小数如 12.5 表示 12:30）。省略保持当前时刻' },
+        play: { type: 'boolean', description: 'true 时自动播放昼夜交替动画（每秒约 1.5 小时）' }
+      }
+    }
+  },
+  execute: async (args) => {
+    if (args.date !== undefined) {
+      if (!isValidDate(args.date)) return { error: 'date 需为合法的 YYYY-MM-DD 日期' }
+      solarStore.setDate(args.date)
+    }
+    if (args.hour !== undefined) {
+      const hour = Number(args.hour)
+      if (!Number.isFinite(hour) || hour < 0 || hour >= 24) return { error: 'hour 需为 0-24 的小时数' }
+      solarStore.setHour(hour)
+    }
+    if (typeof args.play === 'boolean') solarStore.isPlaying = args.play
+    solarStore.setActive(true)
+    return {
+      status: 'ok',
+      date: solarStore.date,
+      hourBeijing: solarStore.hour,
+      utc: new Date(solarStore.utcMs).toISOString(),
+      playing: solarStore.isPlaying,
+      message: '昼夜光照已开启；可配合 fly_to 以 8000000-15000000 米高度展示晨昏线'
+    }
+  }
+})
+
+aiStore.registerTool({
+  definition: {
+    name: 'query_solar',
+    description: '计算某纬度在指定日期的昼长、正午太阳高度角、日出日落地方时与极昼/极夜状态。用于讲解昼夜长短、太阳高度随纬度与季节的变化。',
+    parameters: {
+      type: 'object',
+      properties: {
+        latitude: { type: 'number', description: '纬度（-90 到 90，北纬为正）' },
+        date: { type: 'string', description: '日期 YYYY-MM-DD，省略时使用当前模拟日期' }
+      },
+      required: ['latitude']
+    }
+  },
+  execute: async (args) => {
+    const latitude = Number(args.latitude)
+    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) return { error: '纬度无效，需 -90 到 90' }
+    let dateStr = solarStore.date
+    if (args.date !== undefined) {
+      if (!isValidDate(args.date)) return { error: 'date 需为合法的 YYYY-MM-DD 日期' }
+      dateStr = args.date
+    }
+    const { month, day } = datePartsOf(dateStr)
+    const declination = declinationForDate(month, day)
+    const length = dayLength(latitude, declination)
+    const times = sunTimes(latitude, declination)
+    const round1 = (value: number) => Math.round(value * 10) / 10
+    return {
+      latitude: round1(latitude),
+      date: dateStr,
+      declinationDeg: round1(declination),
+      noonAltitudeDeg: round1(noonAltitudeDeg(latitude, declination)),
+      dayLengthHours: round1(length.hours),
+      polar: length.state === 'polar-day' ? '极昼' : length.state === 'polar-night' ? '极夜' : undefined,
+      sunriseLocalSolarTime: times.sunrise !== undefined ? formatClock(times.sunrise) : undefined,
+      sunsetLocalSolarTime: times.sunset !== undefined ? formatClock(times.sunset) : undefined,
+      note: '日出日落为地方时（平太阳时近似）'
+    }
+  }
+})
+
 watch(selectedShape, (shape) => {
   annotationDraft.value = shape?.annotation ?? ''
 })
@@ -392,6 +481,10 @@ function handleLevelViewToggle(): void {
   toggleLevelView()
 }
 
+function handleToggleSolar(): void {
+  solarStore.setActive(!solarStore.active)
+}
+
 function handleTool(tool: DrawTool): void {
   drawingStore.setActiveTool(activeTool.value === tool ? null : tool)
 }
@@ -429,6 +522,7 @@ function deleteSelectedShape(): void {
       :shape-count="shapes.length"
       :level-view-active="levelViewActive"
       :level-view-visible="levelSwitcherVisible"
+      :solar-active="solarStore.active"
       @open-layers="handleOpenLayers"
       @open-annotations="handleOpenAnnotations"
       @open-assistant="handleOpenAssistant"
@@ -436,9 +530,12 @@ function deleteSelectedShape(): void {
       @tool="handleTool"
       @clear-shapes="handleClearShapes"
       @toggle-level-view="handleLevelViewToggle"
+      @toggle-solar="handleToggleSolar"
     />
     <PlaceSearchBox @select="flyToPlace" />
     <MonthTimeline />
+    <SolarTimePanel />
+    <TimezonePanel v-if="timezoneComparison" :comparison="timezoneComparison" @clear="clearTimezone" />
     <ThematicLegend />
     <div v-if="drawHint" class="draw-hint">{{ drawHint }}</div>
     <CameraStatus :camera="camera" />
@@ -516,5 +613,6 @@ function deleteSelectedShape(): void {
   font-size: 12px;
   line-height: 20px;
   pointer-events: none;
+  z-index: 11;
 }
 </style>

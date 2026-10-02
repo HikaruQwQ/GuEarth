@@ -2,7 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { summerFactor, winterFactor } from '@renderer/thematic/windField'
 
-export type ThematicLayerId = 'wind-particles' | 'rain-belt' | 'summer-monsoon' | 'winter-monsoon' | 'ocean-currents' | 'climate-zones'
+export type ThematicLayerId = 'wind-particles' | 'rain-belt' | 'summer-monsoon' | 'winter-monsoon' | 'ocean-currents' | 'climate-zones' | 'coriolis-demo'
 
 export interface ThematicLayerMeta {
   id: ThematicLayerId
@@ -16,7 +16,8 @@ export const thematicLayerCatalog: ThematicLayerMeta[] = [
   { id: 'summer-monsoon', name: '夏季风风向', description: '偏南气流路径' },
   { id: 'winter-monsoon', name: '冬季风风向', description: '偏北气流路径' },
   { id: 'ocean-currents', name: '世界洋流', description: '暖流与寒流分布' },
-  { id: 'climate-zones', name: '中国气候区', description: '五大气候区示意' }
+  { id: 'climate-zones', name: '中国气候区', description: '五大气候区示意' },
+  { id: 'coriolis-demo', name: '地转偏向力演示', description: '水平运动物体的偏转轨迹（北右南左）' }
 ]
 
 const MONTHS_PER_SECOND = 0.5
@@ -31,7 +32,8 @@ export const useClimateStore = defineStore('climate', () => {
     'summer-monsoon': false,
     'winter-monsoon': false,
     'ocean-currents': false,
-    'climate-zones': false
+    'climate-zones': false,
+    'coriolis-demo': false
   })
 
   const summerStrength = computed(() => summerFactor(month.value))

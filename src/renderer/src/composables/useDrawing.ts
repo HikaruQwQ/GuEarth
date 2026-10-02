@@ -218,6 +218,7 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
       store.setSelectedShapeId(picked && picked.id instanceof Cesium.Entity && entities.has(picked.id.id) ? picked.id.id : null)
       return
     }
+    if (tool === 'timezone') return
     const position = pickAt(movement.position)
     if (!position) return
     if (tool === 'point') {

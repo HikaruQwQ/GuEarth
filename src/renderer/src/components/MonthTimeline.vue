@@ -104,6 +104,6 @@ onBeforeUnmount(() => {
 
 .month-slider {
   flex: 1;
-  margin: 0 0 12px 4px;
+  margin: 0 10px 12px 10px;
 }
 </style>

@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 
 export type ShapeKind = 'point' | 'polyline' | 'polygon'
-export type DrawTool = 'point' | 'line' | 'polygon' | 'distance' | 'area'
+export type DrawTool = 'point' | 'line' | 'polygon' | 'distance' | 'area' | 'timezone'
 
 export interface GeoPosition {
   longitude: number

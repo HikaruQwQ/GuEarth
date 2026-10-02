@@ -35,6 +35,11 @@ const zoneEntries = climateZones.map((zone) => ({ name: zone.name, color: zone.c
         <span class="swatch" :style="{ background: zone.color }"></span><span>{{ zone.name }}</span>
       </div>
     </div>
+    <div v-if="store.overlays['coriolis-demo']" class="legend-group">
+      <div class="legend-item"><span class="swatch swatch-dashed"></span><span>惯性直线（不偏转）</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #1677ff"></span><span>北半球轨迹 · 右偏</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #fa8c16"></span><span>南半球轨迹 · 左偏</span></div>
+    </div>
   </div>
 </template>
 
@@ -81,6 +86,12 @@ const zoneEntries = climateZones.map((zone) => ({ name: zone.name, color: zone.c
   width: 14px;
   height: 4px;
   border-radius: 2px;
+}
+
+.swatch-dashed {
+  height: 0;
+  border-radius: 0;
+  border-top: 2px dashed rgba(0, 0, 0, 0.45);
 }
 
 .wind-ramp {

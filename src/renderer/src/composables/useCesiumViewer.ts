@@ -1,6 +1,7 @@
-import { onBeforeUnmount, onMounted, shallowRef, type Ref } from 'vue'
+import { onBeforeUnmount, onMounted, shallowRef, watch, type Ref } from 'vue'
 import * as Cesium from 'cesium'
 import { useGlobeStore, providerCatalog, terrainCatalog, type ProviderMeta } from '@renderer/stores/globe'
+import { useSolarStore } from '@renderer/stores/solar'
 import type { PlaceSuggestion } from '../../../preload'
 import { createPolarCaps } from './polarCaps'
 
@@ -36,6 +37,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
   const viewer = shallowRef<Cesium.Viewer>()
   const imageryLayers = new Map<string, Cesium.ImageryLayer>()
   const store = useGlobeStore()
+  const solarStore = useSolarStore()
   let generation = 0
   let selectedPlaceMarker: Cesium.Entity | undefined
   let polarCaps: Cesium.Primitive | undefined
@@ -51,7 +53,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     if (polarCaps) currentViewer.scene.primitives.remove(polarCaps)
     polarCaps = createPolarCaps(terrain)
     if (polarCaps) {
-      polarCaps.appearance = new Cesium.PerInstanceColorAppearance({ flat: !store.terrainLighting, translucent: false })
+      polarCaps.appearance = new Cesium.PerInstanceColorAppearance({ flat: !(store.terrainLighting || solarStore.active), translucent: false })
       currentViewer.scene.primitives.add(polarCaps)
       updatePolarCapsVisibility()
     }
@@ -144,9 +146,18 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     const currentViewer = viewer.value
     if (!currentViewer || currentViewer.isDestroyed()) return
     currentViewer.scene.verticalExaggeration = store.terrainExaggeration
-    currentViewer.scene.globe.enableLighting = store.terrainLighting
+    currentViewer.scene.globe.enableLighting = store.terrainLighting || solarStore.active
     currentViewer.scene.globe.depthTestAgainstTerrain = true
   }
+
+  watch(() => [solarStore.active, solarStore.utcMs] as const, () => {
+    const currentViewer = viewer.value
+    if (!currentViewer || currentViewer.isDestroyed()) return
+    currentViewer.clock.currentTime = solarStore.active
+      ? Cesium.JulianDate.fromDate(new Date(solarStore.utcMs))
+      : Cesium.JulianDate.now()
+    currentViewer.scene.globe.enableLighting = store.terrainLighting || solarStore.active
+  })
 
   function toggleLevelView(): void {
     if (!viewer.value || viewer.value.isDestroyed()) return
@@ -286,8 +297,8 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     setTerrainLighting: (value: boolean) => {
       store.setTerrainLighting(value)
       const currentViewer = viewer.value
-      if (currentViewer && !currentViewer.isDestroyed()) currentViewer.scene.globe.enableLighting = value
-      if (polarCaps) polarCaps.appearance = new Cesium.PerInstanceColorAppearance({ flat: !value, translucent: false })
+      if (currentViewer && !currentViewer.isDestroyed()) currentViewer.scene.globe.enableLighting = value || solarStore.active
+      if (polarCaps) polarCaps.appearance = new Cesium.PerInstanceColorAppearance({ flat: !(value || solarStore.active), translucent: false })
     }
   }
 }

@@ -1,14 +1,18 @@
-import { watch, type Ref } from 'vue'
+import { onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import * as Cesium from 'cesium'
 import { thematicLayerCatalog, useClimateStore, type ThematicLayerId } from '@renderer/stores/climate'
 import { beltLabel, beltLabelPosition, beltOpacity, beltRing } from '@renderer/thematic/rainBelt'
 import { summerMonsoonArrows, winterMonsoonArrows, type MonsoonArrow } from '@renderer/thematic/monsoonArrows'
 import { oceanCurrents, pathPointAt } from '@renderer/thematic/oceanCurrents'
 import { climateZones } from '@renderer/thematic/climateZones'
+import { coriolisDemos, sampleTrack } from '@renderer/thematic/coriolis'
 
 const WARM_COLOR = '#f5222d'
 const COLD_COLOR = '#1677ff'
 const RAIN_BELT_COLOR = '#1677ff'
+const CORIOLIS_NORTH_COLOR = '#1677ff'
+const CORIOLIS_SOUTH_COLOR = '#fa8c16'
+const CORIOLIS_INERTIAL_COLOR = 'rgba(0, 0, 0, 0.45)'
 const LABEL_FONT_FAMILY = '"Microsoft YaHei", "PingFang SC", sans-serif'
 
 interface LayerView {
@@ -63,6 +67,30 @@ function arrowLabelAt(arrow: MonsoonArrow): [number, number] {
 export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void {
   const store = useClimateStore()
   const sources = new Map<ThematicLayerId, Cesium.CustomDataSource>()
+  const coriolisProgress = ref(0)
+  let coriolisRaf = 0
+  let coriolisLast = 0
+
+  function coriolisTick(now: number): void {
+    coriolisRaf = requestAnimationFrame(coriolisTick)
+    const dt = coriolisLast > 0 ? Math.min(0.05, (now - coriolisLast) / 1000) : 0
+    coriolisLast = now
+    if (dt > 0) coriolisProgress.value = (coriolisProgress.value + dt / 10) % 1
+  }
+
+  function startCoriolis(): void {
+    if (!coriolisRaf) {
+      coriolisLast = 0
+      coriolisRaf = requestAnimationFrame(coriolisTick)
+    }
+  }
+
+  function stopCoriolis(): void {
+    if (coriolisRaf) {
+      cancelAnimationFrame(coriolisRaf)
+      coriolisRaf = 0
+    }
+  }
 
   function buildRainBelt(dataSource: Cesium.CustomDataSource): void {
     dataSource.entities.add({
@@ -214,20 +242,91 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     }
   }
 
+  function buildCoriolis(dataSource: Cesium.CustomDataSource): void {
+    startCoriolis()
+    const inertialColor = Cesium.Color.fromCssColorString(CORIOLIS_INERTIAL_COLOR)
+    for (const demo of coriolisDemos) {
+      const deflectedColor = Cesium.Color.fromCssColorString(demo.id === 'north' ? CORIOLIS_NORTH_COLOR : CORIOLIS_SOUTH_COLOR)
+      dataSource.entities.add({
+        polyline: {
+          positions: toCartesians(demo.inertial),
+          clampToGround: true,
+          width: 2,
+          material: new Cesium.PolylineDashMaterialProperty({ color: inertialColor })
+        }
+      })
+      dataSource.entities.add({
+        polyline: {
+          positions: toCartesians(demo.deflected),
+          clampToGround: true,
+          width: 3.5,
+          material: deflectedColor.withAlpha(0.9)
+        }
+      })
+      for (const track of [demo.inertial, demo.deflected]) {
+        const isDeflected = track === demo.deflected
+        dataSource.entities.add({
+          position: new Cesium.CallbackPositionProperty(() => {
+            const [lon, lat] = sampleTrack(track, coriolisProgress.value)
+            return Cesium.Cartesian3.fromDegrees(lon, lat)
+          }, false, Cesium.ReferenceFrame.FIXED),
+          point: {
+            pixelSize: 9,
+            color: isDeflected ? deflectedColor : Cesium.Color.fromCssColorString('rgba(0, 0, 0, 0.65)'),
+            outlineColor: Cesium.Color.WHITE,
+            outlineWidth: 2,
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY
+          }
+        })
+      }
+      const deflectedEnd = demo.deflected[demo.deflected.length - 1]
+      dataSource.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(demo.start[0], demo.start[1]),
+        label: {
+          text: demo.label,
+          font: labelFont(13, 600),
+          fillColor: Cesium.Color.WHITE,
+          outlineColor: deflectedColor,
+          outlineWidth: 3,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          pixelOffset: new Cesium.Cartesian2(0, -14),
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
+        }
+      })
+      dataSource.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(deflectedEnd[0], deflectedEnd[1]),
+        label: {
+          text: demo.id === 'north' ? '向右偏转' : '向左偏转',
+          font: labelFont(12, 600),
+          fillColor: deflectedColor,
+          outlineColor: Cesium.Color.WHITE,
+          outlineWidth: 2,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
+        }
+      })
+    }
+  }
+
   const builders: Record<ThematicLayerId, (dataSource: Cesium.CustomDataSource) => void> = {
     'wind-particles': () => undefined,
     'rain-belt': buildRainBelt,
     'summer-monsoon': (dataSource) => buildMonsoonArrows(dataSource, 'summer'),
     'winter-monsoon': (dataSource) => buildMonsoonArrows(dataSource, 'winter'),
     'ocean-currents': buildOceanCurrents,
-    'climate-zones': buildClimateZones
+    'climate-zones': buildClimateZones,
+    'coriolis-demo': buildCoriolis
   }
 
   const enableViews: Partial<Record<ThematicLayerId, LayerView>> = {
     'rain-belt': { longitude: 112, latitude: 30, height: 4500000 },
     'summer-monsoon': { longitude: 96, latitude: 24, height: 7500000 },
     'winter-monsoon': { longitude: 108, latitude: 32, height: 7500000 },
-    'climate-zones': { longitude: 104, latitude: 34, height: 5200000 }
+    'climate-zones': { longitude: 104, latitude: 34, height: 5200000 },
+    'coriolis-demo': { longitude: 100, latitude: 0, height: 12000000 }
   }
 
   function syncOverlays(): void {
@@ -246,6 +345,7 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
       } else if (!enabled && existing) {
         current.dataSources.remove(existing, true)
         sources.delete(layer.id)
+        if (layer.id === 'coriolis-demo') stopCoriolis()
       }
     }
   }
@@ -255,4 +355,6 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     if (previous && !previous.isDestroyed()) sources.clear()
     syncOverlays()
   })
+
+  onBeforeUnmount(stopCoriolis)
 }
