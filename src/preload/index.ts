@@ -45,6 +45,70 @@ export interface TileCacheStats {
   bytes: number
 }
 
+export type AiProtocol = 'openai' | 'anthropic'
+export type AiThinkingLevel = 'low' | 'medium' | 'high'
+
+export interface AiModelConfig {
+  id: string
+  label: string
+  contextWindow: number
+  streaming: boolean
+  thinking: boolean
+  thinkingLevel: AiThinkingLevel
+}
+
+export interface AiProviderConfig {
+  id: string
+  name: string
+  protocol: AiProtocol
+  baseUrl: string
+  models: AiModelConfig[]
+}
+
+export interface AiSettings {
+  providers: AiProviderConfig[]
+  activeProviderId: string
+  activeModelId: string
+}
+
+export interface AiChatTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface AiToolDefinition {
+  name: string
+  description: string
+  parameters: Record<string, unknown>
+}
+
+export type AiChatEvent =
+  | { sessionId: string; type: 'reasoning-delta'; text: string }
+  | { sessionId: string; type: 'text-delta'; text: string }
+  | { sessionId: string; type: 'tool-start'; callId: string; name: string; args: unknown }
+  | { sessionId: string; type: 'tool-end'; callId: string; ok: boolean; summary: string; result: string }
+  | { sessionId: string; type: 'execute-tool'; callId: string; name: string; args: unknown }
+  | { sessionId: string; type: 'done' }
+  | { sessionId: string; type: 'error'; message: string }
+
+export interface PlaceSuggestion {
+  name: string
+  province: string
+  city: string
+  district: string
+  address: string
+  type: string
+  longitude: number
+  latitude: number
+}
+
+export interface PlaceSearchResult {
+  query: string
+  places: PlaceSuggestion[]
+  note?: string
+  error?: string
+}
+
 const api = {
   versions: {
     electron: process.versions.electron,
@@ -63,6 +127,21 @@ const api = {
     put: (entry: TileCacheEntry): Promise<void> => ipcRenderer.invoke('tiles:put', entry),
     clear: (providerId?: string): Promise<void> => ipcRenderer.invoke('tiles:clear', providerId),
     stats: (): Promise<TileCacheStats> => ipcRenderer.invoke('tiles:stats')
+  },
+  places: {
+    search: (keyword: string): Promise<PlaceSearchResult> => ipcRenderer.invoke('places:search', keyword)
+  },
+  ai: {
+    getSettings: (): Promise<AiSettings> => ipcRenderer.invoke('ai:get-settings'),
+    updateSettings: (settings: AiSettings): Promise<AiSettings> => ipcRenderer.invoke('ai:update-settings', settings),
+    chat: (sessionId: string, turns: AiChatTurn[], tools: AiToolDefinition[]): Promise<void> => ipcRenderer.invoke('ai:chat', sessionId, turns, tools),
+    stop: (sessionId: string): Promise<void> => ipcRenderer.invoke('ai:stop', sessionId),
+    toolResult: (sessionId: string, callId: string, ok: boolean, result: unknown): Promise<void> => ipcRenderer.invoke('ai:tool-result', sessionId, callId, ok, result),
+    onEvent: (listener: (event: AiChatEvent) => void): (() => void) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, payload: AiChatEvent): void => listener(payload)
+      ipcRenderer.on('ai:event', wrapped)
+      return () => ipcRenderer.removeListener('ai:event', wrapped)
+    }
   }
 }
 

@@ -62,7 +62,7 @@ export const basemapCategories: BasemapCategoryMeta[] = [
 ]
 
 export const credentialOnlyProviders: ProviderMeta[] = [
-  { id: 'amap', name: '高德', description: '大陆地图', region: 'china', coordinateSystem: 'GCJ02', requiresKey: true, requiresSecurityKey: true, styles: [{ id: 'road', name: '道路' }, { id: 'satellite', name: '卫星' }], defaultStyleId: 'road' },
+  { id: 'amap', name: '高德', description: '地点检索（Web 服务）', region: 'china', coordinateSystem: 'GCJ02', requiresKey: true, requiresSecurityKey: true, styles: [{ id: 'road', name: '道路' }, { id: 'satellite', name: '卫星' }], defaultStyleId: 'road' },
   { id: 'baidu', name: '百度', description: '大陆地图', region: 'china', coordinateSystem: 'BD09', requiresKey: true, requiresSk: true, skOptional: true, styles: [{ id: 'road', name: '道路' }, { id: 'satellite', name: '卫星' }], defaultStyleId: 'road' }
 ]
 

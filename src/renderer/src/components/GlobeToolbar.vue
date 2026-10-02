@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { AppstoreOutlined, HomeOutlined } from '@ant-design/icons-vue'
+import { AppstoreOutlined, HomeOutlined, RobotOutlined } from '@ant-design/icons-vue'
 
 defineEmits<{
   openLayers: []
+  openAssistant: []
   home: []
 }>()
 </script>
@@ -17,6 +18,11 @@ defineEmits<{
     <a-tooltip title="回到初始视角" placement="right">
       <a-button type="text" class="toolbar-btn" aria-label="回到初始视角" @click="$emit('home')">
         <HomeOutlined />
+      </a-button>
+    </a-tooltip>
+    <a-tooltip title="EOQ 智能助手" placement="right">
+      <a-button type="text" class="toolbar-btn" aria-label="EOQ 智能助手" @click="$emit('openAssistant')">
+        <RobotOutlined />
       </a-button>
     </a-tooltip>
   </div>
