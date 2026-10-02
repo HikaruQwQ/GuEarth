@@ -56,7 +56,7 @@ export function definePointSetLayer(spec: PointSetSpec): TeachingLayerDefinition
     flyTo: spec.flyTo,
     create(viewer: Cesium.Viewer): TeachingLayerHandle {
       const points = viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection())
-      const labels = viewer.scene.primitives.add(new Cesium.LabelCollection())
+      const labels = viewer.scene.primitives.add(new Cesium.LabelCollection({ scene: viewer.scene }))
       const color = Cesium.Color.fromCssColorString(spec.color)
       const labelColor = Cesium.Color.fromCssColorString(spec.labelColor ?? spec.color)
       for (const point of spec.points) {
@@ -67,7 +67,6 @@ export function definePointSetLayer(spec: PointSetSpec): TeachingLayerDefinition
           color,
           outlineColor: Cesium.Color.WHITE,
           outlineWidth: 1.5,
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
           disableDepthTestDistance: Number.POSITIVE_INFINITY
         })
         labels.add({
