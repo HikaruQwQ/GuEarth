@@ -23,6 +23,7 @@ function normalizeModel(value: unknown): AiModelConfig | null {
     label,
     contextWindow,
     streaming: value.streaming !== false,
+    vision: value.vision === true,
     thinking: value.thinking === true,
     thinkingLevel
   }

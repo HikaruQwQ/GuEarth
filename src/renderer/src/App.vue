@@ -325,11 +325,44 @@ aiStore.registerTool({
   execute: async () => {
     const current = viewer.value
     if (!current || current.isDestroyed()) return { error: '地球尚未就绪' }
+    const canvas = current.scene.canvas
+    const viewContext = () => {
+      const cartographic = current.camera.positionCartographic
+      const headingDegrees = Cesium.Math.toDegrees(current.camera.heading)
+      const picked = [[0, 0], [canvas.clientWidth, 0], [0, canvas.clientHeight], [canvas.clientWidth, canvas.clientHeight]]
+        .map(([x, y]) => current.camera.pickEllipsoid(new Cesium.Cartesian2(x, y), current.scene.globe.ellipsoid))
+        .filter((cartesian): cartesian is Cesium.Cartesian3 => Boolean(cartesian))
+        .map((cartesian) => Cesium.Cartographic.fromCartesian(cartesian))
+      const extent = picked.length >= 3
+        ? {
+            west: Math.round(Cesium.Math.toDegrees(Math.min(...picked.map((item) => item.longitude))) * 10000) / 10000,
+            south: Math.round(Cesium.Math.toDegrees(Math.min(...picked.map((item) => item.latitude))) * 10000) / 10000,
+            east: Math.round(Cesium.Math.toDegrees(Math.max(...picked.map((item) => item.longitude))) * 10000) / 10000,
+            north: Math.round(Cesium.Math.toDegrees(Math.max(...picked.map((item) => item.latitude))) * 10000) / 10000
+          }
+        : undefined
+      return {
+        camera: {
+          longitude: Math.round(Cesium.Math.toDegrees(cartographic.longitude) * 10000) / 10000,
+          latitude: Math.round(Cesium.Math.toDegrees(cartographic.latitude) * 10000) / 10000,
+          height: Math.round(cartographic.height),
+          heading: Math.round(headingDegrees < 0 ? headingDegrees + 360 : headingDegrees),
+          pitch: Math.round(Cesium.Math.toDegrees(current.camera.pitch) * 10) / 10
+        },
+        extent
+      }
+    }
+    if (!aiStore.activeModelVisionEnabled()) {
+      return {
+        status: 'vision_disabled',
+        ...viewContext(),
+        guidance: '当前模型未开启「视觉」能力，不会接收截图图片，本次已改为返回当前视角的文字信息（camera 与 extent）。请依据这些文本信息尽量回答；同时提醒用户：若该模型实际支持图像输入，可在「AI 设置」的模型列表中开启「视觉」开关后重试。'
+      }
+    }
     const loadStart = Date.now()
     while (!current.scene.globe.tilesLoaded && Date.now() - loadStart < 3000) {
       await new Promise((resolve) => setTimeout(resolve, 100))
     }
-    const canvas = current.scene.canvas
     const scale = Math.min(1, 1280 / Math.max(canvas.width, canvas.height))
     const offscreen = document.createElement('canvas')
     offscreen.width = Math.max(1, Math.round(canvas.width * scale))
@@ -339,34 +372,13 @@ aiStore.registerTool({
     context.drawImage(canvas, 0, 0, offscreen.width, offscreen.height)
     const image = offscreen.toDataURL('image/jpeg', 0.85)
     if (!image.startsWith('data:image/')) return { error: '截图失败' }
-    const cartographic = current.camera.positionCartographic
-    const headingDegrees = Cesium.Math.toDegrees(current.camera.heading)
-    const picked = [[0, 0], [canvas.clientWidth, 0], [0, canvas.clientHeight], [canvas.clientWidth, canvas.clientHeight]]
-      .map(([x, y]) => current.camera.pickEllipsoid(new Cesium.Cartesian2(x, y), current.scene.globe.ellipsoid))
-      .filter((cartesian): cartesian is Cesium.Cartesian3 => Boolean(cartesian))
-      .map((cartesian) => Cesium.Cartographic.fromCartesian(cartesian))
-    const extent = picked.length >= 3
-      ? {
-          west: Math.round(Cesium.Math.toDegrees(Math.min(...picked.map((item) => item.longitude))) * 10000) / 10000,
-          south: Math.round(Cesium.Math.toDegrees(Math.min(...picked.map((item) => item.latitude))) * 10000) / 10000,
-          east: Math.round(Cesium.Math.toDegrees(Math.max(...picked.map((item) => item.longitude))) * 10000) / 10000,
-          north: Math.round(Cesium.Math.toDegrees(Math.max(...picked.map((item) => item.latitude))) * 10000) / 10000
-        }
-      : undefined
     return {
       status: 'ok',
       screenshot: true,
       image,
       imageWidth: offscreen.width,
       imageHeight: offscreen.height,
-      camera: {
-        longitude: Math.round(Cesium.Math.toDegrees(cartographic.longitude) * 10000) / 10000,
-        latitude: Math.round(Cesium.Math.toDegrees(cartographic.latitude) * 10000) / 10000,
-        height: Math.round(cartographic.height),
-        heading: Math.round(headingDegrees < 0 ? headingDegrees + 360 : headingDegrees),
-        pitch: Math.round(Cesium.Math.toDegrees(current.camera.pitch) * 10) / 10
-      },
-      extent
+      ...viewContext()
     }
   }
 })

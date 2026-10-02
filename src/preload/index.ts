@@ -67,6 +67,7 @@ export interface AiModelConfig {
   label: string
   contextWindow: number
   streaming: boolean
+  vision: boolean
   thinking: boolean
   thinkingLevel: AiThinkingLevel
 }

@@ -157,6 +157,11 @@ export const useAiStore = defineStore('ai', () => {
     return Boolean(provider?.models.some((model) => model.id === settings.value.activeModelId))
   }
 
+  function activeModelVisionEnabled(): boolean {
+    const provider = settings.value.providers.find((item) => item.id === settings.value.activeProviderId)
+    return provider?.models.find((item) => item.id === settings.value.activeModelId)?.vision === true
+  }
+
   async function send(text: string): Promise<void> {
     const question = text.trim()
     if (!question || isStreaming.value) return
@@ -215,6 +220,7 @@ export const useAiStore = defineStore('ai', () => {
 
   return {
     settings, messages, isStreaming, isPanelOpen, isSettingsOpen, hydrated,
-    hydrate, registerTool, saveSettings, send, stop, clearConversation, setPanelOpen, setSettingsOpen
+    hydrate, registerTool, saveSettings, send, stop, clearConversation, setPanelOpen, setSettingsOpen,
+    activeModelVisionEnabled
   }
 })

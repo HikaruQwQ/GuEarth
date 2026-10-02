@@ -110,6 +110,7 @@ function addModel(): void {
     label: '',
     contextWindow: 128000,
     streaming: true,
+    vision: false,
     thinking: false,
     thinkingLevel: 'medium'
   })
@@ -181,6 +182,7 @@ async function handleSave(): Promise<void> {
           label: model.label.trim() || model.id.trim(),
           contextWindow: model.contextWindow,
           streaming: model.streaming,
+          vision: model.vision,
           thinking: model.thinking,
           thinkingLevel: model.thinkingLevel
         }))
@@ -283,6 +285,12 @@ async function handleSave(): Promise<void> {
               <a-switch v-model:checked="model.streaming" size="small" />
             </span>
             <span class="model-field">
+              <a-tooltip title="开启后允许向该模型发送地球截图等图片内容；模型不支持图像输入时请保持关闭，截图将以文字描述视角代替">
+                <label class="vision-label">视觉</label>
+              </a-tooltip>
+              <a-switch v-model:checked="model.vision" size="small" />
+            </span>
+            <span class="model-field">
               <label>思考</label>
               <a-switch v-model:checked="model.thinking" size="small" />
             </span>
@@ -327,11 +335,13 @@ async function handleSave(): Promise<void> {
 .models-empty{color:rgba(0,0,0,.45);font-size:13px;padding:8px 0}
 .model-card{border:1px solid rgba(5,5,5,.06);border-radius:8px;padding:12px;margin-bottom:8px}
 .model-row{display:flex;align-items:center;gap:8px}
-.model-row-secondary{margin-top:8px;gap:16px}
+.model-row-secondary{margin-top:8px;gap:12px 16px;flex-wrap:wrap}
 .model-id-input{flex:1.4}
 .model-label-input{flex:1}
 .model-field{display:flex;align-items:center;gap:8px}
 .model-field>label{color:rgba(0,0,0,.65);font-size:12px;white-space:nowrap}
+.vision-label{cursor:help;text-decoration:underline dotted rgba(0,0,0,.35);text-underline-offset:3px}
+.model-field :deep(.ant-input-number){width:104px}
 .level-select{width:76px}
 .provider-danger{margin-top:8px;display:flex;justify-content:flex-end}
 .modal-footer{display:flex;justify-content:flex-end;gap:8px;padding-top:8px;border-top:1px solid rgba(5,5,5,.06)}
