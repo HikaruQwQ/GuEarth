@@ -9,7 +9,8 @@ import App from './App.vue'
 import './assets/main.css'
 
 Sentry.init({
-  dsn: 'https://28239780e3a5ede424bde1114849f448@o4509333304573952.ingest.us.sentry.io/4512192370769920'
+  dsn: 'https://28239780e3a5ede424bde1114849f448@o4509333304573952.ingest.us.sentry.io/4512192370769920',
+  integrations: (defaults) => defaults.filter((integration) => integration.name !== 'Breadcrumbs' && integration.name !== 'Console')
 })
 
 dayjs.locale('zh-cn')
