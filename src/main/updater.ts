@@ -5,7 +5,6 @@ import { join } from 'path'
 import type { UpdateState, UpdaterEvent } from '../preload'
 
 const DEFAULT_UPDATE_BASE_URL = 'https://guearth-updater.isla.fan'
-const INITIAL_CHECK_DELAY_MS = 8000
 const CHECK_TIMEOUT_MS = 15000
 const PROGRESS_EMIT_INTERVAL_MS = 400
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/
@@ -170,5 +169,5 @@ export function initUpdater(userDataUpdatesPath: string): void {
   })
   ipcMain.handle('updater:install', () => installUpdate())
   if (!updateCheckEnabled()) return
-  setTimeout(() => void checkForUpdate(), INITIAL_CHECK_DELAY_MS)
+  void checkForUpdate()
 }
