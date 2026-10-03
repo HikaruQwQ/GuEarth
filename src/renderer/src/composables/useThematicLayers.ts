@@ -35,6 +35,7 @@ const TYPHOON_INTENSITY_COLOR = '#f5222d'
 const TYPHOON_TRACK_COLOR = '#fa541c'
 const TYPHOON_ANCHOR_LON = 138
 const TYPHOON_ANCHOR_LAT = 15
+const ENSO_BAND_LATITUDE = 20
 const FRONTAL_CYCLONE_LON = 125
 const FRONTAL_CYCLONE_LAT = 34
 const BELT_LABEL_LON = 150
@@ -774,7 +775,7 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
           summary: `${phase.summary} 对地理格局的影响：${phase.impacts.map((line) => line).join('；')}。`
         }),
         rectangle: {
-          coordinates: Cesium.Rectangle.fromDegrees(item.west, -5, item.east, 5),
+          coordinates: Cesium.Rectangle.fromDegrees(item.west, -ENSO_BAND_LATITUDE, item.east, ENSO_BAND_LATITUDE),
           material: Cesium.Color.fromCssColorString(ensoAnomalyColor(item.anomaly)).withAlpha(0.8)
         }
       })
