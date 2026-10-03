@@ -19,7 +19,7 @@ import { useHydrologyStore } from '@renderer/stores/hydrology'
 import { useLandformStore } from '@renderer/stores/landform'
 import { useCesiumViewer } from '@renderer/composables/useCesiumViewer'
 import { useDrawing } from '@renderer/composables/useDrawing'
-import { registerAnnotationTools } from '@renderer/ai/annotationTools'
+import { collectStrings, parsePositions, registerAnnotationTools } from '@renderer/ai/annotationTools'
 import { useThematicLayers } from '@renderer/composables/useThematicLayers'
 import { useTimezoneCompare } from '@renderer/composables/useTimezoneCompare'
 import { useScenePlayer, type RecordingStep } from '@renderer/composables/useScenePlayer'
@@ -443,6 +443,7 @@ aiStore.registerTool({
 })
 
 aiStore.registerTool({
+  label: '保存教学场景',
   definition: {
     name: 'save_scene',
     description: '把当前地球视角、图层与时间状态保存为「教学场景」书签，供课堂一键回放。适合老师备课或讲解到重要画面时收藏。',
@@ -470,6 +471,7 @@ aiStore.registerTool({
 })
 
 aiStore.registerTool({
+  label: '查看教学场景',
   definition: {
     name: 'list_scenes',
     description: '列出已保存的教学场景书签（含顺序、名称、旁白、图层与相机），用于回答“我存了哪些场景”或为录制视频复用位置。',
@@ -564,6 +566,7 @@ function parseRecordingStep(raw: unknown, index: number): RecordingStep | { erro
 }
 
 aiStore.registerTool({
+  label: '录制教学视频',
   definition: {
     name: 'record_video',
     description: '按剧本自动录制教学视频：依次飞到各场景、开关图层、叠加标注与旁白字幕，完成后保存为视频文件（自动存到系统「影片/GuEarth」）。用户说“帮我录一个XX的介绍视频/微课”时使用，把完整剧本通过 steps 一次性传入，不要逐步调用其他工具执行。',
@@ -622,6 +625,7 @@ aiStore.registerTool({
 })
 
 aiStore.registerTool({
+  label: '查询录制进度',
   definition: {
     name: 'get_recording_status',
     description: '查询自动录制视频的进度：准备中/录制中第几幕/保存中/已完成（含保存路径）/失败。用户询问录制进度或录制久久未结束时使用。',

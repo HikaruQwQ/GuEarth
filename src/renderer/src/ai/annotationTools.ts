@@ -9,7 +9,7 @@ const MAX_MARKER_BATCH = 20
 const MAX_FOLDER_OPERATIONS = 20
 const COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/
 
-function parsePositions(raw: unknown, minCount: number): GeoPosition[] | null {
+export function parsePositions(raw: unknown, minCount: number): GeoPosition[] | null {
   if (!Array.isArray(raw)) return null
   const positions: GeoPosition[] = []
   for (const item of raw) {
@@ -24,7 +24,7 @@ function parsePositions(raw: unknown, minCount: number): GeoPosition[] | null {
   return positions.length >= minCount && positions.length <= 500 ? positions : null
 }
 
-function collectStrings(raw: unknown): string[] {
+export function collectStrings(raw: unknown): string[] {
   if (!Array.isArray(raw)) return []
   return raw.flatMap((item) => (typeof item === 'string' && item.trim() ? [item.trim()] : []))
 }
