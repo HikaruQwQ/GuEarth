@@ -1,86 +1,112 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { CloseOutlined } from '@ant-design/icons-vue'
 
-type HeatingState = 'day-clear' | 'day-cloudy' | 'night-clear' | 'night-cloudy'
+type Period = 'day' | 'night'
+type CloudCover = 'clear' | 'cloudy'
 
 interface RadiatorArrow {
   d: string
   color: string
-  dashed?: boolean
   width?: number
+  dashed?: boolean
+  marker: string
   label?: string
   labelAt?: [number, number]
+  labelAnchor?: 'start' | 'middle' | 'end'
 }
 
-const state = ref<HeatingState>('day-clear')
+const emit = defineEmits<{ close: [] }>()
+
+const period = ref<Period>('day')
+const cloud = ref<CloudCover>('clear')
 
 const SOLAR = '#fa8c16'
 const GROUND_RADIATION = '#f5222d'
 const COUNTER_RADIATION = '#722ed1'
 
-const stateOptions = [
-  { value: 'day-clear', label: '白天·晴' },
-  { value: 'day-cloudy', label: '白天·多云' },
-  { value: 'night-clear', label: '夜晚·晴' },
-  { value: 'night-cloudy', label: '夜晚·多云' }
+const periodOptions = [
+  { value: 'day', label: '白天' },
+  { value: 'night', label: '夜晚' }
 ] as const
 
-const isDay = computed(() => state.value.startsWith('day'))
-const isCloudy = computed(() => state.value.endsWith('cloudy'))
+const cloudOptions = [
+  { value: 'clear', label: '晴朗' },
+  { value: 'cloudy', label: '多云' }
+] as const
+
+const legendItems = [
+  { color: SOLAR, name: '太阳短波辐射' },
+  { color: GROUND_RADIATION, name: '地面长波辐射' },
+  { color: COUNTER_RADIATION, name: '大气逆辐射' }
+]
+
+const stateLabel = computed(() =>
+  `${period.value === 'day' ? '白天' : '夜晚'}·${cloud.value === 'clear' ? '晴朗' : '多云'}`
+)
+
+const groundText = computed(() =>
+  period.value === 'day' ? '地面（吸收太阳辐射而增温）' : '地面（向外辐射散热降温）'
+)
 
 const arrows = computed<RadiatorArrow[]>(() => {
+  const isDay = period.value === 'day'
+  const isCloudy = cloud.value === 'cloudy'
   const list: RadiatorArrow[] = []
-  if (isDay.value) {
-    if (isCloudy.value) {
+  if (isDay) {
+    if (isCloudy) {
       list.push(
-        { d: 'M 62 40 L 196 54', color: SOLAR, label: '太阳短波辐射', labelAt: [96, 32] },
-        { d: 'M 202 50 Q 252 34 272 20', color: SOLAR, dashed: true, label: '云层反射（削弱强）', labelAt: [262, 44] },
-        { d: 'M 54 48 L 92 164', color: SOLAR, width: 1.6, label: '少量透过云隙', labelAt: [58, 120] }
+        { d: 'M 56 44 L 200 52', color: SOLAR, width: 2.4, marker: 'solar', label: '太阳辐射', labelAt: [116, 30] },
+        { d: 'M 214 48 Q 258 30 280 20', color: SOLAR, width: 1.6, dashed: true, marker: 'solar', label: '云层反射', labelAt: [254, 14] },
+        { d: 'M 58 52 L 84 166', color: SOLAR, width: 1.4, dashed: true, marker: 'solar', label: '云隙透过', labelAt: [72, 140], labelAnchor: 'end' }
       )
     } else {
       list.push(
-        { d: 'M 62 40 L 148 164', color: SOLAR, width: 2.6, label: '太阳短波辐射', labelAt: [92, 84] },
-        { d: 'M 46 46 L 66 104', color: SOLAR, width: 1.4, dashed: true, label: '被大气吸收、散射（削弱）', labelAt: [132, 108] }
+        { d: 'M 56 44 L 160 166', color: SOLAR, width: 2.6, marker: 'solar', label: '太阳辐射', labelAt: [118, 92], labelAnchor: 'start' },
+        { d: 'M 76 68 L 116 52', color: SOLAR, width: 1.4, dashed: true, marker: 'solar', label: '大气削弱', labelAt: [122, 52], labelAnchor: 'start' }
       )
     }
   }
-  if (isCloudy.value) {
+  if (isCloudy) {
     list.push(
-      { d: 'M 118 164 L 118 76', color: GROUND_RADIATION, width: 2.2, label: '地面长波辐射', labelAt: [88, 132] },
-      { d: 'M 246 164 L 246 78', color: GROUND_RADIATION, width: 2.2, dashed: true }
+      { d: 'M 170 166 L 170 72', color: GROUND_RADIATION, width: 2.2, marker: 'ground', label: '地面辐射', labelAt: [162, 124], labelAnchor: 'end' },
+      { d: 'M 260 166 L 260 72', color: GROUND_RADIATION, width: 1.6, marker: 'ground' }
     )
   } else {
     list.push(
-      { d: 'M 118 164 L 118 96', color: GROUND_RADIATION, width: 2.2, label: '地面长波辐射被大气吸收', labelAt: [148, 128] },
-      { d: 'M 258 164 L 258 30', color: GROUND_RADIATION, width: 1.6, dashed: true, label: '少量逸散到宇宙空间', labelAt: [262, 92] }
+      { d: 'M 130 166 L 130 92', color: GROUND_RADIATION, width: 2.2, marker: 'ground', label: '地面辐射', labelAt: [122, 140], labelAnchor: 'end' },
+      { d: 'M 300 166 L 300 34', color: GROUND_RADIATION, width: 1.4, dashed: true, marker: 'ground', label: '逸散到宇宙', labelAt: [294, 26], labelAnchor: 'end' }
     )
   }
-  const counterWidth = state.value === 'night-cloudy' ? 3 : state.value === 'night-clear' ? 1.4 : 1.8
-  const counterColor = COUNTER_RADIATION
-  if (state.value === 'night-cloudy') {
+  if (period.value === 'night' && isCloudy) {
     list.push(
-      { d: 'M 96 96 L 84 162', color: counterColor, width: counterWidth, label: '大气逆辐射强（保温）', labelAt: [72, 84] },
-      { d: 'M 186 92 L 172 162', color: counterColor, width: counterWidth }
+      { d: 'M 210 92 L 203 166', color: COUNTER_RADIATION, width: 3.4, marker: 'counter', label: '大气逆辐射强', labelAt: [206, 86] }
     )
-  } else if (state.value === 'night-clear') {
-    list.push({ d: 'M 140 100 L 132 162', color: counterColor, width: counterWidth, label: '大气逆辐射弱', labelAt: [170, 88] })
+  } else if (period.value === 'night' && !isCloudy) {
+    list.push(
+      { d: 'M 166 100 L 158 166', color: COUNTER_RADIATION, width: 1.4, marker: 'counter', label: '大气逆辐射弱', labelAt: [172, 128], labelAnchor: 'start' }
+    )
+  } else if (isCloudy) {
+    list.push(
+      { d: 'M 210 92 L 203 166', color: COUNTER_RADIATION, width: 1.8, marker: 'counter', label: '大气逆辐射', labelAt: [206, 86] }
+    )
   } else {
-    list.push({ d: 'M 152 98 L 140 162', color: counterColor, width: counterWidth, label: '大气逆辐射', labelAt: [196, 96] })
+    list.push(
+      { d: 'M 172 96 L 162 166', color: COUNTER_RADIATION, width: 1.8, marker: 'counter', label: '大气逆辐射', labelAt: [178, 128], labelAnchor: 'start' }
+    )
   }
   return list
 })
 
 const stateConclusion = computed(() => {
-  switch (state.value) {
-    case 'day-clear':
-      return '白天晴天：大气对太阳辐射削弱少，到达地面的太阳辐射多，气温升高快。'
-    case 'day-cloudy':
-      return '白天多云：云层反射太阳辐射，削弱作用强，到达地面的太阳辐射少，气温不会太高。'
-    case 'night-clear':
-      return '夜晚晴朗：云少则大气吸收地面辐射少、逆辐射弱，地面热量散失快，气温低——深秋寒霜多发生于晴朗夜晚。'
-    case 'night-cloudy':
-      return '夜晚多云：云吸收地面辐射多、逆辐射强，保温作用强，气温不会太低。'
+  if (period.value === 'day') {
+    return cloud.value === 'clear'
+      ? '晴天大气对太阳辐射削弱少，到达地面的太阳辐射多，气温升高快。'
+      : '多云时云层反射太阳辐射，削弱作用强，到达地面的太阳辐射少，气温不会太高。'
   }
+  return cloud.value === 'clear'
+    ? '晴朗夜晚云少，大气吸收地面辐射少、逆辐射弱，地面散热快、气温低——深秋寒霜多发生在晴朗夜间。'
+    : '多云夜晚云吸收地面辐射多、逆辐射强，保温作用强，气温不会太低。'
 })
 
 const keyPoints = [
@@ -95,35 +121,85 @@ const keyPoints = [
   <div class="heating-panel" role="group" aria-label="大气受热过程演示">
     <div class="panel-header">
       <span class="panel-title">大气受热过程</span>
-      <a-segmented v-model:value="state" size="small" :options="[...stateOptions]" aria-label="昼夜与云量" />
+      <a-button type="text" size="small" aria-label="关闭大气受热过程" @click="emit('close')">
+        <CloseOutlined />
+      </a-button>
     </div>
-    <svg viewBox="0 0 320 200" class="heating-svg" role="img" aria-label="大气受热过程示意图：太阳辐射、地面辐射与大气逆辐射">
-      <rect x="0" y="0" width="320" height="170" fill="rgba(22, 119, 255, 0.06)" />
-      <text x="10" y="18" class="space-label">宇宙空间</text>
-      <text v-if="!isDay" x="296" y="26" text-anchor="middle" class="space-label">月</text>
-      <circle v-if="isDay" cx="46" cy="34" r="10" fill="#faad14" />
-      <g v-if="isCloudy">
-        <ellipse cx="200" cy="58" rx="34" ry="12" fill="rgba(0, 0, 0, 0.18)" />
-        <ellipse cx="178" cy="62" rx="22" ry="10" fill="rgba(0, 0, 0, 0.14)" />
-        <ellipse cx="224" cy="62" rx="24" ry="10" fill="rgba(0, 0, 0, 0.14)" />
-        <text x="200" y="84" text-anchor="middle" class="tiny-label">云（水滴、冰晶）</text>
+    <div class="control-row">
+      <div class="control-group">
+        <span class="control-label">昼夜</span>
+        <a-segmented v-model:value="period" size="small" :options="[...periodOptions]" aria-label="昼夜" />
+      </div>
+      <div class="control-group">
+        <span class="control-label">云量</span>
+        <a-segmented v-model:value="cloud" size="small" :options="[...cloudOptions]" aria-label="云量" />
+      </div>
+    </div>
+    <svg viewBox="0 0 360 200" class="heating-svg" role="img" aria-label="大气受热过程示意图：太阳辐射、地面辐射与大气逆辐射">
+      <rect x="0" y="0" width="360" height="170" fill="rgba(22, 119, 255, 0.06)" />
+      <text x="10" y="16" class="space-label">宇宙空间</text>
+      <g v-if="period === 'day'">
+        <circle cx="44" cy="36" r="9" fill="#faad14" />
       </g>
-      <path v-for="(arrow, index) in arrows" :key="`r-${index}`" :d="arrow.d" fill="none" :stroke="arrow.color" :stroke-width="arrow.width ?? 2.2" :stroke-dasharray="arrow.dashed ? '5 4' : undefined" marker-end="url(#heat-arrowhead)" class="heat-arrow" />
+      <g v-else>
+        <circle cx="44" cy="36" r="9" fill="rgba(0, 0, 0, 0.25)" />
+        <circle cx="48" cy="33" r="8" fill="#ffffff" />
+      </g>
+      <g v-if="cloud === 'cloudy'">
+        <ellipse cx="218" cy="54" rx="34" ry="12" fill="rgba(0, 0, 0, 0.18)" />
+        <ellipse cx="195" cy="60" rx="20" ry="9" fill="rgba(0, 0, 0, 0.14)" />
+        <ellipse cx="245" cy="60" rx="22" ry="9" fill="rgba(0, 0, 0, 0.14)" />
+        <text x="218" y="36" text-anchor="middle" class="space-label">云层</text>
+      </g>
       <defs>
-        <marker id="heat-arrowhead" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
-          <path d="M0,0 L7,3.5 L0,7 Z" fill="rgba(0,0,0,0.55)" />
+        <marker id="ah-solar" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+          <path d="M0,0 L7,3.5 L0,7 Z" :fill="SOLAR" />
+        </marker>
+        <marker id="ah-ground" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+          <path d="M0,0 L7,3.5 L0,7 Z" :fill="GROUND_RADIATION" />
+        </marker>
+        <marker id="ah-counter" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+          <path d="M0,0 L7,3.5 L0,7 Z" :fill="COUNTER_RADIATION" />
         </marker>
       </defs>
-      <g font-size="10.5" font-family='"Microsoft YaHei", "PingFang SC", sans-serif'>
-        <text v-for="(arrow, index) in arrows.filter((item) => item.label && item.labelAt)" :key="`t-${index}`" :x="arrow.labelAt![0]" :y="arrow.labelAt![1]" text-anchor="middle" :fill="arrow.color">{{ arrow.label }}</text>
-      </g>
-      <rect x="0" y="170" width="320" height="30" fill="rgba(250, 140, 22, 0.18)" />
-      <line x1="0" y1="170" x2="320" y2="170" stroke="rgba(0, 0, 0, 0.45)" stroke-width="1.5" />
-      <text x="160" y="188" text-anchor="middle" class="ground-label">地面（吸收太阳辐射后增温）</text>
+      <path
+        v-for="(arrow, index) in arrows"
+        :key="`r-${index}`"
+        :d="arrow.d"
+        fill="none"
+        :stroke="arrow.color"
+        :stroke-width="arrow.width"
+        :stroke-dasharray="arrow.dashed ? '5 4' : undefined"
+        :marker-end="`url(#ah-${arrow.marker})`"
+      />
+      <text
+        v-for="(arrow, index) in arrows.filter((item) => item.label && item.labelAt)"
+        :key="`t-${index}`"
+        :x="arrow.labelAt![0]"
+        :y="arrow.labelAt![1]"
+        :text-anchor="arrow.labelAnchor ?? 'middle'"
+        class="arrow-label"
+        :fill="arrow.color"
+      >{{ arrow.label }}</text>
+      <rect x="0" y="170" width="360" height="30" fill="rgba(250, 140, 22, 0.18)" />
+      <line x1="0" y1="170" x2="360" y2="170" stroke="rgba(0, 0, 0, 0.45)" stroke-width="1.5" />
+      <text x="180" y="188" text-anchor="middle" class="ground-label">{{ groundText }}</text>
     </svg>
-    <div class="panel-conclusion">{{ stateConclusion }}</div>
+    <div class="legend-row">
+      <span v-for="item in legendItems" :key="item.name" class="legend-item">
+        <span class="legend-swatch" :style="{ background: item.color }"></span>
+        {{ item.name }}
+      </span>
+    </div>
+    <div class="conclusion-row">
+      <a-tag class="state-tag">{{ stateLabel }}</a-tag>
+      <span class="conclusion-text">{{ stateConclusion }}</span>
+    </div>
     <div class="key-points">
-      <div v-for="point in keyPoints" :key="point" class="key-point">· {{ point }}</div>
+      <div class="section-title">要点回顾</div>
+      <ul class="point-list">
+        <li v-for="point in keyPoints" :key="point" class="point-item">{{ point }}</li>
+      </ul>
     </div>
   </div>
 </template>
@@ -136,7 +212,7 @@ const keyPoints = [
   transform: translateY(-50%);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   width: 380px;
   max-height: calc(100vh - 160px);
   overflow-y: auto;
@@ -151,7 +227,7 @@ const keyPoints = [
 .panel-header {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .panel-title {
@@ -162,44 +238,128 @@ const keyPoints = [
   line-height: 22px;
 }
 
+.control-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.control-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.control-label {
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 12px;
+  line-height: 20px;
+}
+
 .heating-svg {
   width: 100%;
   height: auto;
+  display: block;
 }
 
-.heat-arrow {
-  stroke-dasharray: none;
-}
-
-.space-label,
-.tiny-label {
+.space-label {
   fill: rgba(0, 0, 0, 0.45);
   font-size: 10px;
-  font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
 }
 
 .ground-label {
   fill: rgba(0, 0, 0, 0.65);
   font-size: 11px;
-  font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
 }
 
-.panel-conclusion {
-  color: rgba(0, 0, 0, 0.88);
+.arrow-label {
+  font-size: 11px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: rgba(255, 255, 255, 0.9);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: rgba(0, 0, 0, 0.65);
   font-size: 12px;
   line-height: 20px;
-  font-weight: 600;
+}
+
+.legend-swatch {
+  width: 12px;
+  height: 4px;
+  border-radius: 9999px;
+}
+
+.conclusion-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.state-tag {
+  flex: none;
+  margin-inline-end: 0;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.conclusion-text {
+  flex: 1;
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 12px;
+  line-height: 20px;
 }
 
 .key-points {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
-.key-point {
+.section-title {
+  color: rgba(0, 0, 0, 0.88);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.point-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.point-item {
+  position: relative;
+  padding-left: 12px;
   color: rgba(0, 0, 0, 0.65);
   font-size: 12px;
-  line-height: 19px;
+  line-height: 20px;
+}
+
+.point-item::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 8px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
 }
 </style>
