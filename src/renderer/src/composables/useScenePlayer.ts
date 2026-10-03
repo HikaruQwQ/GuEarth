@@ -97,6 +97,9 @@ function cameraOrientation(camera: SceneCamera): { heading: number; pitch: numbe
   }
 }
 
+let runId = 0
+let activeRun: (() => void) | null = null
+
 export function useScenePlayer(viewer: Ref<Cesium.Viewer | undefined>, switchBasemap: (id: string) => void) {
   const globeStore = useGlobeStore()
   const climateStore = useClimateStore()
@@ -119,7 +122,6 @@ export function useScenePlayer(viewer: Ref<Cesium.Viewer | undefined>, switchBas
     recording: false
   })
 
-  let runId = 0
   let aborted = false
   let advanceResolver: (() => void) | null = null
   let advanceTimer: ReturnType<typeof setTimeout> | undefined
@@ -136,8 +138,7 @@ export function useScenePlayer(viewer: Ref<Cesium.Viewer | undefined>, switchBas
   }
 
   function stop(): void {
-    aborted = true
-    next()
+    activeRun?.()
   }
 
   function waitAdvance(timeoutMs: number | null): Promise<void> {
@@ -322,27 +323,26 @@ export function useScenePlayer(viewer: Ref<Cesium.Viewer | undefined>, switchBas
     playerState.narration = ''
     playerState.recording = Boolean(options.recording)
     scenesStore.setPresenting(true)
-    await ensureScene3D()
-    if (aborted || runId !== id) {
-      for (const shapeId of options.recording?.tempShapeIds ?? []) drawingStore.removeShape(shapeId)
-      playerState.active = false
-      playerState.recording = false
-      scenesStore.setPresenting(false)
-      return
+    const abort = (): void => {
+      aborted = true
+      next()
     }
-    if (options.recording) scenesStore.setRecording({ state: 'preparing', currentStep: 0, totalSteps: options.scenes.length, videoPath: '', error: '', cancelled: false })
-    await prewarm(options.scenes, id, centerTarget)
-    if (options.recording && !aborted && runId === id) {
-      const canvas = viewer.value?.scene.canvas
-      if (!canvas || !recorder.start(canvas, recorderOverlay)) {
-        scenesStore.setRecording({ state: 'error', error: '当前环境不支持视频录制' })
-        playerState.recording = false
-      } else {
-        recorder.pause()
-        scenesStore.setRecording({ state: 'recording' })
-      }
-    }
+    activeRun = abort
     try {
+      await ensureScene3D()
+      if (aborted || runId !== id) return
+      if (options.recording) scenesStore.setRecording({ state: 'preparing', currentStep: 0, totalSteps: options.scenes.length, videoPath: '', error: '', cancelled: false })
+      await prewarm(options.scenes, id, centerTarget)
+      if (options.recording && !aborted && runId === id) {
+        const canvas = viewer.value?.scene.canvas
+        if (!canvas || !recorder.start(canvas, recorderOverlay)) {
+          scenesStore.setRecording({ state: 'error', error: '当前环境不支持视频录制' })
+          playerState.recording = false
+        } else {
+          recorder.pause()
+          scenesStore.setRecording({ state: 'recording' })
+        }
+      }
       for (let index = 0; index < options.scenes.length; index += 1) {
         if (aborted || runId !== id) break
         const scene = options.scenes[index]
@@ -351,7 +351,12 @@ export function useScenePlayer(viewer: Ref<Cesium.Viewer | undefined>, switchBas
         applySnapshot(scene.snapshot)
         await delay(STATE_SETTLE_MS)
         if (playerState.recording) {
-          setCameraView(scene.snapshot.camera, centerTarget)
+          if (index > 0) {
+            recorder.resume()
+            await flyCamera(scene.snapshot.camera, scene.flyDurationMs / 1000, centerTarget)
+          } else {
+            setCameraView(scene.snapshot.camera, centerTarget)
+          }
           await waitTilesLoaded(RECORD_TILE_TIMEOUT_MS, () => aborted || runId !== id)
         } else {
           await flyCamera(scene.snapshot.camera, scene.flyDurationMs / 1000, centerTarget)
@@ -375,19 +380,25 @@ export function useScenePlayer(viewer: Ref<Cesium.Viewer | undefined>, switchBas
         if (state === 'preparing' || state === 'recording') scenesStore.setRecording({ state: 'idle' })
       }
     } finally {
+      if (activeRun === abort) {
+        activeRun = null
+        scenesStore.setPresenting(false)
+      }
       if (options.recording?.tempShapeIds.length) {
         for (const shapeId of options.recording.tempShapeIds) drawingStore.removeShape(shapeId)
       }
       playerState.active = false
       playerState.recording = false
-      scenesStore.setPresenting(false)
     }
   }
 
   async function recordVideo(title: string, steps: RecordingStep[]): Promise<{ status: string; totalSteps: number; estimatedSeconds: number } | { error: string }> {
     const current = viewer.value
     if (!current || current.isDestroyed()) return { error: '地球尚未就绪' }
-    if (playerState.active) return { error: '已有演示或录制正在进行，请等待完成或按 Esc 结束后再试' }
+    if (playerState.active) {
+      stop()
+      return { error: '正在结束上一次演示或录制，请稍候片刻后重试' }
+    }
     if (typeof MediaRecorder === 'undefined') return { error: '当前环境不支持视频录制' }
     const scenes: TeachingScene[] = steps.map((step) => ({
       id: crypto.randomUUID(),
