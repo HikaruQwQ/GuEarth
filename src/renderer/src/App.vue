@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
-import { Modal } from 'ant-design-vue'
+import { Modal, message } from 'ant-design-vue'
 import zhCN from 'ant-design-vue/es/locale/zh_CN'
 import { ReloadOutlined } from '@ant-design/icons-vue'
 import * as Cesium from 'cesium'
@@ -11,6 +11,7 @@ import { useFailureStore } from '@renderer/stores/failure'
 import { useDrawingStore, type DrawnShape, type DrawTool } from '@renderer/stores/drawing'
 import { useAiStore } from '@renderer/stores/ai'
 import { useUpdaterStore } from '@renderer/stores/updater'
+import { useScenesStore } from '@renderer/stores/scenes'
 import { thematicLayerCatalog, useClimateStore } from '@renderer/stores/climate'
 import { useSolarStore } from '@renderer/stores/solar'
 import { useAtmosphereStore } from '@renderer/stores/atmosphere'
@@ -21,6 +22,7 @@ import { useDrawing } from '@renderer/composables/useDrawing'
 import { registerAnnotationTools } from '@renderer/ai/annotationTools'
 import { useThematicLayers } from '@renderer/composables/useThematicLayers'
 import { useTimezoneCompare } from '@renderer/composables/useTimezoneCompare'
+import { useScenePlayer, type RecordingStep } from '@renderer/composables/useScenePlayer'
 import { datePartsOf, dayLength, declinationForDate, formatClock, isValidDate, noonAltitudeDeg, sunTimes } from '@renderer/thematic/solarMath'
 import { nearestBoundary, plateBoundaryKindName } from '@renderer/thematic/plateBoundaries'
 import GlobeToolbar from '@renderer/components/GlobeToolbar.vue'
@@ -56,6 +58,8 @@ import ThematicLegend from '@renderer/components/ThematicLegend.vue'
 import FrontalCyclone from '@renderer/components/FrontalCyclone.vue'
 import ThematicInfoCard from '@renderer/components/ThematicInfoCard.vue'
 import TeachingLab from '@renderer/components/TeachingLab.vue'
+import SceneBookmarksPanel, { type SceneEditPayload } from '@renderer/components/SceneBookmarksPanel.vue'
+import ScenePlayerOverlay from '@renderer/components/ScenePlayerOverlay.vue'
 import EoqAssistant from '@renderer/components/EoqAssistant.vue'
 import AiSettingsModal from '@renderer/components/AiSettingsModal.vue'
 import UpdateDialog from '@renderer/components/UpdateDialog.vue'
@@ -100,6 +104,9 @@ const { activeTool, shapes, entries, selectedShapeId, saveError } = storeToRefs(
 const aiStore = useAiStore()
 const updaterStore = useUpdaterStore()
 const failureStore = useFailureStore()
+const scenesStore = useScenesStore()
+const isScenesPanelOpen = ref(false)
+const scenePlayer = useScenePlayer(viewer, switchBasemap)
 const firstUseGuide = ref<InstanceType<typeof FirstUseGuide> | null>(null)
 const isAnnotationPanelOpen = ref(false)
 const systemFonts = ref(['Arial', 'Segoe UI', 'Microsoft YaHei'])
@@ -435,8 +442,208 @@ aiStore.registerTool({
   }
 })
 
+aiStore.registerTool({
+  definition: {
+    name: 'save_scene',
+    description: '把当前地球视角、图层与时间状态保存为「教学场景」书签，供课堂一键回放。适合老师备课或讲解到重要画面时收藏。',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: '场景名称（如“夏至晨昏线与极昼”）' },
+        narration: { type: 'string', description: '可选旁白字幕，播放时显示在画面下方' }
+      },
+      required: ['name']
+    }
+  },
+  execute: async (args) => {
+    const name = typeof args.name === 'string' ? args.name.trim().slice(0, 80) : ''
+    if (!name) return { error: '需要提供场景名称' }
+    const narration = typeof args.narration === 'string' ? args.narration.trim().slice(0, 500) : ''
+    try {
+      const scene = scenePlayer.captureScene(name, narration)
+      await scenesStore.addScene(scene)
+      return { status: 'ok', id: scene.id, name, hint: '场景已保存，可在底部工具栏「教学场景」面板中查看、排序与播放' }
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : '地球尚未就绪，无法捕获当前画面' }
+    }
+  }
+})
+
+aiStore.registerTool({
+  definition: {
+    name: 'list_scenes',
+    description: '列出已保存的教学场景书签（含顺序、名称、旁白、图层与相机），用于回答“我存了哪些场景”或为录制视频复用位置。',
+    parameters: { type: 'object', properties: {} }
+  },
+  execute: async () => {
+    await scenesStore.hydrate()
+    return {
+      count: scenesStore.scenes.length,
+      scenes: scenesStore.scenes.map((scene, index) => ({
+        order: index + 1,
+        id: scene.id,
+        name: scene.name,
+        narration: scene.narration || undefined,
+        layers: scene.snapshot.overlays,
+        month: scene.snapshot.month,
+        solarSimulation: Boolean(scene.snapshot.simTime),
+        camera: {
+          longitude: Math.round(scene.snapshot.camera.longitude * 10000) / 10000,
+          latitude: Math.round(scene.snapshot.camera.latitude * 10000) / 10000,
+          height: Math.round(scene.snapshot.camera.height)
+        }
+      }))
+    }
+  }
+})
+
+const MAX_RECORD_STEPS = 12
+
+function parseRecordingStep(raw: unknown, index: number): RecordingStep | { error: string } {
+  if (typeof raw !== 'object' || raw === null) return { error: `第 ${index + 1} 步格式无效` }
+  const record = raw as Record<string, unknown>
+  const longitude = Number(record.longitude)
+  const latitude = Number(record.latitude)
+  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180 || !Number.isFinite(latitude) || latitude < -90 || latitude > 90) return { error: `第 ${index + 1} 步缺少有效经纬度` }
+  const height = record.height === undefined ? 600000 : Number(record.height)
+  if (!Number.isFinite(height) || height <= 0 || height > 20000000) return { error: `第 ${index + 1} 步视点高度无效` }
+  const clampedHeight = Math.min(12000000, Math.max(10000, height))
+  const heading = record.heading === undefined ? 0 : Number(record.heading)
+  const pitch = record.pitch === undefined ? -90 : Number(record.pitch)
+  if (!Number.isFinite(heading) || heading < -360 || heading > 360 || !Number.isFinite(pitch) || pitch < -90 || pitch > 90) return { error: `第 ${index + 1} 步朝向参数无效` }
+  const requestedOverlays = collectStrings(record.overlays)
+  const knownOverlays = thematicLayerCatalog.filter((layer) => requestedOverlays.includes(layer.id)).map((layer) => layer.id)
+  const month = record.month === undefined ? climateStore.month : Number(record.month)
+  if (!Number.isFinite(month) || month < 1 || month > 12) return { error: `第 ${index + 1} 步 month 需为 1-12` }
+  let simTime: { date: string; hour: number } | null = null
+  if (record.simTime !== null && record.simTime !== undefined) {
+    if (typeof record.simTime !== 'object') return { error: `第 ${index + 1} 步 simTime 格式无效` }
+    const time = record.simTime as Record<string, unknown>
+    if (typeof time.date !== 'string' || !isValidDate(time.date)) return { error: `第 ${index + 1} 步 simTime.date 需为合法 YYYY-MM-DD` }
+    const hour = time.hour === undefined ? 12 : Number(time.hour)
+    if (!Number.isFinite(hour) || hour < 0 || hour >= 24) return { error: `第 ${index + 1} 步 simTime.hour 需为 0-24` }
+    simTime = { date: time.date, hour }
+  }
+  const markers = Array.isArray(record.markers)
+    ? record.markers.flatMap((item) => {
+        if (typeof item !== 'object' || item === null) return []
+        const entry = item as Record<string, unknown>
+        const name = typeof entry.name === 'string' ? entry.name.trim().slice(0, 200) : ''
+        const longitude = Number(entry.longitude)
+        const latitude = Number(entry.latitude)
+        if (!name || !Number.isFinite(longitude) || longitude < -180 || longitude > 180 || !Number.isFinite(latitude) || latitude < -90 || latitude > 90) return []
+        return [{ name, longitude, latitude }]
+      })
+    : []
+  const shapes = Array.isArray(record.shapes)
+    ? record.shapes.flatMap((item) => {
+        if (typeof item !== 'object' || item === null) return []
+        const entry = item as Record<string, unknown>
+        if (entry.kind !== 'polyline' && entry.kind !== 'polygon') return []
+        const positions = parsePositions(entry.points, entry.kind === 'polygon' ? 3 : 2)
+        if (!positions) return []
+        const name = typeof entry.name === 'string' ? entry.name.trim().slice(0, 200) : ''
+        return [{ kind: entry.kind as 'polyline' | 'polygon', name, positions }]
+      })
+    : []
+  const dwellMs = record.dwellMs === undefined ? 6000 : Number(record.dwellMs)
+  const flyDurationMs = record.flyMs === undefined ? 3500 : Number(record.flyMs)
+  return {
+    name: typeof record.name === 'string' && record.name.trim() ? record.name.trim().slice(0, 80) : `第 ${index + 1} 幕`,
+    narration: typeof record.narration === 'string' ? record.narration.trim().slice(0, 500) : '',
+    camera: { longitude, latitude, height: clampedHeight, heading, pitch },
+    basemapId: store.selectedLayerId,
+    overlays: knownOverlays,
+    month: Math.round(month),
+    simTime,
+    dwellMs: Math.min(60000, Math.max(1000, dwellMs)),
+    flyDurationMs: Math.min(15000, Math.max(500, flyDurationMs)),
+    markers,
+    shapes
+  }
+}
+
+aiStore.registerTool({
+  definition: {
+    name: 'record_video',
+    description: '按剧本自动录制教学视频：依次飞到各场景、开关图层、叠加标注与旁白字幕，完成后保存为视频文件（自动存到系统「影片/GuEarth」）。用户说“帮我录一个XX的介绍视频/微课”时使用，把完整剧本通过 steps 一次性传入，不要逐步调用其他工具执行。',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: '视频标题，将显示在画面左上角' },
+        steps: {
+          type: 'array',
+          description: '剧本步骤（3-8 幕为宜，按播放顺序排列）',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: '本幕名称（如“胡焕庸线”）' },
+              longitude: { type: 'number', description: '本幕画面中心点经度（WGS-84，讲解目标始终保持居中）' },
+              latitude: { type: 'number', description: '本幕画面中心点纬度（WGS-84，讲解目标始终保持居中）' },
+              height: { type: 'number', description: '本幕视点高度（米），默认 600000。宁远勿近，观众要看清地理格局而非街道：国家/大区域尺度 800000-3000000，省域/城市群 200000-800000，单个城市 80000-200000，地貌细节也不低于 15000' },
+              heading: { type: 'number', description: '可选朝向角（度，默认 0）' },
+              pitch: { type: 'number', description: '可选俯仰角（度，-90 正俯视为默认，看地形起伏可用 -55 至 -70，中心点仍保持画面居中）' },
+              overlays: { type: 'array', description: '本幕开启的教学图层 id 列表（未列出的图层会被关闭），可选项：' + thematicLayerCatalog.map((layer) => `${layer.id}（${layer.name}）`).join('、'), items: { type: 'string' } },
+              month: { type: 'number', description: '可选专题月份 1-12（配合季节性图层对比 1 月/7 月）' },
+              simTime: { type: 'object', description: '可选昼夜模拟 { date: "YYYY-MM-DD", hour: 北京时间 0-24 }，如夏至 2026-06-22', properties: { date: { type: 'string' }, hour: { type: 'number' } } },
+              markers: { type: 'array', description: '命名标记点数组：本幕讲解到的具体地点务必标注（名称用规范地名），便于观众看清讲解位置', items: { type: 'object', properties: { name: { type: 'string' }, longitude: { type: 'number' }, latitude: { type: 'number' } }, required: ['name', 'longitude', 'latitude'] } },
+              shapes: { type: 'array', description: '可选线/多边形数组（如胡焕庸线、区域边界）', items: { type: 'object', properties: { kind: { type: 'string', enum: ['polyline', 'polygon'] }, name: { type: 'string' }, points: { type: 'array', items: { type: 'object', properties: { longitude: { type: 'number' }, latitude: { type: 'number' } }, required: ['longitude', 'latitude'] } } }, required: ['kind', 'points'] } },
+              narration: { type: 'string', description: '本幕旁白字幕，1-3 句精炼讲解' },
+              dwellMs: { type: 'number', description: '可选本幕停留毫秒数（默认 6000，建议 4000-10000）' },
+              flyMs: { type: 'number', description: '可选飞往本幕的飞行时长毫秒数（默认 3500）' }
+            },
+            required: ['longitude', 'latitude']
+          }
+        }
+      },
+      required: ['steps']
+    }
+  },
+  execute: async (args) => {
+    if (!Array.isArray(args.steps) || !args.steps.length) return { error: 'steps 需为非空数组' }
+    if (args.steps.length > MAX_RECORD_STEPS) return { error: `单次录制最多 ${MAX_RECORD_STEPS} 幕，请精简剧本` }
+    const title = typeof args.title === 'string' && args.title.trim() ? args.title.trim().slice(0, 80) : '地理教学视频'
+    const steps: RecordingStep[] = []
+    for (let index = 0; index < args.steps.length; index += 1) {
+      const step = parseRecordingStep(args.steps[index], index)
+      if ('error' in step) return { error: step.error }
+      steps.push(step)
+    }
+    const result = await scenePlayer.recordVideo(title, steps)
+    if ('error' in result) return { error: result.error }
+    return {
+      status: 'started',
+      title,
+      totalSteps: result.totalSteps,
+      estimatedSeconds: result.estimatedSeconds,
+      message: `录制已在后台开始，共 ${result.totalSteps} 幕，约 ${result.estimatedSeconds} 秒；完成后自动保存到系统「影片/GuEarth」文件夹并打开所在位置。期间用户可按 Esc 中止（已录制部分仍会保存）。`
+    }
+  }
+})
+
+aiStore.registerTool({
+  definition: {
+    name: 'get_recording_status',
+    description: '查询自动录制视频的进度：准备中/录制中第几幕/保存中/已完成（含保存路径）/失败。用户询问录制进度或录制久久未结束时使用。',
+    parameters: { type: 'object', properties: {} }
+  },
+  execute: async () => {
+    const recording = scenesStore.recording
+    return {
+      state: recording.state,
+      title: recording.title || undefined,
+      currentStep: recording.currentStep,
+      totalSteps: recording.totalSteps,
+      videoPath: recording.videoPath || undefined,
+      error: recording.error || undefined,
+      cancelled: recording.cancelled || undefined
+    }
+  }
+})
+
 onMounted(async () => {
   void updaterStore.hydrate()
+  void scenesStore.hydrate()
   try {
     const installedFonts = await window.guEarth.system.fonts()
     const existingFonts = shapes.value.map((shape) => shape.fontFamily)
@@ -556,6 +763,43 @@ function handleToggleLab(): void {
   isLabOpen.value = !isLabOpen.value
 }
 
+function handleOpenScenes(): void {
+  aiStore.setPanelOpen(false)
+  store.setLayerPanelOpen(false)
+  void scenesStore.hydrate()
+  isScenesPanelOpen.value = !isScenesPanelOpen.value
+}
+
+async function handleSaveScene(name: string, narration: string): Promise<void> {
+  try {
+    const scene = scenePlayer.captureScene(name, narration)
+    await scenesStore.addScene(scene)
+  } catch (error) {
+    message.warning(error instanceof Error ? error.message : '地球尚未就绪，暂时无法保存场景')
+  }
+}
+
+function handlePreviewScene(id: string): void {
+  const scene = scenesStore.scenes.find((item) => item.id === id)
+  if (scene) void scenePlayer.previewScene(scene)
+}
+
+async function handleUpdateScene(id: string, changes: SceneEditPayload): Promise<void> {
+  await scenesStore.updateScene(id, { name: changes.name, narration: changes.narration, dwellMs: Math.round(changes.dwellSeconds * 1000) })
+}
+
+function handleMoveScene(id: string, offset: -1 | 1): void {
+  void scenesStore.moveScene(id, offset)
+}
+
+function handlePlayScenes(mode: 'manual' | 'auto'): void {
+  if (!scenesStore.scenes.length) return
+  drawingStore.setActiveTool(null)
+  drawingStore.setSelectedShapeId(null)
+  isScenesPanelOpen.value = false
+  void scenePlayer.play({ scenes: scenesStore.scenes, mode, title: '教学演示' })
+}
+
 function handleTool(tool: DrawTool): void {
   const next = activeTool.value === tool ? null : tool
   drawingStore.setSelectedShapeId(null)
@@ -605,6 +849,7 @@ function deleteSelectedShape(): void {
       <FrontalCyclone v-if="thematicOverlays['frontal-cyclone']" :viewer="viewer" />
       <TyphoonOverlay v-if="thematicOverlays['typhoon']" :viewer="viewer" />
       <WalkerCirculationOverlay v-if="thematicOverlays['enso']" :viewer="viewer" :phase="climateStore.ensoPhase" />
+      <template v-if="!scenesStore.isPresenting">
       <GlobeToolbar
         :active-tool="activeTool"
         :shape-count="shapes.length"
@@ -618,6 +863,7 @@ function deleteSelectedShape(): void {
         @open-annotations="handleOpenAnnotations"
         @open-assistant="handleOpenAssistant"
         @open-setup-guide="handleOpenSetupGuide"
+        @open-scenes="handleOpenScenes"
         @home="handleHome"
         @tool="handleTool"
         @clear-shapes="handleClearShapes"
@@ -696,6 +942,20 @@ function deleteSelectedShape(): void {
         @credential-save="handleCredentialSave"
         @credential-clear="handleCredentialClear"
       />
+      </template>
+      <SceneBookmarksPanel
+        :open="isScenesPanelOpen"
+        :scenes="scenesStore.scenes"
+        :save-error="scenesStore.saveError"
+        @close="isScenesPanelOpen = false"
+        @save="handleSaveScene"
+        @preview="handlePreviewScene"
+        @update="handleUpdateScene"
+        @remove="scenesStore.removeScene"
+        @move="handleMoveScene"
+        @play="handlePlayScenes"
+      />
+      <ScenePlayerOverlay :player="scenePlayer.playerState" @next="scenePlayer.next()" @stop="scenePlayer.stop()" />
     </div>
   </a-config-provider>
 </template>
