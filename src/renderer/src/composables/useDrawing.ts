@@ -96,19 +96,39 @@ function isGroundPolylineSupported(viewer: Cesium.Viewer): boolean {
   return viewer.scene.verticalExaggeration === 1
 }
 
-function terrainSurfacePositions(viewer: Cesium.Viewer, positions: Cesium.Cartesian3[]): Cesium.Cartesian3[] {
-  return positions.map((position) => {
-    const cartographic = Cesium.Cartographic.fromCartesian(position)
+function terrainPath(positions: Cesium.Cartesian3[]): Cesium.Cartographic[] {
+  const points = positions.map((position) => Cesium.Cartographic.fromCartesian(position))
+  const spacing = Math.max(200, pathDistance(positions) / 512)
+  const path: Cesium.Cartographic[] = []
+  for (let index = 1; index < points.length; index += 1) {
+    const from = points[index - 1]
+    const to = points[index]
+    const geodesic = new Cesium.EllipsoidGeodesic(from, to)
+    const segments = Math.max(1, Math.ceil(geodesic.surfaceDistance / spacing))
+    if (!path.length) path.push(from)
+    for (let segment = 1; segment < segments; segment += 1) {
+      const fraction = segment / segments
+      const point = geodesic.interpolateUsingFraction(fraction)
+      point.height = from.height + (to.height - from.height) * fraction
+      path.push(point)
+    }
+    path.push(to)
+  }
+  return path
+}
+
+function terrainSurfacePositions(viewer: Cesium.Viewer, path: Cesium.Cartographic[]): Cesium.Cartesian3[] {
+  return path.map((cartographic) => {
     const terrainHeight = viewer.scene.globe.getHeight(cartographic)
     const exaggeration = viewer.scene.verticalExaggeration
     const height = (typeof terrainHeight === 'number' && Number.isFinite(terrainHeight) ? terrainHeight : cartographic.height / exaggeration) * exaggeration
-    return Cesium.Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, height + 1)
+    return Cesium.Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, height + 5)
   })
 }
 
 function previewPolylinePositions(viewer: Cesium.Viewer, positions: Cesium.Cartesian3[]): Cesium.Cartesian3[] {
   const sanitized = sanitizePositions(positions)
-  return isGroundPolylineSupported(viewer) ? sanitized : terrainSurfacePositions(viewer, sanitized)
+  return isGroundPolylineSupported(viewer) ? sanitized : terrainSurfacePositions(viewer, terrainPath(sanitized))
 }
 
 function polylineOptions(viewer: Cesium.Viewer, positions: Cesium.Cartesian3[], width: number, color: Cesium.Color): Cesium.PolylineGraphics.ConstructorOptions | undefined {
@@ -116,7 +136,8 @@ function polylineOptions(viewer: Cesium.Viewer, positions: Cesium.Cartesian3[], 
   if (sanitized.length < 2) return undefined
   if (isGroundPolylineSupported(viewer)) return { positions: sanitized, width, material: color, clampToGround: true }
   const material = new Cesium.ColorMaterialProperty(color)
-  return { positions: new Cesium.CallbackProperty(() => terrainSurfacePositions(viewer, sanitized), false), width, material, depthFailMaterial: material }
+  const path = terrainPath(sanitized)
+  return { positions: new Cesium.CallbackProperty(() => terrainSurfacePositions(viewer, path), false), width, material, depthFailMaterial: material }
 }
 
 function measurementFor(kind: DrawnShape['kind'], cartesians: Cesium.Cartesian3[]): string {
@@ -196,7 +217,7 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
     } else if (shape.kind === 'polygon') {
       options.position = surfacePosition(centroidOf(cartesians))
       const hierarchy = sanitizePositions(cartesians)
-      if (hierarchy.length >= 3) options.polygon = { hierarchy: new Cesium.PolygonHierarchy(hierarchy), material: color.withAlpha(0.25), perPositionHeight: !isGroundPolylineSupported(current) }
+      if (hierarchy.length >= 3) options.polygon = { hierarchy: new Cesium.PolygonHierarchy(hierarchy), material: color.withAlpha(0.25) }
       const polyline = polylineOptions(current, ringOf(cartesians), shape.lineWidth, color)
       if (polyline) options.polyline = polyline
     } else if (shape.kind === 'arrow') {
@@ -205,7 +226,7 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
       const polyline = polylineOptions(current, geometry.shaft, shape.lineWidth, color)
       if (polyline) options.polyline = polyline
       const head = sanitizePositions(geometry.head)
-      if (head.length >= 3) options.polygon = { hierarchy: new Cesium.PolygonHierarchy(head), material: color, perPositionHeight: !isGroundPolylineSupported(current), outline: true, outlineColor: color, outlineWidth: shape.lineWidth }
+      if (head.length >= 3) options.polygon = { hierarchy: new Cesium.PolygonHierarchy(head), material: color, outline: true, outlineColor: color, outlineWidth: shape.lineWidth }
     } else {
       options.position = surfacePosition(cartesians[0])
       options.point = {
@@ -297,10 +318,9 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
       options.polygon = {
         hierarchy: new Cesium.CallbackProperty(() => new Cesium.PolygonHierarchy(sanitizePositions(arrowGeometry(previewPositions()).head)), false),
         material: SHAPE_COLOR.withAlpha(0.7),
-        perPositionHeight: !isGroundPolylineSupported(current)
       }
     } else if (isPolygonTool()) {
-      options.polygon = { hierarchy: new Cesium.CallbackProperty(() => new Cesium.PolygonHierarchy(sanitizePositions(previewPositions())), false), material: SHAPE_COLOR.withAlpha(0.15), perPositionHeight: !isGroundPolylineSupported(current) }
+      options.polygon = { hierarchy: new Cesium.CallbackProperty(() => new Cesium.PolygonHierarchy(sanitizePositions(previewPositions())), false), material: SHAPE_COLOR.withAlpha(0.15) }
       options.polyline = {
         positions: new Cesium.CallbackProperty(() => previewPolylinePositions(current, ringOf(previewPositions())), false),
         width: 2,
