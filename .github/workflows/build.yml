@@ -73,8 +73,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          notes_args=(--generate-notes)
+          if [ -f "changelogs/v${{ steps.version.outputs.version }}.md" ]; then
+            notes_args=(--notes-file "changelogs/v${{ steps.version.outputs.version }}.md")
+          fi
           gh release create "v${{ steps.version.outputs.version }}" \
             --target "$GITHUB_SHA" \
             --title "GuEarth v${{ steps.version.outputs.version }}" \
-            --generate-notes \
+            "${notes_args[@]}" \
             dist/*.exe
