@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { AimOutlined, AppstoreOutlined, ClearOutlined, EnvironmentOutlined, ExperimentOutlined, EyeOutlined, GatewayOutlined, HomeOutlined, NodeIndexOutlined, RobotOutlined, TagsOutlined } from '@ant-design/icons-vue'
+import { AimOutlined, AppstoreOutlined, ArrowRightOutlined, ClearOutlined, EnvironmentOutlined, ExperimentOutlined, EyeOutlined, FontSizeOutlined, GatewayOutlined, HomeOutlined, NodeIndexOutlined, RobotOutlined, TagsOutlined } from '@ant-design/icons-vue'
 import { Button, Tooltip } from 'ant-design-vue'
 import type { Component } from 'vue'
 import type { DrawTool } from '@renderer/stores/drawing'
@@ -27,7 +27,9 @@ defineEmits<{
 const tools: { id: DrawTool; label: string; icon: Component }[] = [
   { id: 'point', label: '绘制点', icon: EnvironmentOutlined },
   { id: 'line', label: '绘制线', icon: NodeIndexOutlined },
-  { id: 'polygon', label: '绘制多边形', icon: GatewayOutlined }
+  { id: 'polygon', label: '绘制多边形', icon: GatewayOutlined },
+  { id: 'arrow', label: '绘制箭头', icon: ArrowRightOutlined },
+  { id: 'text', label: '添加文本框', icon: FontSizeOutlined }
 ]
 
 const levelViewIcon = computed(() => (props.levelViewActive ? EyeOutlined : AimOutlined))

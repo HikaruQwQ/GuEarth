@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { CloseOutlined, DeleteOutlined, EditOutlined, EnvironmentOutlined, FolderAddOutlined, FolderOutlined, GatewayOutlined, NodeIndexOutlined } from '@ant-design/icons-vue'
+import { ArrowRightOutlined, CloseOutlined, DeleteOutlined, EditOutlined, EnvironmentOutlined, FontSizeOutlined, FolderAddOutlined, FolderOutlined, GatewayOutlined, NodeIndexOutlined } from '@ant-design/icons-vue'
 import { message, Modal } from 'ant-design-vue'
 import type { DataNode, EventDataNode } from 'ant-design-vue/es/tree'
 import type { Component } from 'vue'
@@ -23,8 +23,8 @@ const emit = defineEmits<{
 }>()
 
 const drawingStore = useDrawingStore()
-const kindLabels: Record<DrawnShape['kind'], string> = { point: '点', polyline: '线', polygon: '面' }
-const kindIcons: Record<DrawnShape['kind'], Component> = { point: EnvironmentOutlined, polyline: NodeIndexOutlined, polygon: GatewayOutlined }
+const kindLabels: Record<DrawnShape['kind'], string> = { point: '点', polyline: '线', polygon: '面', arrow: '箭头', text: '文本框' }
+const kindIcons: Record<DrawnShape['kind'], Component> = { point: EnvironmentOutlined, polyline: NodeIndexOutlined, polygon: GatewayOutlined, arrow: ArrowRightOutlined, text: FontSizeOutlined }
 const folderDialogOpen = ref(false)
 const folderDialogMode = ref<'create' | 'rename'>('create')
 const folderTargetId = ref<string | null>(null)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Modal } from 'ant-design-vue'
 import { ReloadOutlined } from '@ant-design/icons-vue'
@@ -7,7 +7,7 @@ import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { useGlobeStore } from '@renderer/stores/globe'
 import { useFailureStore } from '@renderer/stores/failure'
-import { useDrawingStore, type DrawTool, type GeoPosition } from '@renderer/stores/drawing'
+import { DEFAULT_DRAW_STYLE, useDrawingStore, type DrawnShape, type DrawTool, type GeoPosition } from '@renderer/stores/drawing'
 import { useAiStore } from '@renderer/stores/ai'
 import { thematicLayerCatalog, useClimateStore } from '@renderer/stores/climate'
 import { useSolarStore } from '@renderer/stores/solar'
@@ -21,6 +21,8 @@ import GlobeToolbar from '@renderer/components/GlobeToolbar.vue'
 import CameraStatus from '@renderer/components/CameraStatus.vue'
 import LayerPanel from '@renderer/components/LayerPanel.vue'
 import AnnotationPanel from '@renderer/components/AnnotationPanel.vue'
+import DrawingEditToolbar from '@renderer/components/DrawingEditToolbar.vue'
+import InlineTextEditor from '@renderer/components/InlineTextEditor.vue'
 import PlaceSearchBox from '@renderer/components/PlaceSearchBox.vue'
 import WindParticles from '@renderer/components/WindParticles.vue'
 import MonthTimeline from '@renderer/components/MonthTimeline.vue'
@@ -69,7 +71,7 @@ const { activeTool, shapes, entries, selectedShapeId, saveError } = storeToRefs(
 const aiStore = useAiStore()
 const failureStore = useFailureStore()
 const isAnnotationPanelOpen = ref(false)
-const annotationDraft = ref('')
+const systemFonts = ref(['Arial', 'Segoe UI', 'Microsoft YaHei'])
 const selectedShape = computed(() => shapes.value.find((shape) => shape.id === selectedShapeId.value) ?? null)
 const levelSwitcherVisible = computed(() => isGlobeReady.value && camera.value.height < 5000000)
 const showGlobeLoading = computed(() => !isGlobeReady.value && !globeError.value)
@@ -78,6 +80,8 @@ const labActive = computed(() => climateStore.hasActiveOverlay || solarStore.act
 const drawHint = computed(() => {
   if (!activeTool.value) return ''
   if (activeTool.value === 'timezone') return '单击选取两个地点对比地方时 · Esc 退出'
+  if (activeTool.value === 'text') return '在地球上单击放置文本框 · Esc 退出'
+  if (activeTool.value === 'arrow') return '依次单击箭头起点和终点 · Esc 取消'
   return activeTool.value === 'point' ? '在地球上单击以放置点' : '单击加点 · 双击或右键完成 · Esc 取消'
 })
 
@@ -213,7 +217,7 @@ aiStore.registerTool({
       const positions = parsePositions([record], 1)
       if (!name || !positions) { skipped += 1; continue }
       const id = crypto.randomUUID()
-      drawingStore.addShape({ id, kind: 'point', positions, annotation: name, createdAt: Date.now() })
+      drawingStore.addShape({ ...DEFAULT_DRAW_STYLE, id, kind: 'point', positions, annotation: name, createdAt: Date.now() })
       added.push({ id, name, longitude: positions[0].longitude, latitude: positions[0].latitude })
     }
     if (!added.length) return { error: '没有有效标记：需要名称与 WGS-84 经纬度坐标' }
@@ -255,7 +259,7 @@ aiStore.registerTool({
     const positions = parsePositions(args.points, kind === 'polygon' ? 3 : 2)
     if (!positions) return { error: `坐标无效：${kind === 'polygon' ? '多边形需要至少 3 个' : '线需要至少 2 个'}有效且不重复的经纬度顶点` }
     const name = typeof args.name === 'string' ? args.name.trim().slice(0, 200) : ''
-    const shape = { id: crypto.randomUUID(), kind, positions, annotation: name, createdAt: Date.now() }
+    const shape = { ...DEFAULT_DRAW_STYLE, id: crypto.randomUUID(), kind, positions, annotation: name, createdAt: Date.now() }
     drawingStore.addShape(shape)
     const measurement = measureShape(shape)
     return { status: 'ok', id: shape.id, kind, name: name || undefined, vertices: positions.length, measurement: measurement || undefined }
@@ -564,8 +568,14 @@ aiStore.registerTool({
   }
 })
 
-watch(selectedShape, (shape) => {
-  annotationDraft.value = shape?.annotation ?? ''
+onMounted(async () => {
+  try {
+    const installedFonts = await window.guEarth.system.fonts()
+    const existingFonts = shapes.value.map((shape) => shape.fontFamily)
+    systemFonts.value = [...new Set([...installedFonts, ...existingFonts])].sort((first, second) => first.localeCompare(second))
+  } catch {
+    systemFonts.value = ['Arial', 'Segoe UI', 'Microsoft YaHei']
+  }
 })
 
 function handleOpenLayers(): void {
@@ -652,7 +662,9 @@ function handleToggleLab(): void {
 }
 
 function handleTool(tool: DrawTool): void {
-  drawingStore.setActiveTool(activeTool.value === tool ? null : tool)
+  const next = activeTool.value === tool ? null : tool
+  drawingStore.setSelectedShapeId(null)
+  drawingStore.setActiveTool(next)
 }
 
 function handleOpenAnnotations(): void {
@@ -668,23 +680,24 @@ function handleFlyShape(id: string): void {
   if (shape) flyToShape(shape)
 }
 
-function saveSelectedAnnotation(): void {
-  if (!selectedShape.value) return
-  drawingStore.updateAnnotation(selectedShape.value.id, annotationDraft.value.trim())
-  drawingStore.setSelectedShapeId(null)
+function updateSelectedShape(changes: Partial<Pick<DrawnShape, 'annotation' | 'color' | 'textColor' | 'fontFamily' | 'fontSize' | 'textFrame' | 'lineWidth'>>): void {
+  if (selectedShape.value) drawingStore.updateShape(selectedShape.value.id, changes)
 }
 
 function deleteSelectedShape(): void {
   if (!selectedShape.value) return
-  const id = selectedShape.value.id
-  const name = selectedShape.value.annotation || '未命名标注'
-  Modal.confirm({ title: `删除标注「${name}」？`, okText: '删除', okButtonProps: { danger: true }, cancelText: '取消', onOk: () => drawingStore.removeShape(id) })
+  drawingStore.removeShape(selectedShape.value.id)
 }
 </script>
 
 <template>
   <div class="app">
     <div ref="globeContainer" class="globe" :class="{ drawing: activeTool }"></div>
+    <InlineTextEditor
+      :viewer="viewer"
+      :shape="selectedShape?.kind === 'text' ? selectedShape : null"
+      @update="(annotation) => updateSelectedShape({ annotation })"
+    />
     <div v-if="showGlobeLoading" class="globe-loading">
       <a-spin :spinning="!globeLoadTimedOut" size="small" />
       <span class="globe-loading-text">{{ globeLoadTimedOut ? '地图加载较慢，请检查网络' : '正在加载地图…' }}</span>
@@ -709,6 +722,13 @@ function deleteSelectedShape(): void {
       @toggle-level-view="handleLevelViewToggle"
       @toggle-lab="handleToggleLab"
     />
+    <DrawingEditToolbar
+      v-if="selectedShape && !activeTool"
+      :shape="selectedShape"
+      :fonts="systemFonts"
+      @change="updateSelectedShape"
+      @remove="deleteSelectedShape"
+    />
     <TeachingLab :open="isLabOpen" @close="isLabOpen = false" />
     <PlaceSearchBox @select="flyToPlace" />
     <MonthTimeline />
@@ -731,14 +751,6 @@ function deleteSelectedShape(): void {
       @fly="handleFlyShape"
       @remove="drawingStore.removeShape"
     />
-    <a-modal :open="Boolean(selectedShape)" title="编辑标注" :width="380" @cancel="drawingStore.setSelectedShapeId(null)">
-      <a-input v-model:value="annotationDraft" :maxlength="200" placeholder="标注名称" @press-enter="saveSelectedAnnotation" />
-      <template #footer>
-        <a-button danger @click="deleteSelectedShape">删除</a-button>
-        <a-button @click="drawingStore.setSelectedShapeId(null)">取消</a-button>
-        <a-button type="primary" @click="saveSelectedAnnotation">保存</a-button>
-      </template>
-    </a-modal>
     <LayerPanel
       :open="isLayerPanelOpen"
       :layers="layers"
@@ -827,4 +839,5 @@ function deleteSelectedShape(): void {
   pointer-events: none;
   z-index: 11;
 }
+
 </style>

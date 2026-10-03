@@ -53,9 +53,15 @@ export interface GeoPosition {
 
 export interface StoredShape {
   id: string
-  kind: 'point' | 'polyline' | 'polygon'
+  kind: 'point' | 'polyline' | 'polygon' | 'arrow' | 'text'
   positions: GeoPosition[]
   annotation: string
+  color: string
+  textColor: string
+  fontFamily: string
+  fontSize: number
+  textFrame: boolean
+  lineWidth: number
   createdAt: number
 }
 
@@ -249,6 +255,9 @@ const api = {
   annotations: {
     load: (): Promise<AnnotationDocument> => ipcRenderer.invoke('annotations:load'),
     save: (document: AnnotationDocument): Promise<void> => ipcRenderer.invoke('annotations:save', document)
+  },
+  system: {
+    fonts: (): Promise<string[]> => ipcRenderer.invoke('system:fonts')
   },
   places: {
     search: (keyword: string, provider?: PlaceSearchProvider): Promise<PlaceSearchResult> => ipcRenderer.invoke('places:search', keyword, provider)

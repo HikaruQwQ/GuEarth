@@ -1,4 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain, net, protocol } from 'electron'
+import { execFileSync } from 'child_process'
 import { join } from 'path'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'fs'
 import { createHash } from 'crypto'
@@ -268,7 +269,7 @@ async function handleTileProtocol(request: Request): Promise<Response> {
 function normalizeShape(value: unknown): StoredShape {
   if (!isRecord(value)) throw new Error('无效的标注数据')
   const id = safeId(value.id)
-  if (value.kind !== 'point' && value.kind !== 'polyline' && value.kind !== 'polygon') throw new Error('无效的标注类型')
+  if (value.kind !== 'point' && value.kind !== 'polyline' && value.kind !== 'polygon' && value.kind !== 'arrow' && value.kind !== 'text') throw new Error('无效的标注类型')
   if (!Array.isArray(value.positions)) throw new Error('无效的标注坐标')
   const positions: GeoPosition[] = value.positions.map((item) => {
     if (!isRecord(item)) throw new Error('无效的标注坐标')
@@ -278,13 +279,23 @@ function normalizeShape(value: unknown): StoredShape {
     if (typeof height !== 'number' || !Number.isFinite(height) || height < -11000 || height > 20000) throw new Error('无效的标注坐标')
     return { longitude, latitude, height }
   })
-  const minimum = value.kind === 'point' ? 1 : value.kind === 'polyline' ? 2 : 3
+  const minimum = value.kind === 'point' || value.kind === 'text' ? 1 : value.kind === 'polygon' ? 3 : 2
   if (positions.length < minimum || positions.length > 500) throw new Error('无效的标注坐标')
+  const validColor = (color: unknown, fallback: string): string => typeof color === 'string' && /^#[\da-f]{6}$/i.test(color) ? color.toLowerCase() : fallback
+  const fontFamily = typeof value.fontFamily === 'string' && value.fontFamily.length <= 128 && /^[\p{L}\p{N} .,'()&_\-]+$/u.test(value.fontFamily) ? value.fontFamily : 'Arial'
+  const fontSize = typeof value.fontSize === 'number' && Number.isFinite(value.fontSize) ? Math.min(72, Math.max(8, value.fontSize)) : 13
+  const lineWidth = typeof value.lineWidth === 'number' && Number.isFinite(value.lineWidth) ? Math.min(12, Math.max(1, value.lineWidth)) : 3
   return {
     id,
     kind: value.kind,
     positions,
     annotation: typeof value.annotation === 'string' ? value.annotation.slice(0, 200) : '',
+    color: validColor(value.color, '#1677ff'),
+    textColor: validColor(value.textColor, '#ffffff'),
+    fontFamily,
+    fontSize,
+    textFrame: typeof value.textFrame === 'boolean' ? value.textFrame : false,
+    lineWidth,
     createdAt: typeof value.createdAt === 'number' && Number.isFinite(value.createdAt) ? value.createdAt : Date.now()
   }
 }
@@ -344,6 +355,43 @@ function saveAnnotations(): void {
 }
 
 function registerIpcHandlers(): void {
+  ipcMain.handle('system:fonts', (): string[] => {
+    const families = new Set(['Arial', 'Segoe UI', 'Microsoft YaHei'])
+    const registryKeys = [
+      'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts',
+      'HKCU\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts'
+    ]
+    if (process.platform === 'win32') {
+      for (const key of registryKeys) {
+        try {
+          const result = execFileSync('reg.exe', ['query', key], { encoding: 'utf8', windowsHide: true, timeout: 5000 })
+          for (const line of result.split(/\r?\n/)) {
+            const match = line.match(/^\s+(.+?)\s+REG_\w+\s+/)
+            if (!match) continue
+            for (const family of match[1].replace(/\s*\([^)]*\)\s*$/, '').split(/\s*&\s*/)) {
+              const name = family.trim()
+              if (name && name.length <= 128) families.add(name)
+            }
+          }
+        } catch {
+          continue
+        }
+      }
+    } else {
+      try {
+        const result = execFileSync('fc-list', ['--format', '%{family}\n'], { encoding: 'utf8', windowsHide: true, timeout: 5000 })
+        for (const line of result.split(/\r?\n/)) {
+          for (const family of line.split(',')) {
+            const name = family.trim()
+            if (name && name.length <= 128) families.add(name)
+          }
+        }
+      } catch {
+        void 0
+      }
+    }
+    return [...families].sort((first, second) => first.localeCompare(second))
+  })
   ipcMain.handle('settings:get', () => settingsSnapshot())
   ipcMain.handle('settings:update', (_event, patch: GuEarthSettingsPatch): GuEarthSettings => {
     if (!isRecord(patch)) throw new Error('无效的设置')

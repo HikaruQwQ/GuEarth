@@ -3,8 +3,18 @@ import { defineStore } from 'pinia'
 import type { AnnotationDocument, AnnotationEntry } from '../../../preload'
 import { useFailureStore } from './failure'
 
-export type ShapeKind = 'point' | 'polyline' | 'polygon'
-export type DrawTool = 'point' | 'line' | 'polygon' | 'timezone'
+export type ShapeKind = 'point' | 'polyline' | 'polygon' | 'arrow' | 'text'
+export type DrawTool = 'point' | 'line' | 'polygon' | 'arrow' | 'text' | 'timezone'
+export type DrawFontFamily = string
+
+export const DEFAULT_DRAW_STYLE = {
+  color: '#1677ff',
+  textColor: '#ffffff',
+  fontFamily: 'Arial' as DrawFontFamily,
+  fontSize: 13,
+  textFrame: false,
+  lineWidth: 3
+}
 
 export interface GeoPosition {
   longitude: number
@@ -12,12 +22,9 @@ export interface GeoPosition {
   height: number
 }
 
-export interface DrawnShape {
-  id: string
+export interface DrawnShape extends Omit<import('../../../preload').StoredShape, 'kind' | 'positions'> {
   kind: ShapeKind
   positions: GeoPosition[]
-  annotation: string
-  createdAt: number
 }
 
 function apiAvailable(): boolean {
@@ -73,19 +80,24 @@ export const useDrawingStore = defineStore('drawing', () => {
   const selectedShapeId = ref<string | null>(null)
   const saveError = ref('')
   let pendingSave = Promise.resolve()
+  let saveTimer: ReturnType<typeof setTimeout> | undefined
 
   function persist(): void {
     if (!apiAvailable()) return
-    const snapshot: AnnotationDocument = {
-      shapes: JSON.parse(JSON.stringify(shapes.value)) as DrawnShape[],
-      entries: JSON.parse(JSON.stringify(entries.value)) as AnnotationEntry[]
-    }
-    pendingSave = pendingSave.catch(() => undefined).then(async () => {
-      await window.guEarth.annotations.save(snapshot)
-      saveError.value = ''
-    }).catch(() => {
-      saveError.value = '标注保存失败，请重试'
-    })
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => {
+      saveTimer = undefined
+      const snapshot: AnnotationDocument = {
+        shapes: JSON.parse(JSON.stringify(shapes.value)) as DrawnShape[],
+        entries: JSON.parse(JSON.stringify(entries.value)) as AnnotationEntry[]
+      }
+      pendingSave = pendingSave.catch(() => undefined).then(async () => {
+        await window.guEarth.annotations.save(snapshot)
+        saveError.value = ''
+      }).catch(() => {
+        saveError.value = '标注保存失败，请重试'
+      })
+    }, 120)
   }
 
   async function load(): Promise<void> {
@@ -114,10 +126,10 @@ export const useDrawingStore = defineStore('drawing', () => {
     persist()
   }
 
-  function updateAnnotation(id: string, annotation: string): void {
+  function updateShape(id: string, changes: Partial<Pick<DrawnShape, 'annotation' | 'color' | 'textColor' | 'fontFamily' | 'fontSize' | 'textFrame' | 'lineWidth'>>): void {
     const shape = shapes.value.find((item) => item.id === id)
     if (!shape) return
-    shape.annotation = annotation
+    Object.assign(shape, changes)
     persist()
   }
 
@@ -197,5 +209,5 @@ export const useDrawingStore = defineStore('drawing', () => {
 
   failureStore.registerRetry('annotations', load)
 
-  return { shapes, entries, activeTool, selectedShapeId, saveError, load, setActiveTool, setSelectedShapeId, addShape, updateAnnotation, removeShape, clearAll, addFolder, renameFolder, removeFolder, moveEntry }
+  return { shapes, entries, activeTool, selectedShapeId, saveError, load, setActiveTool, setSelectedShapeId, addShape, updateShape, removeShape, clearAll, addFolder, renameFolder, removeFolder, moveEntry }
 })

@@ -1,6 +1,6 @@
 import { onBeforeUnmount, onMounted, watch, type Ref } from 'vue'
 import * as Cesium from 'cesium'
-import { useDrawingStore, type DrawTool, type DrawnShape, type GeoPosition } from '@renderer/stores/drawing'
+import { DEFAULT_DRAW_STYLE, useDrawingStore, type DrawTool, type DrawnShape, type GeoPosition } from '@renderer/stores/drawing'
 import { thematicLayerCatalog } from '@renderer/stores/climate'
 import { useFeatureFocusStore, type FocusedFeature } from '@renderer/stores/featureFocus'
 
@@ -83,6 +83,27 @@ function measurementFor(kind: DrawnShape['kind'], cartesians: Cesium.Cartesian3[
   return ''
 }
 
+function arrowGeometry(cartesians: Cesium.Cartesian3[]): { shaft: Cesium.Cartesian3[]; head: Cesium.Cartesian3[] } {
+  if (cartesians.length < 2) return { shaft: cartesians, head: [] }
+  const start = cartesians[0]
+  const end = cartesians[cartesians.length - 1]
+  const distance = Cesium.Cartesian3.distance(start, end)
+  if (!Number.isFinite(distance) || distance < 1) return { shaft: [start, end], head: [] }
+  const direction = Cesium.Cartesian3.normalize(Cesium.Cartesian3.subtract(end, start, new Cesium.Cartesian3()), new Cesium.Cartesian3())
+  const headLength = Math.min(distance * 0.18, 200000)
+  const base = Cesium.Cartesian3.subtract(end, Cesium.Cartesian3.multiplyByScalar(direction, headLength, new Cesium.Cartesian3()), new Cesium.Cartesian3())
+  const normal = Cesium.Cartesian3.normalize(end, new Cesium.Cartesian3())
+  let side = Cesium.Cartesian3.cross(direction, normal, new Cesium.Cartesian3())
+  if (Cesium.Cartesian3.magnitudeSquared(side) < 1e-8) side = Cesium.Cartesian3.cross(direction, Cesium.Cartesian3.UNIT_Z, new Cesium.Cartesian3())
+  side = Cesium.Cartesian3.normalize(side, side)
+  const halfWidth = headLength * 0.48
+  const offset = Cesium.Cartesian3.multiplyByScalar(side, halfWidth, new Cesium.Cartesian3())
+  return {
+    shaft: [start, base],
+    head: [end, Cesium.Cartesian3.add(base, offset, new Cesium.Cartesian3()), Cesium.Cartesian3.subtract(base, offset, new Cesium.Cartesian3())]
+  }
+}
+
 export function measureShape(shape: DrawnShape): string {
   return measurementFor(shape.kind, shape.positions.map(toCartesian))
 }
@@ -119,20 +140,45 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
     removeEntity(shape.id)
     const cartesians = shape.positions.map(toCartesian)
     if (!cartesians.length) return
+    const color = Cesium.Color.fromCssColorString(shape.color) ?? SHAPE_COLOR
+    const textColor = Cesium.Color.fromCssColorString(shape.textColor) ?? Cesium.Color.WHITE
     const options: Cesium.Entity.ConstructorOptions = { id: shape.id }
     if (shape.kind === 'point') {
       options.position = surfacePosition(cartesians[0])
-      options.point = { color: SHAPE_COLOR, pixelSize: 10, outlineColor: Cesium.Color.WHITE, outlineWidth: 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND }
+      options.point = { color, pixelSize: 10, outlineColor: Cesium.Color.WHITE, outlineWidth: 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND }
     } else if (shape.kind === 'polyline') {
       options.position = surfacePosition(centroidOf(cartesians))
-      options.polyline = { positions: cartesians, width: 3, material: SHAPE_COLOR, clampToGround: true }
-    } else {
+      options.polyline = { positions: cartesians, width: shape.lineWidth, material: color, clampToGround: true }
+    } else if (shape.kind === 'polygon') {
       options.position = surfacePosition(centroidOf(cartesians))
-      options.polygon = { hierarchy: new Cesium.PolygonHierarchy(cartesians), material: SHAPE_COLOR.withAlpha(0.25) }
-      options.polyline = { positions: ringOf(cartesians), width: 2, material: SHAPE_COLOR, clampToGround: true }
+      options.polygon = { hierarchy: new Cesium.PolygonHierarchy(cartesians), material: color.withAlpha(0.25) }
+      options.polyline = { positions: ringOf(cartesians), width: shape.lineWidth, material: color, clampToGround: true }
+    } else if (shape.kind === 'arrow') {
+      const geometry = arrowGeometry(cartesians)
+      options.position = surfacePosition(cartesians[cartesians.length - 1])
+      options.polyline = { positions: geometry.shaft, width: shape.lineWidth, material: color, clampToGround: true }
+      options.polygon = { hierarchy: new Cesium.PolygonHierarchy(geometry.head), material: color, outline: true, outlineColor: color, outlineWidth: shape.lineWidth }
+    } else {
+      options.position = surfacePosition(cartesians[0])
+      options.point = {
+        color: Cesium.Color.TRANSPARENT,
+        outlineColor: Cesium.Color.TRANSPARENT,
+        pixelSize: 8,
+        show: !shape.annotation,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+      }
     }
-    const text = shape.annotation || measurementFor(shape.kind, cartesians)
-    if (text) options.label = { ...LABEL_STYLE, text }
+    const text = shape.kind === 'text' ? shape.annotation : shape.annotation || measurementFor(shape.kind, cartesians)
+    if (text) options.label = {
+      ...LABEL_STYLE,
+      text,
+      font: `${shape.fontSize}px ${shape.fontFamily}`,
+      fillColor: textColor,
+      show: shape.kind !== 'text' || store.selectedShapeId !== shape.id,
+      showBackground: shape.kind === 'text' && shape.textFrame,
+      backgroundColor: Cesium.Color.WHITE.withAlpha(0.94),
+      backgroundPadding: new Cesium.Cartesian2(8, 4)
+    }
     const entity = new Cesium.Entity(options)
     current.entities.add(entity)
     entities.set(shape.id, entity)
@@ -191,7 +237,18 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
       position: new Cesium.CallbackPositionProperty(draftAnchor, false),
       label: { ...LABEL_STYLE, text: new Cesium.CallbackProperty(draftMeasurement, false) }
     }
-    if (isPolygonTool()) {
+    if (tool === 'arrow') {
+      options.polyline = {
+        positions: new Cesium.CallbackProperty(() => arrowGeometry(previewPositions()).shaft, false),
+        width: DEFAULT_DRAW_STYLE.lineWidth,
+        material: SHAPE_COLOR.withAlpha(0.7),
+        clampToGround: true
+      }
+      options.polygon = {
+        hierarchy: new Cesium.CallbackProperty(() => new Cesium.PolygonHierarchy(arrowGeometry(previewPositions()).head), false),
+        material: SHAPE_COLOR.withAlpha(0.7)
+      }
+    } else if (isPolygonTool()) {
       options.polygon = { hierarchy: new Cesium.CallbackProperty(() => new Cesium.PolygonHierarchy(previewPositions()), false), material: SHAPE_COLOR.withAlpha(0.15) }
       options.polyline = { positions: new Cesium.CallbackProperty(() => ringOf(previewPositions()), false), width: 2, material: SHAPE_COLOR.withAlpha(0.6), clampToGround: true }
     } else {
@@ -202,12 +259,12 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
   }
 
   function commit(cartesians: Cesium.Cartesian3[]): void {
-    const kind = tool === 'point' ? 'point' : isPolygonTool() ? 'polygon' : 'polyline'
+    const kind: DrawnShape['kind'] = tool === 'point' ? 'point' : tool === 'text' ? 'text' : tool === 'arrow' ? 'arrow' : isPolygonTool() ? 'polygon' : 'polyline'
     const positions = dedupe(cartesians)
     cancelDraft()
     const id = crypto.randomUUID()
-    store.addShape({ id, kind, positions: positions.map(toGeo), annotation: '', createdAt: Date.now() })
-    if (kind === 'point' || tool === 'line' || tool === 'polygon') store.setSelectedShapeId(id)
+    store.addShape({ ...DEFAULT_DRAW_STYLE, id, kind, positions: positions.map(toGeo), annotation: '', textFrame: kind === 'text', createdAt: Date.now() })
+    store.setSelectedShapeId(id)
     tool = null
     store.setActiveTool(null)
   }
@@ -249,8 +306,12 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
     if (tool === 'timezone') return
     const position = pickAt(movement.position)
     if (!position) return
-    if (tool === 'point') {
+    if (tool === 'point' || tool === 'text') {
       commit([position])
+      return
+    }
+    if (tool === 'arrow' && draft.length) {
+      commit([draft[0], position])
       return
     }
     draft.push(position)
@@ -258,7 +319,7 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
   }
 
   function handleDoubleClick(): void {
-    if (!tool || tool === 'point') return
+    if (!tool || tool === 'point' || tool === 'text' || tool === 'arrow') return
     const positions = dedupe([...draft])
     const minimum = isPolygonTool() ? 3 : 2
     if (positions.length < minimum) return
@@ -266,12 +327,12 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
   }
 
   function handleMove(movement: { endPosition: Cesium.Cartesian2 }): void {
-    if (!tool || tool === 'point' || !draft.length) return
+    if (!tool || tool === 'point' || tool === 'text' || !draft.length) return
     cursor = pickAt(movement.endPosition)
   }
 
   function handleRightClick(): void {
-    if (!tool || tool === 'point' || dedupe(draft).length < (isPolygonTool() ? 3 : 2)) {
+    if (!tool || tool === 'point' || tool === 'text' || tool === 'arrow' || dedupe(draft).length < (isPolygonTool() ? 3 : 2)) {
       cancelDraft()
       return
     }
@@ -293,7 +354,7 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
     if (!current) return
     const cartesians = shape.positions.map(toCartesian)
     if (!cartesians.length) return
-    if (shape.kind === 'point') {
+    if (shape.kind === 'point' || shape.kind === 'text') {
       const cartographic = Cesium.Cartographic.fromCartesian(cartesians[0])
       current.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(Cesium.Math.toDegrees(cartographic.longitude), Cesium.Math.toDegrees(cartographic.latitude), 8000), duration: 1.2 })
       return
@@ -324,6 +385,7 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
   })
 
   watch(() => store.shapes, syncEntities, { deep: true })
+  watch(() => store.selectedShapeId, syncEntities)
 
   onMounted(() => window.addEventListener('keydown', handleKeydown))
 
