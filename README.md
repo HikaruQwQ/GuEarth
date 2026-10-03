@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/status-0.1.6%20early-f4f4f5?style=flat-square&labelColor=18181b" alt="0.1.6 early">
+  <img src="https://img.shields.io/badge/status-0.1.8%20early-f4f4f5?style=flat-square&labelColor=18181b" alt="0.1.8 early">
   <img src="https://img.shields.io/badge/platform-Windows%20x64-f4f4f5?style=flat-square&labelColor=18181b" alt="Windows x64">
 
 GuEarth 是一个仍在早期开发中的桌面数字地球，面向地理教学。它把真实影像和地形装进一个本地运行的 3D 地球，配合教学工具、主题模块和 AI 助手，让晨昏线、气压带、河流地貌这些"讲不动的"内容动起来。
@@ -34,4 +34,4 @@ GuEarth 是一个仍在早期开发中的桌面数字地球，面向地理教学
 
 - GuEarth 不提供账号、同步或云服务器；标注、设置和 AI 配置都保存在当前电脑上；
 - **地图影像、地形与地名数据来自你配置的地图服务提供商，聊天内容会发送到你配置的模型服务提供商**，这些数据由相应供应商处理；
-- 除此之外，GuEarth 不会上传你的任何使用数据。
+- 应用发生错误或崩溃时，错误日志（含堆栈信息）会通过 Sentry 上传，用于定位和修复问题；除此之外，GuEarth 不会上传你的任何使用数据。
