@@ -76,6 +76,9 @@ let idleTimer: ReturnType<typeof setTimeout> | undefined
 
 const STREAM_IDLE_TIMEOUT_MS = 120_000
 
+let contextSummary = ''
+let coveredMessageIds = new Set<string>()
+
 const rendererTools = new Map<string, RendererTool>()
 
 function emptyContextStats(contextWindow = 128_000): AiContextStats {
@@ -151,63 +154,70 @@ export const useAiStore = defineStore('ai', () => {
   }
 
   function conversationTurns(): AiChatTurn[] {
-    return messages.value
-      .filter((message) => message.status !== 'streaming' && message.status !== 'error')
-      .filter((message) => message.content.trim() !== '' || message.role === 'user')
-      .map((message) => ({ role: message.role, content: message.content }))
+    const summaryTurns: AiChatTurn[] = contextSummary ? [{ role: 'assistant', content: `[上下文摘要]\n${contextSummary}` }] : []
+    return [
+      ...summaryTurns,
+      ...messages.value
+        .filter((message) => message.status !== 'streaming' && message.status !== 'error')
+        .filter((message) => !coveredMessageIds.has(message.id))
+        .filter((message) => message.content.trim() !== '' || message.role === 'user')
+        .map((message) => ({ role: message.role, content: message.content }))
+    ]
   }
 
   function contextEntries(): AiContextEntry[] {
-    return messages.value
-      .filter((message) => message.status !== 'streaming')
-      .flatMap((message): AiContextEntry[] => {
-        const entries: AiContextEntry[] = []
-        if (message.content.trim() !== '' || message.role === 'user') entries.push({ role: message.role, content: message.content })
-        if (message.role === 'assistant') {
-          for (const part of message.parts) {
-            if (part.kind !== 'tool') continue
-            const result = part.step.result.trim() || part.step.summary.trim()
-            if (!result) continue
-            entries.push({
-              role: 'tool',
-              content: result,
-              callId: part.step.callId,
-              name: part.step.name,
-              isError: part.step.status === 'error'
-            })
+    const summaryEntries: AiContextEntry[] = contextSummary ? [{ role: 'assistant', content: `[上下文摘要]\n${contextSummary}` }] : []
+    return [
+      ...summaryEntries,
+      ...messages.value
+        .filter((message) => message.status !== 'streaming')
+        .filter((message) => !coveredMessageIds.has(message.id))
+        .flatMap((message): AiContextEntry[] => {
+          const entries: AiContextEntry[] = []
+          if (message.content.trim() !== '' || message.role === 'user') entries.push({ role: message.role, content: message.content })
+          if (message.role === 'assistant') {
+            for (const part of message.parts) {
+              if (part.kind !== 'tool') continue
+              const result = part.step.result.trim() || part.step.summary.trim()
+              if (!result) continue
+              entries.push({
+                role: 'tool',
+                content: result,
+                callId: part.step.callId,
+                name: part.step.name,
+                isError: part.step.status === 'error'
+              })
+            }
           }
-        }
-        return entries
-      })
+          return entries
+        })
+    ]
   }
 
   function applyCompressedContext(result: AiContextCompressionResult): void {
     const streaming = messages.value.find((message) => message.role === 'assistant' && message.status === 'streaming')
     const completed = messages.value.filter((message) => message !== streaming && message.status !== 'error')
-    const retained: ChatMessage[] = []
+    const retainedIds = new Set<string>()
     let cursor = completed.length - 1
     for (let index = result.retainedTurns.length - 1; index >= 0; index -= 1) {
       const turn = result.retainedTurns[index]
       for (; cursor >= 0; cursor -= 1) {
         const candidate = completed[cursor]
         if (candidate.role === turn.role && candidate.content === turn.content) {
-          retained.unshift(candidate)
+          retainedIds.add(candidate.id)
           cursor -= 1
           break
         }
       }
     }
-    messageSeq += 1
-    const summary: ChatMessage = {
-      id: `m${messageSeq}`,
-      role: 'assistant',
-      content: `[上下文摘要]\n${result.summary}`,
-      parts: [{ kind: 'text', text: `[上下文摘要]\n${result.summary}` }],
-      status: 'done',
-      error: ''
-    }
-    messages.value = [summary, ...retained, ...(streaming ? [streaming] : [])]
+    coveredMessageIds = new Set(completed.filter((message) => !retainedIds.has(message.id)).map((message) => message.id))
+    contextSummary = result.summary
     contextStats.value = result.stats
+  }
+
+  function resetContextCompression(): void {
+    contextSummary = ''
+    coveredMessageIds = new Set()
   }
 
   async function refreshContextStats(): Promise<void> {
@@ -258,7 +268,6 @@ export const useAiStore = defineStore('ai', () => {
           afterTokens: event.afterTokens
         })
         setContextNotice(`已压缩上下文 ${formatContextTokens(event.afterTokens)}`, 'idle')
-        void persistConversation()
       }
       return
     }
@@ -516,7 +525,6 @@ export const useAiStore = defineStore('ai', () => {
       const result = await window.guEarth.ai.compressContext(contextEntries())
       applyCompressedContext(result)
       setContextNotice(`已压缩上下文 ${formatContextTokens(result.afterTokens)}`, 'idle')
-      await persistConversation()
     } catch {
       setContextNotice('无法压缩上下文', 'error')
     }
@@ -531,6 +539,7 @@ export const useAiStore = defineStore('ai', () => {
     if (isStreaming.value) return
     currentConversationId.value = ''
     messages.value = []
+    resetContextCompression()
     contextStats.value = emptyContextStats(contextStats.value.contextWindow)
     setContextNotice('', 'idle')
   }
@@ -541,6 +550,7 @@ export const useAiStore = defineStore('ai', () => {
     if (!conversation || conversation.id === currentConversationId.value) return
     currentConversationId.value = id
     messages.value = JSON.parse(JSON.stringify(conversation.messages)) as ChatMessage[]
+    resetContextCompression()
     void refreshContextStats()
   }
 
@@ -548,6 +558,7 @@ export const useAiStore = defineStore('ai', () => {
     if (currentConversationId.value === id) {
       currentConversationId.value = ''
       messages.value = []
+      resetContextCompression()
       contextStats.value = emptyContextStats(contextStats.value.contextWindow)
     }
     if (!window.guEarth?.ai) return
