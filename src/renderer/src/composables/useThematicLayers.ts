@@ -56,6 +56,10 @@ function toCartesians(points: Array<[number, number]>): Cesium.Cartesian3[] {
   return Cesium.Cartesian3.fromDegreesArray(points.flat())
 }
 
+function toRingCartesians(points: Array<[number, number]>): Cesium.Cartesian3[] {
+  return toCartesians(points).filter((cartesian, index, all) => index === 0 || !Cesium.Cartesian3.equals(cartesian, all[index - 1]))
+}
+
 function arrowHeadPositions(from: [number, number], to: [number, number], size: number): Cesium.Cartesian3[] {
   const latMidRad = (((from[1] + to[1]) / 2) * Math.PI) / 180
   const cosLat = Math.max(0.25, Math.cos(latMidRad))
@@ -434,10 +438,12 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
       const properties = new Cesium.PropertyBag({ name: zone.name, layerId: 'koppen-zones', summary: zone.summary })
       for (const [west, east, south, north] of zone.boxes) {
         const ring: Array<[number, number]> = [[west, south], [east, south], [east, north], [west, north]]
+        const ringPositions = toRingCartesians([...ring, ring[0]])
+        if (ringPositions.length < 4) continue
         dataSource.entities.add({
           properties,
-          polygon: { hierarchy: new Cesium.PolygonHierarchy(toCartesians(ring)), material: new Cesium.ColorMaterialProperty(fillColor.withAlpha(0.3)) },
-          polyline: { positions: toCartesians([...ring, ring[0]]), clampToGround: true, width: 1.5, material: edgeColor.withAlpha(0.85) }
+          polygon: { hierarchy: new Cesium.PolygonHierarchy(toRingCartesians(ring)), material: new Cesium.ColorMaterialProperty(fillColor.withAlpha(0.3)) },
+          polyline: { positions: ringPositions, clampToGround: true, width: 1.5, material: edgeColor.withAlpha(0.85) }
         })
       }
       dataSource.entities.add({
