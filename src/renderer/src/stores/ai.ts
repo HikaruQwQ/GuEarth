@@ -601,9 +601,18 @@ export const useAiStore = defineStore('ai', () => {
     isSettingsOpen.value = value
   }
 
+  async function setActiveModel(providerId: string, modelId: string): Promise<void> {
+    const next = JSON.parse(JSON.stringify(settings.value)) as AiSettings
+    const provider = next.providers.find((item) => item.id === providerId)
+    if (!provider?.models.some((model) => model.id === modelId)) return
+    next.activeProviderId = providerId
+    next.activeModelId = modelId
+    await saveSettings(next)
+  }
+
   return {
     settings, messages, conversations, currentConversationId, isStreaming, isPanelOpen, isSettingsOpen, hydrated, contextStats, contextCompressionStatus, contextCompressionNotice, modelRetryNotice,
-    hydrate, registerTool, saveSettings, setSkipDeleteConversationConfirm, setMemoryEnabled, send, stop, retryLast, compressContext, newConversation, openConversation, deleteConversation, persistConversation, setPanelOpen, setSettingsOpen,
+    hydrate, registerTool, saveSettings, setSkipDeleteConversationConfirm, setMemoryEnabled, setActiveModel, send, stop, retryLast, compressContext, newConversation, openConversation, deleteConversation, persistConversation, setPanelOpen, setSettingsOpen,
     activeModelVisionEnabled
   }
 })

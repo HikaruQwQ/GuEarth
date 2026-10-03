@@ -3,14 +3,14 @@ import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from
 import { storeToRefs } from 'pinia'
 import MarkdownIt from 'markdown-it'
 import { Bubble, Sender } from 'ant-design-x-vue'
-import { CloseCircleOutlined, CloseOutlined, CompassOutlined, DeleteOutlined, HistoryOutlined, LeftOutlined, PlusOutlined, ReloadOutlined, RightOutlined, SettingOutlined } from '@ant-design/icons-vue'
+import { CloseCircleOutlined, CloseOutlined, CompassOutlined, DeleteOutlined, HistoryOutlined, LeftOutlined, PlusOutlined, ReloadOutlined, RightOutlined, SettingOutlined, UpOutlined } from '@ant-design/icons-vue'
 import { useAiStore, toolLabel, type ChatMessage, type ReasoningPart, type ToolStep } from '@renderer/stores/ai'
-import type { StoredAiConversation } from '../../../preload'
+import type { AiModelConfig, AiProviderConfig, StoredAiConversation } from '../../../preload'
 import ContextMeter from './ContextMeter.vue'
 import WebSearchStep from './WebSearchStep.vue'
 
 const store = useAiStore()
-const { messages, conversations, currentConversationId, isStreaming, isPanelOpen, isSettingsOpen, contextStats, contextCompressionStatus, contextCompressionNotice, modelRetryNotice } = storeToRefs(store)
+const { messages, conversations, currentConversationId, isStreaming, isPanelOpen, isSettingsOpen, settings, contextStats, contextCompressionStatus, contextCompressionNotice, modelRetryNotice } = storeToRefs(store)
 
 const draft = ref('')
 const listRef = ref<HTMLDivElement>()
@@ -18,6 +18,91 @@ const historyOpen = ref(false)
 const deleteConfirmOpen = ref(false)
 const deleteTarget = ref<StoredAiConversation | null>(null)
 const deleteNoAsk = ref(false)
+const modelMenuOpen = ref(false)
+const viewportWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
+const drawerWidth = ref(Math.min(420, Math.floor(viewportWidth.value / 3)))
+const isResizingDrawer = ref(false)
+
+const drawerMaxWidth = computed(() => Math.max(0, Math.floor(viewportWidth.value / 3)))
+const drawerMinWidth = computed(() => Math.min(320, drawerMaxWidth.value))
+const modelProviders = computed(() => settings.value.providers.filter((provider) => provider.models.length > 0))
+const activeProvider = computed(() => settings.value.providers.find((provider) => provider.id === settings.value.activeProviderId))
+const activeModel = computed(() => activeProvider.value?.models.find((model) => model.id === settings.value.activeModelId))
+const activeModelLabel = computed(() => activeModel.value?.label || activeModel.value?.id || '选择模型')
+
+function clampDrawerWidth(width: number): number {
+  return Math.min(drawerMaxWidth.value, Math.max(drawerMinWidth.value, Math.round(width)))
+}
+
+function readDrawerWidth(): void {
+  try {
+    const stored = Number(window.localStorage.getItem('guearth.eoq-drawer-width'))
+    if (Number.isFinite(stored) && stored > 0) drawerWidth.value = clampDrawerWidth(stored)
+  } catch {
+    drawerWidth.value = clampDrawerWidth(drawerWidth.value)
+  }
+}
+
+function persistDrawerWidth(): void {
+  try {
+    window.localStorage.setItem('guearth.eoq-drawer-width', String(drawerWidth.value))
+  } catch {
+    return
+  }
+}
+
+function handleViewportResize(): void {
+  viewportWidth.value = window.innerWidth
+  drawerWidth.value = clampDrawerWidth(drawerWidth.value)
+}
+
+function stopDrawerResize(): void {
+  if (!isResizingDrawer.value) return
+  isResizingDrawer.value = false
+  window.removeEventListener('pointermove', handleDrawerResize)
+  window.removeEventListener('pointerup', stopDrawerResize)
+  window.removeEventListener('pointercancel', stopDrawerResize)
+  document.body.style.userSelect = ''
+  persistDrawerWidth()
+}
+
+function handleDrawerResize(event: PointerEvent): void {
+  if (!isResizingDrawer.value) return
+  drawerWidth.value = clampDrawerWidth(window.innerWidth - event.clientX)
+}
+
+function startDrawerResize(event: PointerEvent): void {
+  if (event.button !== 0) return
+  isResizingDrawer.value = true
+  document.body.style.userSelect = 'none'
+  window.addEventListener('pointermove', handleDrawerResize)
+  window.addEventListener('pointerup', stopDrawerResize)
+  window.addEventListener('pointercancel', stopDrawerResize)
+  event.preventDefault()
+}
+
+function handleResizeKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') return
+  const step = event.shiftKey ? 80 : 20
+  if (event.key === 'ArrowLeft') drawerWidth.value = clampDrawerWidth(drawerWidth.value + step)
+  if (event.key === 'ArrowRight') drawerWidth.value = clampDrawerWidth(drawerWidth.value - step)
+  if (event.key === 'Home') drawerWidth.value = drawerMinWidth.value
+  if (event.key === 'End') drawerWidth.value = drawerMaxWidth.value
+  persistDrawerWidth()
+  event.preventDefault()
+}
+
+function modelKey(provider: AiProviderConfig, model: AiModelConfig): string {
+  return `${provider.id}:${model.id}`
+}
+
+async function handleModelSelect(info: { key: string | number }): Promise<void> {
+  const choice = String(info.key)
+  const separatorIndex = choice.indexOf(':')
+  if (separatorIndex < 0) return
+  modelMenuOpen.value = false
+  await store.setActiveModel(choice.slice(0, separatorIndex), choice.slice(separatorIndex + 1))
+}
 
 function formatConversationTime(timestamp: number): string {
   const date = new Date(timestamp)
@@ -96,8 +181,16 @@ function submitCurrentSuggestion(): void {
   submit(currentSuggestion.value.prompt)
 }
 
-onMounted(startRotate)
-onUnmounted(stopRotate)
+onMounted(() => {
+  startRotate()
+  readDrawerWidth()
+  window.addEventListener('resize', handleViewportResize)
+})
+onUnmounted(() => {
+  stopRotate()
+  stopDrawerResize()
+  window.removeEventListener('resize', handleViewportResize)
+})
 
 const md = new MarkdownIt({ breaks: true, linkify: true })
 md.validateLink = (url) => /^https?:\/\//i.test(url)
@@ -199,11 +292,11 @@ watch(currentConversationId, () => {
   <a-drawer
     :open="isPanelOpen"
     placement="right"
-    :width="420"
+    :width="drawerWidth"
     :mask="false"
     :closable="false"
     class="eoq-drawer"
-    :body-style="{ display: 'flex', flexDirection: 'column', padding: '16px', gap: '12px' }"
+    :body-style="{ display: 'flex', flexDirection: 'column', padding: '16px', gap: '12px', position: 'relative' }"
     @close="store.setPanelOpen(false)"
   >
     <template #title>
@@ -237,6 +330,19 @@ watch(currentConversationId, () => {
         </div>
       </div>
     </template>
+
+    <div
+      class="drawer-resize-handle"
+      role="separator"
+      tabindex="0"
+      aria-orientation="vertical"
+      aria-label="调整助手宽度"
+      :aria-valuemin="drawerMinWidth"
+      :aria-valuemax="drawerMaxWidth"
+      :aria-valuenow="drawerWidth"
+      @pointerdown="startDrawerResize"
+      @keydown="handleResizeKeydown"
+    />
 
     <div v-if="messages.length === 0" class="empty-state">
       <CompassOutlined class="empty-icon" />
@@ -322,13 +428,31 @@ watch(currentConversationId, () => {
       </template>
     </div>
 
-    <ContextMeter
-      :stats="contextStats"
-      :status="contextCompressionStatus"
-      :notice="contextCompressionNotice"
-      :disabled="isStreaming"
-      @compress="void store.compressContext()"
-    />
+    <div class="composer-tools">
+      <ContextMeter
+        :stats="contextStats"
+        :status="contextCompressionStatus"
+        :notice="contextCompressionNotice"
+        :disabled="isStreaming"
+        @compress="void store.compressContext()"
+      />
+      <a-dropdown v-model:open="modelMenuOpen" :trigger="['click']" placement="topRight">
+        <a-button class="model-picker" type="text" :disabled="isStreaming" aria-label="选择模型" aria-haspopup="menu" :aria-expanded="modelMenuOpen">
+          <span class="model-picker-label">{{ activeModelLabel }}</span>
+          <UpOutlined />
+        </a-button>
+        <template #overlay>
+          <a-menu class="model-menu" selectable :selected-keys="[`${settings.activeProviderId}:${settings.activeModelId}`]" @click="handleModelSelect">
+            <a-menu-item-group v-for="provider in modelProviders" :key="provider.id" :title="provider.name">
+              <a-menu-item v-for="model in provider.models" :key="modelKey(provider, model)">
+                <span class="model-menu-item"><span class="model-menu-name">{{ model.label || model.id }}</span><span v-if="model.label && model.label !== model.id" class="model-menu-id">{{ model.id }}</span></span>
+              </a-menu-item>
+            </a-menu-item-group>
+            <a-menu-item v-if="modelProviders.length === 0" key="model-empty" disabled>请先在 AI 设置中添加模型</a-menu-item>
+          </a-menu>
+        </template>
+      </a-dropdown>
+    </div>
     <Sender
       v-model:value="draft"
       :loading="isStreaming"
@@ -356,6 +480,10 @@ watch(currentConversationId, () => {
 
 <style scoped>
 .panel-title{display:flex;align-items:center;justify-content:space-between;width:100%}
+.drawer-resize-handle{position:absolute;top:0;bottom:0;left:0;z-index:10;width:10px;cursor:ew-resize;touch-action:none}
+.drawer-resize-handle::after{position:absolute;top:50%;left:4px;width:2px;height:48px;border-radius:2px;background:rgba(5,5,5,.12);content:'';transform:translateY(-50%);transition:background .2s ease,height .2s ease}
+.drawer-resize-handle:hover::after,.drawer-resize-handle:focus-visible::after{height:64px;background:#1677ff}
+.drawer-resize-handle:focus-visible{outline:2px solid #1677ff;outline-offset:-2px}
 h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28px}
 .title-actions{display:flex;align-items:center;gap:4px}
 .history-menu{max-height:320px;overflow-y:auto}
@@ -418,6 +546,15 @@ h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28p
 .answer-text :deep(img){max-width:100%;border-radius:6px}
 .pending-line{margin:2px 0}
 .ai-disclaimer{margin:-6px 4px 0;color:rgba(0,0,0,.45);font-size:12px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.composer-tools{display:flex;align-items:center;gap:8px;min-width:0}
+.composer-tools :deep(.context-meter){flex:1;width:auto}
+.model-picker{display:flex;align-items:center;gap:4px;flex:0 1 auto;min-width:0;max-width:48%;padding-inline:4px;color:rgba(0,0,0,.65)}
+.model-picker:hover{color:#1677ff}
+.model-picker-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.model-menu{min-width:248px;max-width:min(360px,calc(100vw - 48px));max-height:360px;overflow-y:auto}
+.model-menu-item{display:flex;align-items:baseline;gap:8px;min-width:0}
+.model-menu-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.model-menu-id{min-width:0;overflow:hidden;color:rgba(0,0,0,.45);font-size:12px;text-overflow:ellipsis;white-space:nowrap}
 .answer-error{margin-top:4px}
 .retry-notice{margin-top:4px}
 .shimmer-text{

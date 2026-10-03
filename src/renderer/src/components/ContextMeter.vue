@@ -112,7 +112,7 @@ function compress(): void {
 </template>
 
 <style scoped>
-.context-meter{display:flex;align-items:center;gap:8px;width:100%;min-height:32px;padding:2px 4px;border:0;background:transparent;color:rgba(0,0,0,.65);font:inherit;text-align:left;cursor:pointer}
+.context-meter{display:flex;align-items:center;gap:8px;width:100%;min-width:0;min-height:32px;padding:2px 4px;border:0;background:transparent;color:rgba(0,0,0,.65);font:inherit;text-align:left;cursor:pointer}
 .context-meter:focus-visible{outline:2px solid #1677ff;outline-offset:2px}
 .context-ring{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:0 0 24px;width:24px;height:24px}
 .context-ring :deep(.ant-progress){line-height:0}
