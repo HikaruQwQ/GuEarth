@@ -35,6 +35,15 @@ export type AssistantPart = ReasoningPart | TextPart | ToolPart
 
 export type ContextCompressionStatus = 'idle' | 'compressing' | 'error'
 
+interface ConversationCompression {
+  summary: string
+  coveredMessageIds: Set<string>
+}
+
+function emptyConversationCompression(): ConversationCompression {
+  return { summary: '', coveredMessageIds: new Set() }
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
@@ -75,9 +84,6 @@ let activeSessionId = ''
 let idleTimer: ReturnType<typeof setTimeout> | undefined
 
 const STREAM_IDLE_TIMEOUT_MS = 120_000
-
-let contextSummary = ''
-let coveredMessageIds = new Set<string>()
 
 const rendererTools = new Map<string, RendererTool>()
 
@@ -122,7 +128,10 @@ export const useAiStore = defineStore('ai', () => {
   const contextStats = ref<AiContextStats>(emptyContextStats())
   const contextCompressionStatus = ref<ContextCompressionStatus>('idle')
   const contextCompressionNotice = ref('')
+  const modelRetryNotice = ref('')
   let contextNoticeTimer: ReturnType<typeof setTimeout> | undefined
+  const compressionByConversation = new Map<string, ConversationCompression>()
+  let compression = emptyConversationCompression()
 
   function currentAssistant(): ChatMessage | undefined {
     for (let index = messages.value.length - 1; index >= 0; index -= 1) {
@@ -153,24 +162,24 @@ export const useAiStore = defineStore('ai', () => {
   }
 
   function conversationTurns(): AiChatTurn[] {
-    const summaryTurns: AiChatTurn[] = contextSummary ? [{ role: 'assistant', content: `[上下文摘要]\n${contextSummary}` }] : []
+    const summaryTurns: AiChatTurn[] = compression.summary ? [{ role: 'assistant', content: `[上下文摘要]\n${compression.summary}` }] : []
     return [
       ...summaryTurns,
       ...messages.value
         .filter((message) => message.status !== 'streaming' && message.status !== 'error')
-        .filter((message) => !coveredMessageIds.has(message.id))
+        .filter((message) => !compression.coveredMessageIds.has(message.id))
         .filter((message) => message.content.trim() !== '' || message.role === 'user')
         .map((message) => ({ role: message.role, content: message.content }))
     ]
   }
 
   function contextEntries(): AiContextEntry[] {
-    const summaryEntries: AiContextEntry[] = contextSummary ? [{ role: 'assistant', content: `[上下文摘要]\n${contextSummary}` }] : []
+    const summaryEntries: AiContextEntry[] = compression.summary ? [{ role: 'assistant', content: `[上下文摘要]\n${compression.summary}` }] : []
     return [
       ...summaryEntries,
       ...messages.value
         .filter((message) => message.status !== 'streaming')
-        .filter((message) => !coveredMessageIds.has(message.id))
+        .filter((message) => !compression.coveredMessageIds.has(message.id))
         .flatMap((message): AiContextEntry[] => {
           const entries: AiContextEntry[] = []
           if (message.content.trim() !== '' || message.role === 'user') entries.push({ role: message.role, content: message.content })
@@ -209,14 +218,25 @@ export const useAiStore = defineStore('ai', () => {
         }
       }
     }
-    coveredMessageIds = new Set(completed.filter((message) => !retainedIds.has(message.id)).map((message) => message.id))
-    contextSummary = result.summary
+    compression = {
+      summary: result.summary,
+      coveredMessageIds: new Set(completed.filter((message) => !retainedIds.has(message.id)).map((message) => message.id))
+    }
+    persistConversationCompression()
     contextStats.value = result.stats
   }
 
+  function persistConversationCompression(): void {
+    if (!currentConversationId.value) return
+    compressionByConversation.set(currentConversationId.value, compression)
+  }
+
   function resetContextCompression(): void {
-    contextSummary = ''
-    coveredMessageIds = new Set()
+    compression = emptyConversationCompression()
+  }
+
+  function restoreConversationCompression(id: string): void {
+    compression = compressionByConversation.get(id) ?? emptyConversationCompression()
   }
 
   async function refreshContextStats(): Promise<void> {
@@ -274,9 +294,14 @@ export const useAiStore = defineStore('ai', () => {
       if (event.sessionId === activeSessionId) setContextNotice('无法压缩上下文', 'error')
       return
     }
+    if (event.type === 'model-retry') {
+      if (event.sessionId === activeSessionId) modelRetryNotice.value = `模型请求失败（${event.reason}），正在自动重试 ${event.attempt}/${event.maxRetries}…`
+      return
+    }
     if (event.sessionId !== activeSessionId) return
     if (isStreaming.value) armIdleWatchdog()
     if (event.type === 'reasoning-delta' || event.type === 'text-delta') {
+      modelRetryNotice.value = ''
       const assistant = currentAssistant()
       if (!assistant || assistant.status !== 'streaming') return
       const last = assistant.parts[assistant.parts.length - 1]
@@ -333,6 +358,7 @@ export const useAiStore = defineStore('ai', () => {
     if (event.type === 'done') {
       const assistant = currentAssistant()
       if (assistant && assistant.status === 'streaming') assistant.status = 'done'
+      modelRetryNotice.value = ''
       clearIdleWatchdog()
       isStreaming.value = false
       void persistConversation()
@@ -340,6 +366,7 @@ export const useAiStore = defineStore('ai', () => {
     }
     if (event.type === 'error') {
       const assistant = currentAssistant()
+      modelRetryNotice.value = ''
       if (assistant && assistant.status === 'streaming') {
         assistant.status = 'error'
         assistant.error = event.message
@@ -455,6 +482,7 @@ export const useAiStore = defineStore('ai', () => {
   async function send(text: string): Promise<void> {
     const question = text.trim()
     if (!question || isStreaming.value) return
+    modelRetryNotice.value = ''
     await hydrate()
     messageSeq += 1
     messages.value.push({ id: `m${messageSeq}`, role: 'user', content: question, parts: [], status: 'done', error: '' })
@@ -541,11 +569,12 @@ export const useAiStore = defineStore('ai', () => {
     if (!conversation || conversation.id === currentConversationId.value) return
     currentConversationId.value = id
     messages.value = JSON.parse(JSON.stringify(conversation.messages)) as ChatMessage[]
-    resetContextCompression()
+    restoreConversationCompression(id)
     void refreshContextStats()
   }
 
   async function deleteConversation(id: string): Promise<void> {
+    compressionByConversation.delete(id)
     if (currentConversationId.value === id) {
       currentConversationId.value = ''
       messages.value = []
@@ -573,7 +602,7 @@ export const useAiStore = defineStore('ai', () => {
   }
 
   return {
-    settings, messages, conversations, currentConversationId, isStreaming, isPanelOpen, isSettingsOpen, hydrated, contextStats, contextCompressionStatus, contextCompressionNotice,
+    settings, messages, conversations, currentConversationId, isStreaming, isPanelOpen, isSettingsOpen, hydrated, contextStats, contextCompressionStatus, contextCompressionNotice, modelRetryNotice,
     hydrate, registerTool, saveSettings, setSkipDeleteConversationConfirm, setMemoryEnabled, send, stop, retryLast, compressContext, newConversation, openConversation, deleteConversation, persistConversation, setPanelOpen, setSettingsOpen,
     activeModelVisionEnabled
   }

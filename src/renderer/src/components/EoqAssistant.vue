@@ -10,7 +10,7 @@ import ContextMeter from './ContextMeter.vue'
 import WebSearchStep from './WebSearchStep.vue'
 
 const store = useAiStore()
-const { messages, conversations, currentConversationId, isStreaming, isPanelOpen, isSettingsOpen, contextStats, contextCompressionStatus, contextCompressionNotice } = storeToRefs(store)
+const { messages, conversations, currentConversationId, isStreaming, isPanelOpen, isSettingsOpen, contextStats, contextCompressionStatus, contextCompressionNotice, modelRetryNotice } = storeToRefs(store)
 
 const draft = ref('')
 const listRef = ref<HTMLDivElement>()
@@ -312,6 +312,7 @@ watch(currentConversationId, () => {
             </a-collapse>
           </template>
           <span v-if="message.status === 'streaming' && message.parts.length === 0" class="shimmer-text pending-line">思考中…</span>
+          <a-alert v-if="message.status === 'streaming' && modelRetryNotice" type="warning" show-icon :message="modelRetryNotice" class="retry-notice" />
           <a-alert v-if="message.status === 'error'" type="error" show-icon :message="message.error" class="answer-error">
             <template #action>
               <a-button type="text" size="small" :disabled="isStreaming" @click="void store.retryLast()"><ReloadOutlined />重试</a-button>
@@ -418,6 +419,7 @@ h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28p
 .pending-line{margin:2px 0}
 .ai-disclaimer{margin:-6px 4px 0;color:rgba(0,0,0,.45);font-size:12px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .answer-error{margin-top:4px}
+.retry-notice{margin-top:4px}
 .shimmer-text{
   display:inline-block;
   font-size:12px;
