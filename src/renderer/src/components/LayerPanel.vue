@@ -180,7 +180,7 @@ function clearCredential(): void {
         <span>瓦片缓存</span><a-switch :checked="tileCacheEnabled" @change="(value: boolean) => emit('cache', value)" />
       </section>
 
-      <section v-if="keyProviders.length" class="panel-section">
+      <section v-if="keyProviders.length" class="panel-section" data-guide-target="provider-credentials">
         <div class="section-heading"><span>供应商密钥</span><a-tag v-if="selectedCredentialStatus?.configured && (!requiresSecurityKey || selectedSecurityCredentialStatus?.configured)" color="green">已配置</a-tag></div>
         <a-select v-model:value="credentialProviderId" class="full-select"><a-select-option v-for="provider in keyProviders" :key="provider.id" :value="provider.id">{{ provider.name }}</a-select-option></a-select>
         <a-input v-model:value="credentialDraft" type="password" size="small" :placeholder="credentialProviderId === 'amap' ? '输入 Web 服务 API Key' : supportsSecurityKey ? '输入 AK (访问密钥)' : '输入 API Key'" class="key-input" @press-enter="saveCredential" />

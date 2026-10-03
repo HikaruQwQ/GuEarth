@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { AimOutlined, AppstoreOutlined, ArrowRightOutlined, CheckCircleOutlined, ClearOutlined, DownloadOutlined, EnvironmentOutlined, ExperimentOutlined, EyeOutlined, FontSizeOutlined, GatewayOutlined, HomeOutlined, NodeIndexOutlined, RobotOutlined, TagsOutlined } from '@ant-design/icons-vue'
+import { AimOutlined, AppstoreOutlined, ArrowRightOutlined, CheckCircleOutlined, ClearOutlined, DownloadOutlined, EnvironmentOutlined, ExperimentOutlined, EyeOutlined, FontSizeOutlined, GatewayOutlined, HomeOutlined, NodeIndexOutlined, QuestionCircleOutlined, RobotOutlined, TagsOutlined } from '@ant-design/icons-vue'
 import { Button, Tooltip } from 'ant-design-vue'
 import type { Component } from 'vue'
 import type { DrawTool } from '@renderer/stores/drawing'
@@ -21,6 +21,7 @@ defineEmits<{
   openLayers: []
   openAnnotations: []
   openAssistant: []
+  openSetupGuide: []
   home: []
   tool: [tool: DrawTool]
   clearShapes: []
@@ -51,37 +52,39 @@ const updateTooltip = computed(() => {
   <div class="toolbar">
     <div class="toolbar-group">
       <a-tooltip title="回到初始视角" placement="top">
-        <a-button type="text" class="toolbar-btn" aria-label="回到初始视角" @click="$emit('home')">
+        <a-button type="text" class="toolbar-btn" aria-label="回到初始视角" data-guide-target="home" @click="$emit('home')">
           <HomeOutlined />
         </a-button>
       </a-tooltip>
       <a-tooltip title="图层管理" placement="top">
-        <a-button type="text" class="toolbar-btn" aria-label="图层管理" @click="$emit('openLayers')">
+        <a-button type="text" class="toolbar-btn" aria-label="图层管理" data-guide-target="layers" @click="$emit('openLayers')">
           <AppstoreOutlined />
         </a-button>
       </a-tooltip>
       <a-tooltip title="地理实验室" placement="top">
-        <a-button type="text" class="toolbar-btn" :class="{ active: labActive }" aria-label="地理实验室" @click="$emit('toggleLab')">
+        <a-button type="text" class="toolbar-btn" :class="{ active: labActive }" aria-label="地理实验室" data-guide-target="lab" @click="$emit('toggleLab')">
           <ExperimentOutlined />
         </a-button>
       </a-tooltip>
     </div>
     <div class="toolbar-group">
       <a-tooltip title="标注管理" placement="top">
-        <a-button type="text" class="toolbar-btn" aria-label="标注管理" @click="$emit('openAnnotations')">
+        <a-button type="text" class="toolbar-btn" aria-label="标注管理" data-guide-target="annotations" @click="$emit('openAnnotations')">
           <TagsOutlined />
         </a-button>
       </a-tooltip>
-      <a-tooltip v-for="item in tools" :key="item.id" :title="item.label" placement="top">
-        <a-button type="text" class="toolbar-btn" :class="{ active: activeTool === item.id }" :aria-label="item.label" @click="$emit('tool', item.id)">
-          <component :is="item.icon" />
-        </a-button>
-      </a-tooltip>
-      <a-tooltip title="清除全部标注" placement="top">
-        <a-button type="text" class="toolbar-btn" :disabled="!shapeCount" aria-label="清除全部标注" @click="$emit('clearShapes')">
-          <ClearOutlined />
-        </a-button>
-      </a-tooltip>
+      <div class="toolbar-tools" data-guide-target="drawing-tools">
+        <a-tooltip v-for="item in tools" :key="item.id" :title="item.label" placement="top">
+          <a-button type="text" class="toolbar-btn" :class="{ active: activeTool === item.id }" :aria-label="item.label" @click="$emit('tool', item.id)">
+            <component :is="item.icon" />
+          </a-button>
+        </a-tooltip>
+        <a-tooltip title="清除全部标注" placement="top">
+          <a-button type="text" class="toolbar-btn" :disabled="!shapeCount" aria-label="清除全部标注" @click="$emit('clearShapes')">
+            <ClearOutlined />
+          </a-button>
+        </a-tooltip>
+      </div>
     </div>
     <div class="toolbar-floating">
       <Transition name="fade">
@@ -118,8 +121,13 @@ const updateTooltip = computed(() => {
         </Tooltip>
       </Transition>
       <a-tooltip title="EOQ 智能助手" placement="top">
-        <a-button type="default" shape="circle" class="toolbar-circle" aria-label="EOQ 智能助手" @click="$emit('openAssistant')">
+        <a-button type="default" shape="circle" class="toolbar-circle" aria-label="EOQ 智能助手" data-guide-target="assistant" @click="$emit('openAssistant')">
           <RobotOutlined />
+        </a-button>
+      </a-tooltip>
+      <a-tooltip title="使用引导" placement="top">
+        <a-button type="default" shape="circle" class="toolbar-circle" aria-label="使用引导" @click="$emit('openSetupGuide')">
+          <QuestionCircleOutlined />
         </a-button>
       </a-tooltip>
     </div>
@@ -149,6 +157,12 @@ const updateTooltip = computed(() => {
 }
 
 .toolbar-floating {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-tools {
   display: flex;
   align-items: center;
   gap: 8px;

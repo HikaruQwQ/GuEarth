@@ -241,7 +241,7 @@ async function handleSave(): Promise<void> {
       <div class="default-hint">发送提问时将使用该模型。</div>
     </section>
 
-    <section class="section provider-layout">
+    <section class="section provider-layout" data-guide-target="ai-provider-settings">
       <div class="provider-rail">
         <div
           v-for="provider in draftProviders"

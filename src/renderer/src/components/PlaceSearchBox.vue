@@ -157,7 +157,7 @@ async function handleProviderSelect({ key }: { key: string | number }): Promise<
 </script>
 
 <template>
-  <div class="place-search">
+  <div class="place-search" data-guide-target="place-search">
     <a-auto-complete
       ref="searchInput"
       v-model:value="keyword"

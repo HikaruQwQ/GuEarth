@@ -58,6 +58,7 @@ import EoqAssistant from '@renderer/components/EoqAssistant.vue'
 import AiSettingsModal from '@renderer/components/AiSettingsModal.vue'
 import UpdateDialog from '@renderer/components/UpdateDialog.vue'
 import FailureBanner from '@renderer/components/FailureBanner.vue'
+import FirstUseGuide from '@renderer/components/FirstUseGuide.vue'
 
 const store = useGlobeStore()
 const {
@@ -97,6 +98,7 @@ const { activeTool, shapes, entries, selectedShapeId, saveError } = storeToRefs(
 const aiStore = useAiStore()
 const updaterStore = useUpdaterStore()
 const failureStore = useFailureStore()
+const firstUseGuide = ref<InstanceType<typeof FirstUseGuide> | null>(null)
 const isAnnotationPanelOpen = ref(false)
 const systemFonts = ref(['Arial', 'Segoe UI', 'Microsoft YaHei'])
 const selectedShape = computed(() => shapes.value.find((shape) => shape.id === selectedShapeId.value) ?? null)
@@ -616,6 +618,17 @@ function handleOpenAssistant(): void {
   aiStore.setPanelOpen(true)
 }
 
+function handleOpenSetupGuide(): void {
+  firstUseGuide.value?.start()
+}
+
+function handleSetupGuideStepChange(step: number): void {
+  aiStore.setSettingsOpen(false)
+  aiStore.setPanelOpen(false)
+  store.setLayerPanelOpen(step === 6)
+  if (step === 8) aiStore.setSettingsOpen(true)
+}
+
 function handleClosePanel(): void {
   store.setLayerPanelOpen(false)
 }
@@ -765,6 +778,7 @@ function deleteSelectedShape(): void {
       @open-layers="handleOpenLayers"
       @open-annotations="handleOpenAnnotations"
       @open-assistant="handleOpenAssistant"
+      @open-setup-guide="handleOpenSetupGuide"
       @home="handleHome"
       @tool="handleTool"
       @clear-shapes="handleClearShapes"
@@ -806,6 +820,7 @@ function deleteSelectedShape(): void {
     <CameraStatus :camera="camera" />
     <EoqAssistant />
     <AiSettingsModal />
+    <FirstUseGuide ref="firstUseGuide" :ready="isGlobeReady" @step-change="handleSetupGuideStepChange" />
     <UpdateDialog />
     <AnnotationPanel
       :open="isAnnotationPanelOpen"
