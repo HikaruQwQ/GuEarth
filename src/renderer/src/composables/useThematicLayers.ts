@@ -146,7 +146,8 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
         outlineColor: Cesium.Color.fromCssColorString(RAIN_BELT_COLOR),
         outlineWidth: 3,
         style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
       }
     })
   }
@@ -182,7 +183,8 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
             outlineColor: Cesium.Color.WHITE,
             outlineWidth: 2,
             style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY
           }
         })
       }
@@ -231,6 +233,7 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
           pixelOffset: new Cesium.Cartesian2(0, -10),
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
           show
         }
       })
@@ -265,7 +268,8 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
           showBackground: true,
           backgroundColor: Cesium.Color.WHITE.withAlpha(0.72),
           backgroundPadding: new Cesium.Cartesian2(7, 4),
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
         }
       })
     }
@@ -304,7 +308,8 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
             color: isDeflected ? deflectedColor : Cesium.Color.fromCssColorString('rgba(0, 0, 0, 0.65)'),
             outlineColor: Cesium.Color.WHITE,
             outlineWidth: 2,
-            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY
           }
         })
       }
@@ -319,7 +324,8 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
           outlineWidth: 3,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
           pixelOffset: new Cesium.Cartesian2(0, -14),
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
         }
       })
       dataSource.entities.add({
@@ -331,7 +337,8 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
           outlineColor: Cesium.Color.WHITE,
           outlineWidth: 2,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
         }
       })
     }
@@ -392,7 +399,8 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
             outlineColor: Cesium.Color.WHITE,
             outlineWidth: 2,
             style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY
           }
         })
       })
@@ -423,7 +431,8 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
             outlineColor: Cesium.Color.WHITE,
             outlineWidth: 2,
             style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY
           }
         })
       })
@@ -456,7 +465,8 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
           showBackground: true,
           backgroundColor: Cesium.Color.WHITE.withAlpha(0.72),
           backgroundPadding: new Cesium.Cartesian2(7, 4),
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
         }
       })
     }
@@ -475,7 +485,8 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
         color: Cesium.Color.fromCssColorString(WIND_BELT_COLOR),
         outlineColor: Cesium.Color.WHITE,
         outlineWidth: 2,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
       }
     })
   }
@@ -528,7 +539,8 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
           color: Cesium.Color.fromCssColorString(style.color),
           outlineColor: Cesium.Color.WHITE,
           outlineWidth: 1.5,
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
         }
       })
     }
@@ -564,6 +576,7 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
           pixelOffset: new Cesium.Cartesian2(0, -10),
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
           distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 7000000)
         }
       })
@@ -598,6 +611,7 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
           pixelOffset: new Cesium.Cartesian2(0, -12),
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
           distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2600000)
         }
       })
@@ -632,7 +646,8 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
           showBackground: true,
           backgroundColor: Cesium.Color.WHITE.withAlpha(0.72),
           backgroundPadding: new Cesium.Cartesian2(7, 4),
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
         }
       })
     }
@@ -658,7 +673,8 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
           showBackground: true,
           backgroundColor: Cesium.Color.WHITE.withAlpha(0.72),
           backgroundPadding: new Cesium.Cartesian2(6, 3),
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
         }
       })
     }
@@ -711,7 +727,8 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
         color: Cesium.Color.fromCssColorString(TYPHOON_INTENSITY_COLOR),
         outlineColor: Cesium.Color.WHITE,
         outlineWidth: 2,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
       }
     })
     for (const track of typhoonTracks) {
@@ -749,7 +766,8 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
             color: Cesium.Color.fromCssColorString(typhoonIntensityStyles[point.intensity].color),
             outlineColor: Cesium.Color.WHITE,
             outlineWidth: 1.5,
-            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY
           }
         })
       }
@@ -765,7 +783,8 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
           outlineWidth: 2,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
           pixelOffset: new Cesium.Cartesian2(0, -12),
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
         }
       })
     }

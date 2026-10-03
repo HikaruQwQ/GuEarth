@@ -15,7 +15,8 @@ const LABEL_STYLE: Cesium.LabelGraphics.ConstructorOptions = {
   style: Cesium.LabelStyle.FILL_AND_OUTLINE,
   verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
   pixelOffset: new Cesium.Cartesian2(0, -12),
-  heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+  heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+  disableDepthTestDistance: Number.POSITIVE_INFINITY
 }
 
 function toGeo(cartesian: Cesium.Cartesian3): GeoPosition {
@@ -209,7 +210,7 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
     const options: Cesium.Entity.ConstructorOptions = { id: shape.id }
     if (shape.kind === 'point') {
       options.position = surfacePosition(cartesians[0])
-      options.point = { color, pixelSize: 10, outlineColor: Cesium.Color.WHITE, outlineWidth: 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND }
+      options.point = { color, pixelSize: 10, outlineColor: Cesium.Color.WHITE, outlineWidth: 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY }
     } else if (shape.kind === 'polyline') {
       options.position = surfacePosition(centroidOf(cartesians))
       const polyline = polylineOptions(current, cartesians, shape.lineWidth, color)
@@ -234,7 +235,8 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
         outlineColor: Cesium.Color.TRANSPARENT,
         pixelSize: 8,
         show: !shape.annotation,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
       }
     }
     const text = shape.kind === 'text' ? shape.annotation : shape.annotation || measurementFor(shape.kind, cartesians)

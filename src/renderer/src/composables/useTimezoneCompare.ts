@@ -67,7 +67,8 @@ export function useTimezoneCompare(viewer: Ref<Cesium.Viewer | undefined>) {
         color: cesiumColor,
         outlineColor: Cesium.Color.WHITE,
         outlineWidth: 2,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
       },
       label: {
         text: new Cesium.CallbackProperty(
@@ -81,7 +82,8 @@ export function useTimezoneCompare(viewer: Ref<Cesium.Viewer | undefined>) {
         style: Cesium.LabelStyle.FILL_AND_OUTLINE,
         verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
         pixelOffset: new Cesium.Cartesian2(0, -12),
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
       }
     })
     dataSource.entities.add({

@@ -488,7 +488,8 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
         color: Cesium.Color.fromCssColorString('#1677ff'),
         outlineColor: Cesium.Color.WHITE,
         outlineWidth: 3,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
       },
       label: {
         text: place.name,
@@ -499,7 +500,8 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
         style: Cesium.LabelStyle.FILL_AND_OUTLINE,
         verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
         pixelOffset: new Cesium.Cartesian2(0, -16),
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
       }
     })
     void currentViewer.flyTo(selectedPlaceMarker, {
