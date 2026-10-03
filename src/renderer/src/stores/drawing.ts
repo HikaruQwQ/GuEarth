@@ -126,6 +126,10 @@ export const useDrawingStore = defineStore('drawing', () => {
     persist()
   }
 
+  function addTransientShape(shape: DrawnShape): void {
+    shapes.value = [...shapes.value, shape]
+  }
+
   function updateShape(id: string, changes: Partial<Pick<DrawnShape, 'annotation' | 'color' | 'textColor' | 'fontFamily' | 'fontSize' | 'textFrame' | 'lineWidth'>>): void {
     const shape = shapes.value.find((item) => item.id === id)
     if (!shape) return
@@ -209,5 +213,5 @@ export const useDrawingStore = defineStore('drawing', () => {
 
   failureStore.registerRetry('annotations', load)
 
-  return { shapes, entries, activeTool, selectedShapeId, saveError, load, setActiveTool, setSelectedShapeId, addShape, updateShape, removeShape, clearAll, addFolder, renameFolder, removeFolder, moveEntry }
+  return { shapes, entries, activeTool, selectedShapeId, saveError, load, setActiveTool, setSelectedShapeId, addShape, addTransientShape, updateShape, removeShape, clearAll, addFolder, renameFolder, removeFolder, moveEntry }
 })

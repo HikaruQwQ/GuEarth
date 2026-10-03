@@ -502,8 +502,9 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
         generation += 1
         store.setGlobeLoadStage('正在初始化地球…')
         const terrainPromise = resolveInitialTerrain(store.terrainProviderId)
-        viewer.value = new Cesium.Viewer(container.value, { baseLayer: false, baseLayerPicker: false, terrainProvider: new Cesium.EllipsoidTerrainProvider(), geocoder: false, animation: false, timeline: false, sceneModePicker: false, navigationHelpButton: false, fullscreenButton: false, homeButton: false, infoBox: false, selectionIndicator: false, contextOptions: { webgl: { preserveDrawingBuffer: true } } })
+        viewer.value = new Cesium.Viewer(container.value, { baseLayer: false, baseLayerPicker: false, terrainProvider: new Cesium.EllipsoidTerrainProvider(), geocoder: false, animation: false, timeline: false, sceneModePicker: false, navigationHelpButton: false, fullscreenButton: false, homeButton: false, infoBox: false, selectionIndicator: false, useBrowserRecommendedResolution: false, contextOptions: { webgl: { preserveDrawingBuffer: true } } })
         viewer.value.scene.globe.show = false
+        viewer.value.scene.globe.tileCacheSize = 1000
         store.setGlobeLoadStage('正在准备地形数据…')
         viewer.value.camera.setView({ destination: Cesium.Cartesian3.fromDegrees(105, 35, 15000000) })
         const initialMode = store.sceneMode === '2D' ? Cesium.SceneMode.SCENE2D : Cesium.SceneMode.SCENE3D

@@ -243,6 +243,47 @@ export interface EarthquakeFeed {
 
 export type PlaceSearchProvider = 'amap' | 'baidu'
 
+export interface SceneCamera {
+  longitude: number
+  latitude: number
+  height: number
+  heading: number
+  pitch: number
+}
+
+export interface SceneSimTime {
+  date: string
+  hour: number
+}
+
+export interface SceneSnapshot {
+  camera: SceneCamera
+  basemapId: string
+  overlays: string[]
+  month: number
+  simTime: SceneSimTime | null
+  motionPanel: string | null
+}
+
+export interface TeachingScene {
+  id: string
+  name: string
+  narration: string
+  dwellMs: number
+  flyDurationMs: number
+  snapshot: SceneSnapshot
+  createdAt: number
+}
+
+export interface SceneDocument {
+  scenes: TeachingScene[]
+}
+
+export interface RecordingSaveResult {
+  path: string
+  bytes: number
+}
+
 export interface UpdateState {
   status: 'idle' | 'available' | 'downloading' | 'ready'
   currentVersion: string
@@ -279,6 +320,13 @@ const api = {
   annotations: {
     load: (): Promise<AnnotationDocument> => ipcRenderer.invoke('annotations:load'),
     save: (document: AnnotationDocument): Promise<void> => ipcRenderer.invoke('annotations:save', document)
+  },
+  scenes: {
+    load: (): Promise<SceneDocument> => ipcRenderer.invoke('scenes:load'),
+    save: (document: SceneDocument): Promise<void> => ipcRenderer.invoke('scenes:save', document)
+  },
+  recordings: {
+    save: (data: ArrayBuffer, mimeType: string): Promise<RecordingSaveResult> => ipcRenderer.invoke('recordings:save', data, mimeType)
   },
   system: {
     fonts: (): Promise<string[]> => ipcRenderer.invoke('system:fonts')

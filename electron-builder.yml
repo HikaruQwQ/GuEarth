@@ -9,6 +9,14 @@ files:
   - '!node_modules/**'
 asarUnpack:
   - out/renderer/cesium/**
+mac:
+  category: public.app-category.education
+  target:
+    - target: dmg
+      arch:
+        - arm64
+dmg:
+  artifactName: ${name}-${version}-${arch}.${ext}
 win:
   executableName: GuEarth
 nsis:
