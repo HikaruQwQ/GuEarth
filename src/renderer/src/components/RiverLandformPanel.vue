@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, toRaw } from 'vue'
+import { computed, ref, toRaw, watch } from 'vue'
 import * as Cesium from 'cesium'
 import { CloseOutlined, LoadingOutlined } from '@ant-design/icons-vue'
 import LineChart, { type ChartSeries } from '@renderer/components/charts/LineChart.vue'
@@ -101,9 +101,14 @@ function selectReach(reach: RiverReach): void {
   void sampleProfile(reach)
 }
 
-void sampleProfile(reaches[0])
-const current = props.viewer && !props.viewer.isDestroyed() ? toRaw(props.viewer) : undefined
-current?.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(reaches[0].center[0], reaches[0].center[1], reaches[0].center[2]), duration: 1.2 })
+selectReach(reaches[0])
+
+watch(
+  () => props.viewer,
+  (viewer) => {
+    if (viewer && !viewer.isDestroyed()) selectReach(activeReach.value)
+  }
+)
 </script>
 
 <template>

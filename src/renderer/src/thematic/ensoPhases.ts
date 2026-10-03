@@ -17,6 +17,10 @@ export interface EnsoPhaseMeta {
 const BIN_WEST = 120
 const BIN_EAST = 280
 
+function normalizeLongitude(value: number): number {
+  return value > 180 ? value - 360 : value
+}
+
 export function ensoAnomalyColor(anomaly: number): string {
   if (anomaly <= -1.5) return '#1677ff'
   if (anomaly <= -0.5) return '#69b1ff'
@@ -26,15 +30,12 @@ export function ensoAnomalyColor(anomaly: number): string {
   return '#fa541c'
 }
 
-function band(anomaly: number, west: number, east: number): EnsoSstBand {
-  return { west, east, anomaly }
-}
-
 export function buildEnsoBands(values: number[]): EnsoSstBand[] {
   const bands: EnsoSstBand[] = []
   for (let index = 0; index < values.length; index += 1) {
-    const west = BIN_WEST + index * ((BIN_EAST - BIN_WEST) / values.length)
-    bands.push(band(values[index], west, BIN_WEST + (index + 1) * ((BIN_EAST - BIN_WEST) / values.length)))
+    const west = normalizeLongitude(BIN_WEST + index * ((BIN_EAST - BIN_WEST) / values.length))
+    const east = normalizeLongitude(BIN_WEST + (index + 1) * ((BIN_EAST - BIN_WEST) / values.length))
+    bands.push({ west, east, anomaly: values[index] })
   }
   return bands
 }

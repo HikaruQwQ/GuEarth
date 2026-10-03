@@ -786,7 +786,7 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
         summary: 'Niño3.4 区（5°N–5°S，170°W–120°W）海温距平是判定厄尔尼诺与拉尼娜的主要指标：距平持续 ≥ +0.5℃ 判定为厄尔尼诺事件，≤ -0.5℃ 判定为拉尼娜事件。'
       }),
       polyline: {
-        positions: Cesium.Cartesian3.fromDegreesArray([190, -5, 240, -5, 240, 5, 190, 5, 190, -5]),
+        positions: Cesium.Cartesian3.fromDegreesArray([-170, -5, -120, -5, -120, 5, -170, 5, -170, -5]),
         clampToGround: true,
         width: 2.5,
         material: Cesium.Color.fromCssColorString('#531dab')
@@ -823,7 +823,7 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     'plate-tectonics': { longitude: 180, latitude: 5, height: 17000000 },
     'temperature-zones': { longitude: 20, latitude: 0, height: 17000000 },
     'typhoon': { longitude: 132, latitude: 18, height: 10500000 },
-    'enso': { longitude: 205, latitude: 0, height: 9500000 }
+    'enso': { longitude: -155, latitude: 0, height: 9500000 }
   }
 
   function syncOverlays(): void {
@@ -834,7 +834,11 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
       const existing = sources.get(layer.id)
       if (enabled && !existing) {
         const dataSource = new Cesium.CustomDataSource(layer.id)
-        builders[layer.id](dataSource)
+        try {
+          builders[layer.id](dataSource)
+        } catch (error) {
+          console.error(`[thematic] failed to build layer: ${layer.id}`, error)
+        }
         void current.dataSources.add(dataSource)
         sources.set(layer.id, dataSource)
         const view = enableViews[layer.id]
@@ -858,7 +862,11 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
       current.dataSources.remove(existing, true)
       sources.delete('enso')
       const dataSource = new Cesium.CustomDataSource('enso')
-      buildEnso(dataSource)
+      try {
+        buildEnso(dataSource)
+      } catch (error) {
+        console.error('[thematic] failed to rebuild ENSO layer', error)
+      }
       void current.dataSources.add(dataSource)
       sources.set('enso', dataSource)
     }
