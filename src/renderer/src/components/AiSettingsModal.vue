@@ -5,6 +5,7 @@ import { DeleteOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons-vu
 import type { AiModelConfig, AiProviderConfig, AiSearchProviderConfig, AiSettings, AiThinkingLevel, ProviderCredentialStatus } from '../../../preload'
 import { useAiStore } from '@renderer/stores/ai'
 import SearchProviderSettings from './SearchProviderSettings.vue'
+import MemorySettings from './MemorySettings.vue'
 
 interface ProviderDraft extends AiProviderConfig {
   key: string
@@ -202,7 +203,8 @@ async function handleSave(): Promise<void> {
     activeModelId,
     searchProviders: draftSearchProviders.value.map((provider) => ({ ...provider })),
     activeSearchProviderId: activeSearchProviderId.value,
-    skipDeleteConversationConfirm: store.settings.skipDeleteConversationConfirm
+    skipDeleteConversationConfirm: store.settings.skipDeleteConversationConfirm,
+    memoryEnabled: store.settings.memoryEnabled
   }
   try {
     await store.saveSettings(next)
@@ -327,6 +329,9 @@ async function handleSave(): Promise<void> {
     </a-tab-pane>
     <a-tab-pane key="search" tab="搜索供应商">
       <SearchProviderSettings v-if="visible" v-model:active-provider-id="activeSearchProviderId" :providers="draftSearchProviders" />
+    </a-tab-pane>
+    <a-tab-pane key="memory" tab="记忆">
+      <MemorySettings v-if="visible" :active="activeTab === 'memory'" />
     </a-tab-pane>
     </a-tabs>
     <div class="modal-footer">

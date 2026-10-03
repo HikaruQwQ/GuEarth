@@ -1,5 +1,6 @@
 import { ipcMain, net, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import type {
+  AgentMemory,
   AiChatEvent,
   AiChatTurn,
   AiContextCompressionResult,
@@ -17,6 +18,7 @@ import { searchWeb } from './search'
 import { retrieveKnowledge } from './knowledge'
 import type { AiChatHistoryStore } from './chatHistoryStore'
 import type { AiSettingsStore } from './settingsStore'
+import type { AiMemoryStore } from './memoryStore'
 
 const SYSTEM_PROMPT = [
   '你是 GuEarth 数字地球上的地理教学助手 EOQ，面向中学与高校地理教学场景。',
@@ -81,6 +83,50 @@ const WEB_SEARCH_TOOL: AiToolDefinition = {
     required: ['query'],
     additionalProperties: false
   }
+}
+
+const MEMORY_SAVE_TOOL: AiToolDefinition = {
+  name: 'save_memory',
+  description: '保存一条关于用户的长期记忆（身份背景、教学学段、讲解偏好、常用关注地区、明确的要求与习惯），跨会话生效。用户明确要求记住某事时必须调用；一次性的临时信息不要保存。',
+  parameters: {
+    type: 'object',
+    properties: { content: { type: 'string', description: '一句简洁的中文陈述，例如「用户是高中地理老师，偏好案例式讲解」', maxLength: 300 } },
+    required: ['content'],
+    additionalProperties: false
+  }
+}
+
+const MEMORY_DELETE_TOOL: AiToolDefinition = {
+  name: 'delete_memory',
+  description: '按 id 删除一条已过时或错误的用户长期记忆，id 见系统提示中的用户记忆列表。',
+  parameters: {
+    type: 'object',
+    properties: { id: { type: 'string', description: '要删除的记忆 id' } },
+    required: ['id'],
+    additionalProperties: false
+  }
+}
+
+interface MemoryRuntime {
+  enabled: boolean
+  store: AiMemoryStore
+}
+
+function memoryPromptLines(memories: AgentMemory[]): string[] {
+  const rules = [
+    '长期记忆：',
+    '- 已保存的用户记忆是跨会话的长期信息，回答时自然地结合使用，不要逐条复述，也不要向用户提及「记忆库」的存在方式。',
+    '- 对话中发现值得长期记住的用户信息（身份与教学背景、讲解偏好、常用关注地区、明确表达的要求与习惯）时，调用 save_memory 保存：一条一句简洁中文陈述，先对照已有记忆避免重复；用户明确说「记住……」时必须立即保存，并在回答中简短确认（如「已记住，之后会……」）。',
+    '- 一次性的临时信息（当前视角、本次会话的临时问题与数据）不要保存。',
+    '- 发现某条记忆过时或错误时，调用 delete_memory 按 id 删除，需要时再保存新的。'
+  ]
+  if (!memories.length) return [...rules, '当前暂无已保存的用户记忆。']
+  return [...rules, '已保存的用户记忆（id：内容）：', ...memories.map((memory) => `- ${memory.id}：${memory.content}`)]
+}
+
+function buildSystemPrompt(memory: MemoryRuntime): string {
+  if (!memory.enabled) return SYSTEM_PROMPT
+  return [SYSTEM_PROMPT, ...memoryPromptLines(memory.store.list())].join('\n')
 }
 
 interface WireToolCall {
@@ -257,9 +303,9 @@ function contextStatsForMessages(messages: WireMessage[], contextWindow: number)
   }
 }
 
-function contextMessagesForEntries(entries: AiContextEntry[]): WireMessage[] {
+function contextMessagesForEntries(entries: AiContextEntry[], systemContent: string): WireMessage[] {
   return [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: systemContent },
     ...entries.map((entry) => ({
       role: entry.role,
       content: entry.content,
@@ -517,10 +563,11 @@ async function runAnthropicTurn(options: {
   const url = apiEndpoint(provider.baseUrl, provider.protocol, '/messages')
   const budgetTokens = anthropicBudget[model.thinkingLevel] ?? anthropicBudget.medium
   const maxTokens = model.thinking ? Math.max(8_192, budgetTokens * 2) : 8_192
+  const systemContent = messages.find((message) => message.role === 'system')?.content ?? SYSTEM_PROMPT
   const body: Record<string, unknown> = {
     model: model.id,
     max_tokens: maxTokens,
-    system: SYSTEM_PROMPT,
+    system: systemContent,
     messages: toAnthropicMessages(messages)
   }
   if (model.thinking) body.thinking = { type: 'enabled', budget_tokens: budgetTokens }
@@ -609,7 +656,7 @@ async function dispatchRendererTool(sender: WebContents, sessionId: string, call
   })
 }
 
-async function executeTool(sender: WebContents, sessionId: string, name: string, argsJson: string, signal: AbortSignal, searchProvider?: AiSearchProviderConfig): Promise<ToolOutcome & { callId: string; summary: string }> {
+async function executeTool(sender: WebContents, sessionId: string, name: string, argsJson: string, signal: AbortSignal, searchProvider?: AiSearchProviderConfig, memory?: MemoryRuntime): Promise<ToolOutcome & { callId: string; summary: string }> {
   const args = safeParseJson(argsJson)
   if (name === 'web_search') args.query = typeof args.query === 'string' ? args.query.trim().slice(0, 500) : ''
   const callId = `${name}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
@@ -639,6 +686,29 @@ async function executeTool(sender: WebContents, sessionId: string, name: string,
         searchFailuresBySession.delete(sessionId)
       }
       outcome = { ok: !result.error, content: clampToolResult(JSON.stringify(result)) }
+    } else if (name === 'save_memory') {
+      if (!memory?.enabled) {
+        outcome = { ok: false, content: JSON.stringify({ error: '记忆功能未开启，请在 AI 设置 → 记忆 中开启' }) }
+      } else {
+        try {
+          const saved = memory.store.add(typeof args.content === 'string' ? args.content : '', 'agent')
+          outcome = { ok: true, content: JSON.stringify({ memorySaved: true, id: saved.id, content: saved.content, message: '已写入记忆' }) }
+        } catch (error) {
+          outcome = { ok: false, content: JSON.stringify({ error: error instanceof Error ? error.message : '记忆写入失败' }) }
+        }
+      }
+    } else if (name === 'delete_memory') {
+      const id = typeof args.id === 'string' ? args.id.trim() : ''
+      if (!memory?.enabled) {
+        outcome = { ok: false, content: JSON.stringify({ error: '记忆功能未开启，请在 AI 设置 → 记忆 中开启' }) }
+      } else if (!id) {
+        outcome = { ok: false, content: JSON.stringify({ error: '缺少记忆 id' }) }
+      } else {
+        const deleted = memory.store.delete(id)
+        outcome = deleted
+          ? { ok: true, content: JSON.stringify({ memoryDeleted: true, id, message: '已删除记忆' }) }
+          : { ok: false, content: JSON.stringify({ error: `未找到 id 为 ${id} 的记忆` }) }
+      }
     } else {
       outcome = await dispatchRendererTool(sender, sessionId, callId, name, args)
     }
@@ -708,6 +778,7 @@ async function compressMessages(options: {
 async function runAgent(options: {
   provider: AiProviderConfig
   searchProvider?: AiSearchProviderConfig
+  memory: MemoryRuntime
   model: AiModelConfig
   apiKey: string
   sender: WebContents
@@ -716,13 +787,14 @@ async function runAgent(options: {
   turns: AiChatTurn[]
   tools: AiToolDefinition[]
 }): Promise<void> {
-  const { provider, searchProvider, model, apiKey, sender, sessionId, signal, turns, tools } = options
+  const { provider, searchProvider, memory, model, apiKey, sender, sessionId, signal, turns, tools } = options
   const send = (event: AiChatEvent) => emit(sender, event)
-  const messages: WireMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }]
+  const messages: WireMessage[] = [{ role: 'system', content: buildSystemPrompt(memory) }]
   for (const turn of turns) {
     if (turn.content.trim()) messages.push({ role: turn.role, content: turn.content })
   }
-  const toolset: AiToolDefinition[] = [...tools.filter((tool) => !['retrieve_knowledge', 'search_place', 'web_search'].includes(tool.name)), KNOWLEDGE_TOOL, SEARCH_PLACE_TOOL, WEB_SEARCH_TOOL]
+  const memoryTools = memory.enabled ? [MEMORY_SAVE_TOOL, MEMORY_DELETE_TOOL] : []
+  const toolset: AiToolDefinition[] = [...tools.filter((tool) => !['retrieve_knowledge', 'search_place', 'web_search', 'save_memory', 'delete_memory'].includes(tool.name)), KNOWLEDGE_TOOL, SEARCH_PLACE_TOOL, WEB_SEARCH_TOOL, ...memoryTools]
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
     const currentStats = contextStatsForMessages(messages, model.contextWindow)
@@ -781,7 +853,7 @@ async function runAgent(options: {
     messages.push({ role: 'assistant', content: result.text, toolCalls: result.toolCalls, thinkingBlocks: result.thinkingBlocks })
     for (const call of result.toolCalls) {
       signal.throwIfAborted()
-      const outcome = await executeTool(sender, sessionId, call.name, call.arguments, signal, searchProvider)
+      const outcome = await executeTool(sender, sessionId, call.name, call.arguments, signal, searchProvider, memory)
       send({ sessionId, type: 'tool-end', callId: outcome.callId, ok: outcome.ok, summary: outcome.summary, result: outcome.content, references: outcome.references })
       signal.throwIfAborted()
       messages.push({ role: 'tool', content: outcome.content, callId: call.id, name: call.name, isError: !outcome.ok, image: model.vision ? outcome.image : undefined })
@@ -795,6 +867,8 @@ function summarizeToolResult(content: string): string {
   const parsed = safeParseJson(content)
   if (typeof parsed.error === 'string') return parsed.error.slice(0, 60)
   if (typeof parsed.message === 'string' && parsed.message.trim()) return parsed.message.slice(0, 60)
+  if (parsed.memorySaved === true) return `已记住：${typeof parsed.content === 'string' ? parsed.content.slice(0, 40) : ''}`
+  if (parsed.memoryDeleted === true) return '已删除记忆'
   if (Array.isArray(parsed.matches)) return parsed.matches.length ? `${parsed.matches.length} 条知识条目` : '知识库未命中'
   if (Array.isArray(parsed.references)) return parsed.references.length ? `${parsed.references.length} 条来源` : '未找到相关网页'
   if (Array.isArray(parsed.places)) return `${parsed.places.length} 个地点`
@@ -848,7 +922,7 @@ function validateChatRequest(sessionId: unknown, turns: unknown, tools: unknown)
   return { sessionId, turns: normalizedTurns, tools: normalizedTools }
 }
 
-export function registerAiIpcHandlers(settingsStore: AiSettingsStore, chatHistoryStore: AiChatHistoryStore): void {
+export function registerAiIpcHandlers(settingsStore: AiSettingsStore, chatHistoryStore: AiChatHistoryStore, memoryStore: AiMemoryStore): void {
   ipcMain.handle('ai:get-settings', () => settingsStore.snapshot())
   ipcMain.handle('ai:update-settings', (_event, value: unknown) => settingsStore.update(value))
   ipcMain.handle('ai:history-list', () => chatHistoryStore.list())
@@ -857,11 +931,23 @@ export function registerAiIpcHandlers(settingsStore: AiSettingsStore, chatHistor
     if (typeof id !== 'string' || !id) return chatHistoryStore.list()
     return chatHistoryStore.delete(id)
   })
+  ipcMain.handle('ai:memory-list', () => memoryStore.list())
+  ipcMain.handle('ai:memory-add', (_event, content: unknown) => {
+    if (typeof content !== 'string') throw new Error('无效的记忆内容')
+    memoryStore.add(content, 'user')
+    return memoryStore.list()
+  })
+  ipcMain.handle('ai:memory-delete', (_event, id: unknown) => {
+    if (typeof id !== 'string' || !id.trim()) throw new Error('无效的记忆标识')
+    if (!memoryStore.delete(id.trim())) throw new Error('未找到该记忆，可能已被删除')
+    return memoryStore.list()
+  })
+  const memoryRuntime = (): MemoryRuntime => ({ enabled: settingsStore.snapshot().memoryEnabled !== false, store: memoryStore })
   ipcMain.handle('ai:context-stats', (_event, turns: unknown) => {
     const settings = settingsStore.snapshot()
     const provider = settings.providers.find((item) => item.id === settings.activeProviderId)
     const model = provider?.models.find((item) => item.id === settings.activeModelId)
-    return contextStatsForMessages(contextMessagesForEntries(validateContextEntries(turns)), model?.contextWindow ?? 128_000)
+    return contextStatsForMessages(contextMessagesForEntries(validateContextEntries(turns), buildSystemPrompt(memoryRuntime())), model?.contextWindow ?? 128_000)
   })
   ipcMain.handle('ai:compress-context', async (_event, entries: unknown): Promise<AiContextCompressionResult> => {
     const settings = settingsStore.snapshot()
@@ -875,7 +961,7 @@ export function registerAiIpcHandlers(settingsStore: AiSettingsStore, chatHistor
       provider,
       model,
       apiKey,
-      messages: contextMessagesForEntries(validateContextEntries(entries)),
+      messages: contextMessagesForEntries(validateContextEntries(entries), SYSTEM_PROMPT),
       signal: controller.signal
     })
     return compressed.result
@@ -896,7 +982,7 @@ export function registerAiIpcHandlers(settingsStore: AiSettingsStore, chatHistor
     const sender = event.sender
     watchSenderLifecycle(sender)
     sessions.set(request.sessionId, { controller, sender })
-    void runAgent({ provider, searchProvider, model, apiKey, sender, sessionId: request.sessionId, signal: controller.signal, turns: request.turns, tools: request.tools })
+    void runAgent({ provider, searchProvider, memory: memoryRuntime(), model, apiKey, sender, sessionId: request.sessionId, signal: controller.signal, turns: request.turns, tools: request.tools })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === 'AbortError') {
           emit(sender, { sessionId: request.sessionId, type: 'error', message: '已停止生成' })

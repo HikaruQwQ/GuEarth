@@ -11,6 +11,7 @@ import { assertEncryptionAvailable, assertSafeId, clearProviderKey, hasProviderK
 import { baiduLngLatToTile, tileCenter, wgs84ToBd09 } from './geo'
 import { AiSettingsStore } from './ai/settingsStore'
 import { AiChatHistoryStore } from './ai/chatHistoryStore'
+import { AiMemoryStore } from './ai/memoryStore'
 import { registerAiIpcHandlers } from './ai/agent'
 import { searchPlaces } from './ai/amap'
 import { searchBaiduPlaces } from './ai/baidu'
@@ -60,6 +61,7 @@ let annotations: AnnotationDocument = { shapes: [], entries: [] }
 let scenes: SceneDocument = { scenes: [] }
 const aiSettings = new AiSettingsStore()
 const aiChatHistory = new AiChatHistoryStore()
+const aiMemories = new AiMemoryStore()
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'guearth-tile', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } }
@@ -759,8 +761,9 @@ app.whenReady().then(() => {
   scenes = readScenes()
   aiSettings.init(join(userDataPath, 'ai-settings.json'))
   aiChatHistory.init(join(userDataPath, 'ai-chat-history.json'))
+  aiMemories.init(join(userDataPath, 'ai-memories.json'))
   registerIpcHandlers()
-  registerAiIpcHandlers(aiSettings, aiChatHistory)
+  registerAiIpcHandlers(aiSettings, aiChatHistory, aiMemories)
   initUpdater(join(userDataPath, 'updates'))
   protocol.handle('guearth-tile', async (request) => {
     const response = await handleTileProtocol(request)

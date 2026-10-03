@@ -11,6 +11,7 @@ export function defaultAiSettings(): AiSettings {
     activeModelId: '',
     searchProviders: defaultSearchProviders(),
     activeSearchProviderId: 'baidu',
-    skipDeleteConversationConfirm: false
+    skipDeleteConversationConfirm: false,
+    memoryEnabled: true
   }
 }

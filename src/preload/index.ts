@@ -118,6 +118,14 @@ export interface AiSettings {
   searchProviders: AiSearchProviderConfig[]
   activeSearchProviderId: string
   skipDeleteConversationConfirm: boolean
+  memoryEnabled: boolean
+}
+
+export interface AgentMemory {
+  id: string
+  content: string
+  source: 'user' | 'agent'
+  createdAt: number
 }
 
 export interface AiChatTurn {
@@ -364,6 +372,11 @@ const api = {
       list: (): Promise<StoredAiConversation[]> => ipcRenderer.invoke('ai:history-list'),
       save: (conversation: StoredAiConversation): Promise<StoredAiConversation[]> => ipcRenderer.invoke('ai:history-save', conversation),
       delete: (id: string): Promise<StoredAiConversation[]> => ipcRenderer.invoke('ai:history-delete', id)
+    },
+    memory: {
+      list: (): Promise<AgentMemory[]> => ipcRenderer.invoke('ai:memory-list'),
+      add: (content: string): Promise<AgentMemory[]> => ipcRenderer.invoke('ai:memory-add', content),
+      delete: (id: string): Promise<AgentMemory[]> => ipcRenderer.invoke('ai:memory-delete', id)
     },
     onEvent: (listener: (event: AiChatEvent) => void): (() => void) => {
       const wrapped = (_event: Electron.IpcRendererEvent, payload: AiChatEvent): void => listener(payload)

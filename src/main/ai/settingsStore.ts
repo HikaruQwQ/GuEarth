@@ -75,7 +75,8 @@ export function normalizeAiSettings(value: unknown): AiSettings {
     activeModelId,
     searchProviders,
     activeSearchProviderId,
-    skipDeleteConversationConfirm: source.skipDeleteConversationConfirm === true
+    skipDeleteConversationConfirm: source.skipDeleteConversationConfirm === true,
+    memoryEnabled: source.memoryEnabled !== false
   }
 }
 

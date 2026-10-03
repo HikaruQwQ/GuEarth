@@ -291,7 +291,7 @@ watch(currentConversationId, () => {
             >
               <a-collapse-panel :key="part.step.callId">
                 <template #header>
-                  <span v-if="part.step.status === 'running'" class="shimmer-text">{{ toolLabel(part.step.name) }}</span>
+                  <span v-if="part.step.status === 'running'" class="shimmer-text">{{ toolLabel(part.step.name, true) }}</span>
                   <span v-else-if="part.step.status === 'ok'" class="tool-header">
                     <span class="tool-name">{{ toolLabel(part.step.name) }}</span>
                     <span v-if="part.step.summary" class="tool-summary" :title="part.step.summary">{{ part.step.summary }}</span>
