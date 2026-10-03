@@ -1,11 +1,8 @@
+import type { RecordingSaveResult } from '../../../preload'
+
 export interface RecorderOverlay {
   title: string
   narration: string
-}
-
-export interface RecordedVideo {
-  blob: Blob
-  mimeType: string
 }
 
 const CANDIDATE_MIME_TYPES = ['video/mp4;codecs=avc1.42E01E', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
@@ -35,15 +32,17 @@ function wrapText(context: CanvasRenderingContext2D, text: string, maxWidth: num
 }
 
 export function createVideoRecorder(): {
-  start: (source: HTMLCanvasElement, getOverlay: () => RecorderOverlay) => boolean
-  stop: () => Promise<RecordedVideo | null>
+  start: (source: HTMLCanvasElement, getOverlay: () => RecorderOverlay) => Promise<boolean>
+  stop: () => Promise<RecordingSaveResult | null>
   pause: () => void
   resume: () => void
   isStarted: () => boolean
 } {
   let recorder: MediaRecorder | null = null
-  let chunks: Blob[] = []
   let mimeType = ''
+  let recordingId: string | null = null
+  let writeQueue: Promise<void> = Promise.resolve()
+  let writeError: Error | null = null
   let composeCanvas: HTMLCanvasElement | null = null
   let composeContext: CanvasRenderingContext2D | null = null
   let stream: MediaStream | null = null
@@ -103,7 +102,29 @@ export function createVideoRecorder(): {
     rafId = requestAnimationFrame(renderFrame)
   }
 
-  function start(source: HTMLCanvasElement, getOverlay: () => RecorderOverlay): boolean {
+  function appendChunk(chunk: Blob): void {
+    writeQueue = writeQueue.then(async () => {
+      if (writeError || !recordingId) return
+      try {
+        await window.guEarth.recordings.append(recordingId, await chunk.arrayBuffer())
+      } catch (error) {
+        writeError = error instanceof Error ? error : new Error('视频分段写入失败')
+      }
+    })
+  }
+
+  async function discardRecording(): Promise<void> {
+    const id = recordingId
+    recordingId = null
+    if (!id) return
+    try {
+      await window.guEarth.recordings.abort(id)
+    } catch {
+      return
+    }
+  }
+
+  async function start(source: HTMLCanvasElement, getOverlay: () => RecorderOverlay): Promise<boolean> {
     if (recorder && recorder.state !== 'inactive') return false
     if (typeof MediaRecorder === 'undefined') return false
     mimeType = CANDIDATE_MIME_TYPES.find((candidate) => MediaRecorder.isTypeSupported(candidate)) ?? ''
@@ -111,7 +132,10 @@ export function createVideoRecorder(): {
     composeCanvas.width = Math.max(2, source.width)
     composeCanvas.height = Math.max(2, source.height)
     composeContext = composeCanvas.getContext('2d', { alpha: false })
-    if (!composeContext) return false
+    if (!composeContext) {
+      cleanup()
+      return false
+    }
     sourceCanvas = source
     overlayProvider = getOverlay
     drawOverlay(getOverlay())
@@ -121,15 +145,18 @@ export function createVideoRecorder(): {
         ? new MediaRecorder(stream, { mimeType, videoBitsPerSecond: VIDEO_BITS_PER_SECOND })
         : new MediaRecorder(stream, { videoBitsPerSecond: VIDEO_BITS_PER_SECOND })
       if (!mimeType) mimeType = recorder.mimeType || 'video/webm'
-    } catch {
+      recordingId = await window.guEarth.recordings.start(mimeType)
+      writeQueue = Promise.resolve()
+      writeError = null
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) appendChunk(event.data)
+      }
+      recorder.start(1000)
+    } catch (error) {
+      await discardRecording()
       cleanup()
-      return false
+      throw error instanceof Error ? error : new Error('视频录制初始化失败')
     }
-    chunks = []
-    recorder.ondataavailable = (event) => {
-      if (event.data && event.data.size > 0) chunks.push(event.data)
-    }
-    recorder.start(1000)
     rafId = requestAnimationFrame(renderFrame)
     return true
   }
@@ -137,6 +164,10 @@ export function createVideoRecorder(): {
   function cleanup(): void {
     if (rafId) cancelAnimationFrame(rafId)
     rafId = 0
+    if (recorder) {
+      recorder.ondataavailable = null
+      recorder.onstop = null
+    }
     if (stream) for (const track of stream.getTracks()) track.stop()
     stream = null
     recorder = null
@@ -154,28 +185,41 @@ export function createVideoRecorder(): {
     if (recorder && recorder.state === 'paused') recorder.resume()
   }
 
-  async function stop(): Promise<RecordedVideo | null> {
+  async function stop(): Promise<RecordingSaveResult | null> {
     const active = recorder
     if (!active || active.state === 'inactive') {
+      await discardRecording()
       cleanup()
       return null
     }
-    const settled = new Promise<RecordedVideo | null>((resolve) => {
-      active.onstop = () => {
-        const blob = new Blob(chunks, { type: mimeType })
-        resolve(blob.size > 0 ? { blob, mimeType } : null)
-      }
-      setTimeout(() => resolve(null), STOP_TIMEOUT_MS)
-    })
     try {
-      active.stop()
-    } catch {
+      const didStop = await new Promise<boolean>((resolve) => {
+        const timeout = window.setTimeout(() => resolve(false), STOP_TIMEOUT_MS)
+        active.onstop = () => {
+          window.clearTimeout(timeout)
+          resolve(true)
+        }
+        try {
+          active.stop()
+        } catch {
+          window.clearTimeout(timeout)
+          resolve(false)
+        }
+      })
+      if (!didStop) throw new Error('等待视频编码器结束超时')
+      await writeQueue
+      if (writeError) throw writeError
+      if (!recordingId) throw new Error('录制文件会话已失效')
+      const result = await window.guEarth.recordings.finish(recordingId)
+      recordingId = null
+      return result
+    } catch (error) {
+      await writeQueue
+      await discardRecording()
+      throw error
+    } finally {
       cleanup()
-      return null
     }
-    const result = await settled
-    cleanup()
-    return result
   }
 
   function isStarted(): boolean {

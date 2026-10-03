@@ -326,7 +326,10 @@ const api = {
     save: (document: SceneDocument): Promise<void> => ipcRenderer.invoke('scenes:save', document)
   },
   recordings: {
-    save: (data: ArrayBuffer, mimeType: string): Promise<RecordingSaveResult> => ipcRenderer.invoke('recordings:save', data, mimeType)
+    start: (mimeType: string): Promise<string> => ipcRenderer.invoke('recordings:start', mimeType),
+    append: (recordingId: string, data: ArrayBuffer): Promise<void> => ipcRenderer.invoke('recordings:append', recordingId, data),
+    finish: (recordingId: string): Promise<RecordingSaveResult> => ipcRenderer.invoke('recordings:finish', recordingId),
+    abort: (recordingId: string): Promise<void> => ipcRenderer.invoke('recordings:abort', recordingId)
   },
   system: {
     fonts: (): Promise<string[]> => ipcRenderer.invoke('system:fonts')

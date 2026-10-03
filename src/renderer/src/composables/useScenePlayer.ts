@@ -292,14 +292,12 @@ export function useScenePlayer(viewer: Ref<Cesium.Viewer | undefined>, switchBas
 
   async function saveRecording(cancelled: boolean): Promise<void> {
     scenesStore.setRecording({ state: 'saving', cancelled })
-    const video = await recorder.stop()
-    if (!video) {
-      scenesStore.setRecording(cancelled ? { state: 'idle', cancelled: true } : { state: 'error', error: '未能生成视频数据' })
-      return
-    }
     try {
-      const buffer = await video.blob.arrayBuffer()
-      const result: RecordingSaveResult = await window.guEarth.recordings.save(buffer, video.mimeType)
+      const result: RecordingSaveResult | null = await recorder.stop()
+      if (!result) {
+        scenesStore.setRecording(cancelled ? { state: 'idle', cancelled: true } : { state: 'error', error: '未能生成视频数据' })
+        return
+      }
       scenesStore.applyRecordingResult(result)
     } catch (error) {
       scenesStore.setRecording({ state: 'error', error: error instanceof Error ? error.message : '视频保存失败' })
@@ -335,12 +333,22 @@ export function useScenePlayer(viewer: Ref<Cesium.Viewer | undefined>, switchBas
       await prewarm(options.scenes, id, centerTarget)
       if (options.recording && !aborted && runId === id) {
         const canvas = viewer.value?.scene.canvas
-        if (!canvas || !recorder.start(canvas, recorderOverlay)) {
+        if (!canvas) {
           scenesStore.setRecording({ state: 'error', error: '当前环境不支持视频录制' })
           playerState.recording = false
         } else {
-          recorder.pause()
-          scenesStore.setRecording({ state: 'recording' })
+          try {
+            if (!await recorder.start(canvas, recorderOverlay)) {
+              scenesStore.setRecording({ state: 'error', error: '当前环境不支持视频录制' })
+              playerState.recording = false
+            } else {
+              recorder.pause()
+              scenesStore.setRecording({ state: 'recording' })
+            }
+          } catch (error) {
+            scenesStore.setRecording({ state: 'error', error: error instanceof Error ? error.message : '视频录制初始化失败' })
+            playerState.recording = false
+          }
         }
       }
       for (let index = 0; index < options.scenes.length; index += 1) {
