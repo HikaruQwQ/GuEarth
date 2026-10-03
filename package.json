@@ -6,9 +6,14 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "build:win": "npm run build && electron-builder --win --publish never",
+    "build:win": "npm run build && set \"ELECTRON_GET_USE_PROXY=true\" && electron-builder --win --publish never",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && vue-tsc --noEmit -p tsconfig.web.json"
+  },
+  "overrides": {
+    "app-builder-lib": {
+      "@electron/get": "5.1.0"
+    }
   },
   "dependencies": {},
   "devDependencies": {
