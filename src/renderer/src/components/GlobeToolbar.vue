@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { AimOutlined, AppstoreOutlined, ArrowRightOutlined, ClearOutlined, EnvironmentOutlined, ExperimentOutlined, EyeOutlined, FontSizeOutlined, GatewayOutlined, HomeOutlined, NodeIndexOutlined, RobotOutlined, TagsOutlined } from '@ant-design/icons-vue'
+import { AimOutlined, AppstoreOutlined, ArrowRightOutlined, CheckCircleOutlined, ClearOutlined, DownloadOutlined, EnvironmentOutlined, ExperimentOutlined, EyeOutlined, FontSizeOutlined, GatewayOutlined, HomeOutlined, NodeIndexOutlined, RobotOutlined, TagsOutlined } from '@ant-design/icons-vue'
 import { Button, Tooltip } from 'ant-design-vue'
 import type { Component } from 'vue'
 import type { DrawTool } from '@renderer/stores/drawing'
+import type { UpdateStatus } from '@renderer/stores/updater'
 
 const props = defineProps<{
   activeTool: DrawTool | null
@@ -11,6 +12,9 @@ const props = defineProps<{
   levelViewActive: boolean
   levelViewVisible: boolean
   labActive: boolean
+  updateStatus: UpdateStatus
+  updateVersion: string
+  updatePercent: number
 }>()
 
 defineEmits<{
@@ -22,6 +26,7 @@ defineEmits<{
   clearShapes: []
   toggleLevelView: []
   toggleLab: []
+  updateClick: []
 }>()
 
 const tools: { id: DrawTool; label: string; icon: Component }[] = [
@@ -34,6 +39,12 @@ const tools: { id: DrawTool; label: string; icon: Component }[] = [
 
 const levelViewIcon = computed(() => (props.levelViewActive ? EyeOutlined : AimOutlined))
 const levelViewTooltip = computed(() => (props.levelViewActive ? '恢复俯视视角' : '平视 3D 地形'))
+const updateVisible = computed(() => props.updateStatus !== 'idle')
+const updateTooltip = computed(() => {
+  if (props.updateStatus === 'downloading') return props.updatePercent > 0 ? `正在下载新版本 ${props.updatePercent}%` : '正在下载新版本…'
+  if (props.updateStatus === 'ready') return '新版本已就绪，点击重启安装'
+  return `发现新版本 v${props.updateVersion}，点击下载`
+})
 </script>
 
 <template>
@@ -83,6 +94,26 @@ const levelViewTooltip = computed(() => (props.levelViewActive ? '恢复俯视�
             @click="$emit('toggleLevelView')"
           >
             <template #icon><component :is="levelViewIcon" /></template>
+          </Button>
+        </Tooltip>
+      </Transition>
+      <Transition name="fade">
+        <Tooltip v-if="updateVisible" :title="updateTooltip" placement="top">
+          <a-badge v-if="updateStatus === 'available'" dot color="#1677ff" :offset="[-6, 6]">
+            <Button class="toolbar-circle" type="default" shape="circle" :aria-label="updateTooltip" @click="$emit('updateClick')">
+              <DownloadOutlined />
+            </Button>
+          </a-badge>
+          <Button
+            v-else
+            class="toolbar-circle"
+            :type="updateStatus === 'ready' ? 'primary' : 'default'"
+            shape="circle"
+            :aria-label="updateTooltip"
+            @click="$emit('updateClick')"
+          >
+            <a-progress v-if="updateStatus === 'downloading'" type="circle" :percent="updatePercent" :size="22" :stroke-width="3" :show-info="false" />
+            <CheckCircleOutlined v-else />
           </Button>
         </Tooltip>
       </Transition>

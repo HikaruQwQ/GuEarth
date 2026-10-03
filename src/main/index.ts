@@ -14,6 +14,7 @@ import { searchPlaces } from './ai/amap'
 import { searchBaiduPlaces } from './ai/baidu'
 import { beginPlacesRequest } from './ai/searchThrottle'
 import { initDatasets, loadEarthquakeFeed } from './datasets'
+import { initUpdater } from './updater'
 
 interface PersistedSettings {
   selectedImageryProviderId: string
@@ -518,6 +519,7 @@ app.whenReady().then(() => {
   aiChatHistory.init(join(userDataPath, 'ai-chat-history.json'))
   registerIpcHandlers()
   registerAiIpcHandlers(aiSettings, aiChatHistory)
+  initUpdater(join(userDataPath, 'updates'))
   protocol.handle('guearth-tile', async (request) => {
     const response = await handleTileProtocol(request)
     response.headers.set('Access-Control-Allow-Origin', '*')

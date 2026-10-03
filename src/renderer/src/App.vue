@@ -9,6 +9,7 @@ import { useGlobeStore } from '@renderer/stores/globe'
 import { useFailureStore } from '@renderer/stores/failure'
 import { DEFAULT_DRAW_STYLE, useDrawingStore, type DrawnShape, type DrawTool, type GeoPosition } from '@renderer/stores/drawing'
 import { useAiStore } from '@renderer/stores/ai'
+import { useUpdaterStore } from '@renderer/stores/updater'
 import { thematicLayerCatalog, useClimateStore } from '@renderer/stores/climate'
 import { useSolarStore } from '@renderer/stores/solar'
 import { useCesiumViewer } from '@renderer/composables/useCesiumViewer'
@@ -34,6 +35,7 @@ import ThematicInfoCard from '@renderer/components/ThematicInfoCard.vue'
 import TeachingLab from '@renderer/components/TeachingLab.vue'
 import EoqAssistant from '@renderer/components/EoqAssistant.vue'
 import AiSettingsModal from '@renderer/components/AiSettingsModal.vue'
+import UpdateDialog from '@renderer/components/UpdateDialog.vue'
 import FailureBanner from '@renderer/components/FailureBanner.vue'
 
 const store = useGlobeStore()
@@ -69,6 +71,7 @@ useThematicLayers(viewer)
 const drawingStore = useDrawingStore()
 const { activeTool, shapes, entries, selectedShapeId, saveError } = storeToRefs(drawingStore)
 const aiStore = useAiStore()
+const updaterStore = useUpdaterStore()
 const failureStore = useFailureStore()
 const isAnnotationPanelOpen = ref(false)
 const systemFonts = ref(['Arial', 'Segoe UI', 'Microsoft YaHei'])
@@ -569,6 +572,7 @@ aiStore.registerTool({
 })
 
 onMounted(async () => {
+  void updaterStore.hydrate()
   try {
     const installedFonts = await window.guEarth.system.fonts()
     const existingFonts = shapes.value.map((shape) => shape.fontFamily)
@@ -657,6 +661,22 @@ function handleLevelViewToggle(): void {
   toggleLevelView()
 }
 
+function handleUpdateClick(): void {
+  if (updaterStore.status === 'available') {
+    void updaterStore.startDownload()
+    return
+  }
+  if (updaterStore.status === 'ready') {
+    Modal.confirm({
+      title: `重启并安装新版本 v${updaterStore.version}？`,
+      content: '应用将退出并启动安装程序，完成后可重新打开 GuEarth。',
+      okText: '重启安装',
+      cancelText: '稍后',
+      onOk: () => updaterStore.installNow()
+    })
+  }
+}
+
 function handleToggleLab(): void {
   isLabOpen.value = !isLabOpen.value
 }
@@ -713,6 +733,9 @@ function deleteSelectedShape(): void {
       :level-view-active="levelViewActive"
       :level-view-visible="levelSwitcherVisible"
       :lab-active="labActive"
+      :update-status="updaterStore.status"
+      :update-version="updaterStore.version"
+      :update-percent="updaterStore.percent"
       @open-layers="handleOpenLayers"
       @open-annotations="handleOpenAnnotations"
       @open-assistant="handleOpenAssistant"
@@ -721,6 +744,7 @@ function deleteSelectedShape(): void {
       @clear-shapes="handleClearShapes"
       @toggle-level-view="handleLevelViewToggle"
       @toggle-lab="handleToggleLab"
+      @update-click="handleUpdateClick"
     />
     <DrawingEditToolbar
       v-if="selectedShape && !activeTool"
@@ -740,6 +764,7 @@ function deleteSelectedShape(): void {
     <CameraStatus :camera="camera" />
     <EoqAssistant />
     <AiSettingsModal />
+    <UpdateDialog />
     <AnnotationPanel
       :open="isAnnotationPanelOpen"
       :shapes="shapes"

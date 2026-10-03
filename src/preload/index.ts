@@ -233,6 +233,20 @@ export interface EarthquakeFeed {
 
 export type PlaceSearchProvider = 'amap' | 'baidu'
 
+export interface UpdateState {
+  status: 'idle' | 'available' | 'downloading' | 'ready'
+  currentVersion: string
+  version: string
+  received: number
+  total: number
+}
+
+export type UpdaterEvent =
+  | { type: 'available'; version: string; notes: string }
+  | { type: 'progress'; received: number; total: number }
+  | { type: 'downloaded'; version: string }
+  | { type: 'error'; message: string }
+
 const api = {
   versions: {
     electron: process.versions.electron,
@@ -264,6 +278,16 @@ const api = {
   },
   datasets: {
     getEarthquakes: (): Promise<EarthquakeFeed> => ipcRenderer.invoke('datasets:earthquakes')
+  },
+  updater: {
+    getState: (): Promise<UpdateState> => ipcRenderer.invoke('updater:get-state'),
+    download: (): Promise<void> => ipcRenderer.invoke('updater:download'),
+    install: (): Promise<void> => ipcRenderer.invoke('updater:install'),
+    onEvent: (listener: (event: UpdaterEvent) => void): (() => void) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, payload: UpdaterEvent): void => listener(payload)
+      ipcRenderer.on('updater:event', wrapped)
+      return () => ipcRenderer.removeListener('updater:event', wrapped)
+    }
   },
   ai: {
     getSettings: (): Promise<AiSettings> => ipcRenderer.invoke('ai:get-settings'),
