@@ -3,6 +3,7 @@ import type {
   AiChatEvent,
   AiChatTurn,
   AiContextCompressionResult,
+  AiContextEntry,
   AiContextStats,
   AiModelConfig,
   AiProviderConfig,
@@ -254,8 +255,17 @@ function contextStatsForMessages(messages: WireMessage[], contextWindow: number)
   }
 }
 
-function contextStatsForTurns(turns: AiChatTurn[], contextWindow: number): AiContextStats {
-  return contextStatsForMessages([{ role: 'system', content: SYSTEM_PROMPT }, ...turns.map((turn) => ({ role: turn.role, content: turn.content }))], contextWindow)
+function contextMessagesForEntries(entries: AiContextEntry[]): WireMessage[] {
+  return [
+    { role: 'system', content: SYSTEM_PROMPT },
+    ...entries.map((entry) => ({
+      role: entry.role,
+      content: entry.content,
+      callId: entry.callId,
+      name: entry.name,
+      isError: entry.isError
+    }))
+  ]
 }
 
 function retainedTurns(messages: WireMessage[]): AiChatTurn[] {
@@ -653,7 +663,8 @@ async function compressMessages(options: {
   const system = messages.find((message) => message.role === 'system')
   const rest = messages.filter((message) => message.role !== 'system')
   const keepCount = Math.min(4, rest.length)
-  const older = rest.slice(0, rest.length - keepCount)
+  const hasOlderMessages = rest.length > keepCount
+  const older = hasOlderMessages ? rest.slice(0, rest.length - keepCount) : rest
   if (!older.length) throw new Error('无法压缩上下文')
   const transcript = older.map((message) => {
     const role = message.role === 'user' ? '用户' : message.role === 'assistant' ? '助手' : '工具'
@@ -677,7 +688,7 @@ async function compressMessages(options: {
   const summary = summaryResult.text.trim()
   if (!summary) throw new Error('无法压缩上下文')
   const summaryMessage: WireMessage = { role: 'assistant', content: `[上下文摘要]\n${summary}` }
-  const kept = rest.slice(-keepCount)
+  const kept = hasOlderMessages ? rest.slice(-keepCount) : []
   const compressedMessages = [...(system ? [system] : []), summaryMessage, ...kept]
   const afterStats = contextStatsForMessages(compressedMessages, model.contextWindow)
   return {
@@ -806,6 +817,22 @@ function validateTurns(turns: unknown): AiChatTurn[] {
   })
 }
 
+function validateContextEntries(entries: unknown): AiContextEntry[] {
+  if (!Array.isArray(entries)) throw new Error('无效的上下文')
+  return entries.flatMap((entry): AiContextEntry[] => {
+    if (typeof entry !== 'object' || entry === null) return []
+    const record = entry as { role?: unknown; content?: unknown; callId?: unknown; name?: unknown; isError?: unknown }
+    if ((record.role !== 'user' && record.role !== 'assistant' && record.role !== 'tool') || typeof record.content !== 'string') return []
+    return [{
+      role: record.role,
+      content: record.content.slice(0, TOOL_RESULT_LIMIT),
+      ...(typeof record.callId === 'string' ? { callId: record.callId.slice(0, 128) } : {}),
+      ...(typeof record.name === 'string' ? { name: record.name.slice(0, 128) } : {}),
+      ...(typeof record.isError === 'boolean' ? { isError: record.isError } : {})
+    }]
+  })
+}
+
 function validateChatRequest(sessionId: unknown, turns: unknown, tools: unknown): { sessionId: string; turns: AiChatTurn[]; tools: AiToolDefinition[] } {
   if (typeof sessionId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(sessionId)) throw new Error('无效的会话标识')
   const normalizedTurns = validateTurns(turns)
@@ -831,9 +858,9 @@ export function registerAiIpcHandlers(settingsStore: AiSettingsStore, chatHistor
     const settings = settingsStore.snapshot()
     const provider = settings.providers.find((item) => item.id === settings.activeProviderId)
     const model = provider?.models.find((item) => item.id === settings.activeModelId)
-    return contextStatsForTurns(validateTurns(turns), model?.contextWindow ?? 128_000)
+    return contextStatsForMessages(contextMessagesForEntries(validateContextEntries(turns)), model?.contextWindow ?? 128_000)
   })
-  ipcMain.handle('ai:compress-context', async (_event, turns: unknown): Promise<AiContextCompressionResult> => {
+  ipcMain.handle('ai:compress-context', async (_event, entries: unknown): Promise<AiContextCompressionResult> => {
     const settings = settingsStore.snapshot()
     const provider = settings.providers.find((item) => item.id === settings.activeProviderId)
     const model = provider?.models.find((item) => item.id === settings.activeModelId)
@@ -845,7 +872,7 @@ export function registerAiIpcHandlers(settingsStore: AiSettingsStore, chatHistor
       provider,
       model,
       apiKey,
-      messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...validateTurns(turns).map((turn) => ({ role: turn.role, content: turn.content }))],
+      messages: contextMessagesForEntries(validateContextEntries(entries)),
       signal: controller.signal
     })
     return compressed.result

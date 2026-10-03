@@ -13,6 +13,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ compress: [] }>()
 const open = ref(false)
+const infoOpen = ref(false)
 
 const percent = computed(() => Math.min(100, Math.max(0, Math.round(props.stats.usagePercent))))
 const tone = computed(() => percent.value >= 80 ? 'error' : percent.value > 70 ? 'warning' : 'normal')
@@ -39,7 +40,12 @@ function compress(): void {
       <div class="context-card">
         <div class="context-card-title">
           <span>上下文窗口</span>
-          <InfoCircleOutlined class="context-info-icon" />
+          <button type="button" class="context-info-button" :aria-expanded="infoOpen" aria-label="上下文指标说明" @click.stop="infoOpen = !infoOpen">
+            <InfoCircleOutlined />
+          </button>
+        </div>
+        <div v-if="infoOpen" class="context-info-copy">
+          总进度是已有上下文占模型窗口的比例；分类百分比是各类内容占已有上下文的比例
         </div>
         <div class="context-total">
           <span>已有上下文</span>
@@ -50,7 +56,7 @@ function compress(): void {
           <div v-for="category in stats.categories" :key="category.key" class="context-category">
             <div class="context-category-head">
               <span>{{ category.label }}</span>
-              <span>{{ formatTokens(category.tokens) }} · {{ category.ratio }}%</span>
+              <span>{{ formatTokens(category.tokens) }} · 占比 {{ category.ratio }}%</span>
             </div>
             <a-progress :percent="category.ratio" :stroke-color="strokeColor" :show-info="false" size="small" />
           </div>
@@ -83,7 +89,10 @@ function compress(): void {
 .context-status{display:flex;align-items:center;gap:4px;min-width:0;overflow:hidden;color:rgba(0,0,0,.45);font-size:12px;line-height:20px;text-overflow:ellipsis;white-space:nowrap}
 .context-card{width:304px;max-width:calc(100vw - 48px)}
 .context-card-title{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;color:rgba(0,0,0,.88);font-size:14px;font-weight:600;line-height:22px}
-.context-info-icon{color:rgba(0,0,0,.45);font-size:14px}
+.context-info-button{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:50%;background:transparent;color:rgba(0,0,0,.45);font-size:14px;cursor:pointer}
+.context-info-button:hover{color:#1677ff;background:rgba(22,119,255,.08)}
+.context-info-button:focus-visible{outline:2px solid #1677ff;outline-offset:1px}
+.context-info-copy{margin:-4px 0 12px;color:rgba(0,0,0,.55);font-size:11px;line-height:18px}
 .context-total,.context-category-head{display:flex;align-items:center;justify-content:space-between;gap:8px;color:rgba(0,0,0,.65);font-size:12px;line-height:20px}
 .context-total{margin-bottom:4px}
 .context-total strong{color:rgba(0,0,0,.88);font-family:ui-monospace,SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-weight:400}

@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { AiChatEvent, AiChatTurn, AiContextCompressionResult, AiContextStats, AiSearchReference, AiSettings, AiToolDefinition, StoredAiConversation, StoredAiMessage, StoredAiPart } from '../../../preload'
+import type { AiChatEvent, AiChatTurn, AiContextCompressionResult, AiContextEntry, AiContextStats, AiSearchReference, AiSettings, AiToolDefinition, StoredAiConversation, StoredAiMessage, StoredAiPart } from '../../../preload'
 import { defaultAiSettings } from '../../../shared/aiSettings'
 
 export interface ToolStep {
@@ -137,6 +137,30 @@ export const useAiStore = defineStore('ai', () => {
       .map((message) => ({ role: message.role, content: message.content }))
   }
 
+  function contextEntries(): AiContextEntry[] {
+    return messages.value
+      .filter((message) => message.status !== 'streaming')
+      .flatMap((message): AiContextEntry[] => {
+        const entries: AiContextEntry[] = []
+        if (message.content.trim() !== '' || message.role === 'user') entries.push({ role: message.role, content: message.content })
+        if (message.role === 'assistant') {
+          for (const part of message.parts) {
+            if (part.kind !== 'tool') continue
+            const result = part.step.result.trim() || part.step.summary.trim()
+            if (!result) continue
+            entries.push({
+              role: 'tool',
+              content: result,
+              callId: part.step.callId,
+              name: part.step.name,
+              isError: part.step.status === 'error'
+            })
+          }
+        }
+        return entries
+      })
+  }
+
   function applyCompressedContext(result: AiContextCompressionResult): void {
     const streaming = messages.value.find((message) => message.role === 'assistant' && message.status === 'streaming')
     const completed = messages.value.filter((message) => message !== streaming && message.status !== 'error')
@@ -169,7 +193,7 @@ export const useAiStore = defineStore('ai', () => {
   async function refreshContextStats(): Promise<void> {
     if (!window.guEarth?.ai) return
     try {
-      contextStats.value = await window.guEarth.ai.getContextStats(conversationTurns())
+      contextStats.value = await window.guEarth.ai.getContextStats(contextEntries())
     } catch {
       return
     }
@@ -455,7 +479,7 @@ export const useAiStore = defineStore('ai', () => {
     if (isStreaming.value || !window.guEarth?.ai) return
     setContextNotice('正在压缩上下文...', 'compressing')
     try {
-      const result = await window.guEarth.ai.compressContext(conversationTurns())
+      const result = await window.guEarth.ai.compressContext(contextEntries())
       applyCompressedContext(result)
       setContextNotice(`已压缩上下文 ${formatContextTokens(result.afterTokens)}`, 'idle')
       await persistConversation()

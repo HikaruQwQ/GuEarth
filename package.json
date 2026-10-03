@@ -1,6 +1,6 @@
 {
   "name": "guearth",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "private": true,
   "main": "./out/main/index.js",
   "scripts": {
@@ -10,6 +10,11 @@
     "build:mac": "npm run build && electron-builder --mac --publish never",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && vue-tsc --noEmit -p tsconfig.web.json"
+  },
+  "overrides": {
+    "app-builder-lib": {
+      "@electron/get": "5.1.0"
+    }
   },
   "dependencies": {},
   "devDependencies": {
