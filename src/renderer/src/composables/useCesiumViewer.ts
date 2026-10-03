@@ -51,6 +51,8 @@ function normalizeHeading(radians: number): number {
 export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
   const viewer = shallowRef<Cesium.Viewer>()
   const imageryLayers = new Map<string, Cesium.ImageryLayer>()
+  const imageryLayerStyles = new Map<string, string>()
+  const styleRequestSequences = new Map<string, number>()
   const layersInFlight = new Set<string>()
   const store = useGlobeStore()
   const solarStore = useSolarStore()
@@ -191,7 +193,8 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     }
     layersInFlight.add(id)
     try {
-      const imageryProvider = await provider.createImageryProvider(store.providerStyles[id] ?? provider.meta.defaultStyleId)
+      const styleId = store.providerStyles[id] ?? provider.meta.defaultStyleId
+      const imageryProvider = await provider.createImageryProvider(styleId)
       imageryProvider.errorEvent.addEventListener((error) => handleTileError(id, provider.meta.name, error))
       const currentViewer = viewer.value
       if (!currentViewer || currentViewer.isDestroyed() || expectedGeneration !== generation) return { ok: false, reason: 'cancelled', message: '', detail: '' }
@@ -199,6 +202,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
       layer.show = id === store.selectedLayerId
       layer.alpha = layerMeta(id)?.opacity ?? 1
       imageryLayers.set(id, layer)
+      imageryLayerStyles.set(id, styleId)
       return { ok: true }
     } catch (error) {
       return { ok: false, reason: 'create', message: `${provider.meta.name}加载失败`, detail: error instanceof Error ? error.message : '' }
@@ -211,6 +215,18 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     imageryLayers.forEach((layer, layerId) => { layer.show = layerId === id })
     activeBasemapId = id
     failureStore.clearFailure('basemap')
+  }
+
+  function retireImageryLayer(layer: Cesium.ImageryLayer): void {
+    const currentViewer = viewer.value
+    if (!currentViewer || currentViewer.isDestroyed()) {
+      layer.destroy()
+      return
+    }
+    currentViewer.imageryLayers.remove(layer, false)
+    window.setTimeout(() => {
+      if (!layer.isDestroyed()) layer.destroy()
+    }, 1000)
   }
 
   function switchBasemap(id: string): void {
@@ -247,21 +263,26 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     store.setProviderStyle(id, styleId)
     const layer = imageryLayers.get(id)
     if (!layer || !viewer.value || viewer.value.isDestroyed()) return
-    generation += 1
-    const expectedGeneration = generation
-    viewer.value.imageryLayers.remove(layer, true)
-    imageryLayers.delete(id)
-    void addLayer(id, expectedGeneration).then((result) => {
-      if (result.ok) {
-        if (id === store.selectedLayerId) revealBasemap(id)
-        return
-      }
-      if (result.reason === 'cancelled' || result.reason === 'inflight') return
-      store.setProviderStyle(id, previousStyleId)
-      void addLayer(id, generation).then((restored) => {
-        if (restored.ok && id === store.selectedLayerId) revealBasemap(id)
-      })
-      store.setGlobeError(`${provider.meta.name}样式切换失败`, result.detail || result.message)
+    const requestSequence = (styleRequestSequences.get(id) ?? 0) + 1
+    styleRequestSequences.set(id, requestSequence)
+    const activeStyleId = imageryLayerStyles.get(id) ?? previousStyleId
+    void provider.createImageryProvider(styleId).then((imageryProvider) => {
+      if (styleRequestSequences.get(id) !== requestSequence) return
+      const currentViewer = viewer.value
+      if (!currentViewer || currentViewer.isDestroyed() || layer.isDestroyed()) return
+      imageryProvider.errorEvent.addEventListener((error) => handleTileError(id, provider.meta.name, error))
+      const replacement = currentViewer.imageryLayers.addImageryProvider(imageryProvider)
+      replacement.show = false
+      replacement.alpha = layer.alpha
+      imageryLayers.set(id, replacement)
+      imageryLayerStyles.set(id, styleId)
+      if (id === store.selectedLayerId) revealBasemap(id)
+      retireImageryLayer(layer)
+    }).catch((error: unknown) => {
+      if (styleRequestSequences.get(id) !== requestSequence) return
+      store.setProviderStyle(id, activeStyleId)
+      layer.show = id === store.selectedLayerId
+      store.setGlobeError(`${provider.meta.name}样式切换失败`, error instanceof Error ? error.message : '')
     })
   }
 
@@ -376,7 +397,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     startLoadTimeout()
     const existing = imageryLayers.get(id)
     if (existing) {
-      currentViewer.imageryLayers.remove(existing, true)
+      retireImageryLayer(existing)
       imageryLayers.delete(id)
     }
     const result = await addLayer(id, generation)
@@ -570,6 +591,8 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     selectedPlaceMarker = undefined
     polarCaps = undefined
     imageryLayers.clear()
+    imageryLayerStyles.clear()
+    styleRequestSequences.clear()
   })
 
   return {
