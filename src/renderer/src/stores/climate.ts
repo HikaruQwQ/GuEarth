@@ -1,8 +1,9 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { summerFactor, winterFactor } from '@renderer/thematic/windField'
+import type { EnsoPhase } from '@renderer/thematic/ensoPhases'
 
-export type ThematicLayerId = 'wind-particles' | 'pressure-belts' | 'koppen-zones' | 'frontal-cyclone' | 'rain-belt' | 'summer-monsoon' | 'winter-monsoon' | 'ocean-currents' | 'climate-zones' | 'coriolis-demo' | 'plate-tectonics'
+export type ThematicLayerId = 'wind-particles' | 'pressure-belts' | 'koppen-zones' | 'frontal-cyclone' | 'rain-belt' | 'summer-monsoon' | 'winter-monsoon' | 'ocean-currents' | 'climate-zones' | 'coriolis-demo' | 'plate-tectonics' | 'temperature-zones' | 'typhoon' | 'enso'
 
 export interface ThematicLayerMeta {
   id: ThematicLayerId
@@ -22,7 +23,10 @@ export const thematicLayerCatalog: ThematicLayerMeta[] = [
   { id: 'ocean-currents', name: '世界洋流', description: '暖流与寒流分布', seasonal: true },
   { id: 'climate-zones', name: '中国气候区', description: '五大气候区示意' },
   { id: 'coriolis-demo', name: '地转偏向力演示', description: '水平运动物体的偏转轨迹（北右南左）' },
-  { id: 'plate-tectonics', name: '板块运动与地震火山', description: '三大类板块边界、典型火山与近期地震（可点击查看成因）' }
+  { id: 'plate-tectonics', name: '板块运动与地震火山', description: '三大类板块边界、典型火山与近期地震（可点击查看成因）' },
+  { id: 'temperature-zones', name: '五带与直射点回归', description: '五带划分与回归线、极圈界线，直射点标记随日期时刻移动' },
+  { id: 'typhoon', name: '台风（热带气旋）', description: '台风眼、眼墙与螺旋雨带结构，叠加历史真实台风路径（可点击查看）' },
+  { id: 'enso', name: 'ENSO（厄尔尼诺与拉尼娜）', description: '赤道太平洋海温距平三相位着色与沃克环流示意（可点击查看影响）' }
 ]
 
 const MONTHS_PER_SECOND = 0.5
@@ -42,8 +46,12 @@ export const useClimateStore = defineStore('climate', () => {
     'ocean-currents': false,
     'climate-zones': false,
     'coriolis-demo': false,
-    'plate-tectonics': false
+    'plate-tectonics': false,
+    'temperature-zones': false,
+    'typhoon': false,
+    'enso': false
   })
+  const ensoPhase = ref<EnsoPhase>('normal')
 
   const summerStrength = computed(() => summerFactor(month.value))
   const winterStrength = computed(() => winterFactor(month.value))
@@ -52,6 +60,10 @@ export const useClimateStore = defineStore('climate', () => {
 
   function setOverlay(id: ThematicLayerId, enabled: boolean): void {
     overlays.value[id] = enabled
+  }
+
+  function setEnsoPhase(value: EnsoPhase): void {
+    ensoPhase.value = value
   }
 
   function setMonth(value: number): void {
@@ -68,5 +80,5 @@ export const useClimateStore = defineStore('climate', () => {
     month.value = next >= MONTH_MAX ? next - 12 : next
   }
 
-  return { month, isPlaying, overlays, summerStrength, winterStrength, hasActiveOverlay, hasSeasonalOverlay, setOverlay, setMonth, togglePlaying, advance }
+  return { month, isPlaying, overlays, ensoPhase, summerStrength, winterStrength, hasActiveOverlay, hasSeasonalOverlay, setOverlay, setEnsoPhase, setMonth, togglePlaying, advance }
 })

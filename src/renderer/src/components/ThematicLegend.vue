@@ -38,10 +38,24 @@ const koppenEntries = koppenZones.map((zone) => ({ name: zone.name, color: zone.
         <span class="swatch" :style="{ background: zone.color }"></span><span>{{ zone.name }}</span>
       </div>
     </div>
+    <div v-if="store.overlays['enso']" class="legend-group">
+      <div class="legend-item"><span class="swatch" style="background: #1677ff"></span><span>海温距平 ≤ -1.5℃</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #bae7ff"></span><span>接近正常</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #fa8c16"></span><span>距平 +0.5~+2℃</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #fa541c"></span><span>距平 ≥ +2℃</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #531dab"></span><span>Niño3.4 关键监测区</span></div>
+    </div>
     <div v-if="store.overlays['frontal-cyclone']" class="legend-group">
       <div class="legend-item"><span class="swatch" style="background: #f5222d"></span><span>暖锋</span></div>
       <div class="legend-item"><span class="swatch" style="background: #1677ff"></span><span>冷锋</span></div>
       <div class="legend-item"><span class="swatch" style="background: #69b1ff"></span><span>雨区</span></div>
+    </div>
+    <div v-if="store.overlays['typhoon']" class="legend-group">
+      <div class="legend-item"><span class="swatch" style="background: #1677ff"></span><span>热带低压</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #faad14"></span><span>热带风暴</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #fa8c16"></span><span>台风</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #f5222d"></span><span>超强台风</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #fa541c"></span><span>历史台风路径与结构锚点</span></div>
     </div>
     <div v-if="store.overlays['ocean-currents']" class="legend-group">
       <div class="legend-item"><span class="swatch" style="background: #f5222d"></span><span>暖流</span></div>
@@ -56,6 +70,13 @@ const koppenEntries = koppenZones.map((zone) => ({ name: zone.name, color: zone.
       <div class="legend-item"><span class="swatch swatch-dashed"></span><span>惯性直线（不偏转）</span></div>
       <div class="legend-item"><span class="swatch" style="background: #1677ff"></span><span>北半球轨迹 · 右偏</span></div>
       <div class="legend-item"><span class="swatch" style="background: #fa8c16"></span><span>南半球轨迹 · 左偏</span></div>
+    </div>
+    <div v-if="store.overlays['temperature-zones']" class="legend-group">
+      <div class="legend-item"><span class="swatch" style="background: #fa8c16"></span><span>热带（有直射）</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #52c41a"></span><span>温带（四季分明）</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #1677ff"></span><span>寒带（极昼极夜）</span></div>
+      <div class="legend-item"><span class="swatch swatch-dashed"></span><span>回归线 / 极圈</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #fa8c16; height: 8px; border-radius: 50%"></span><span>太阳直射点</span></div>
     </div>
     <div v-if="store.overlays['plate-tectonics']" class="legend-group">
       <div class="legend-item"><span class="swatch" style="background: #f5222d"></span><span>消亡边界（碰撞/俯冲）</span></div>

@@ -56,6 +56,52 @@ export function localSolarTime(utcHours: number, longitudeDeg: number): number {
   return (((utcHours + longitudeDeg / 15) % 24) + 24) % 24
 }
 
+export interface SubsolarPoint {
+  longitude: number
+  latitude: number
+}
+
+export function subsolarPointDeg(utcMs: number): SubsolarPoint {
+  const date = new Date(utcMs)
+  const utcHours = date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600
+  const longitude = (((12 - utcHours) * 15 + 540) % 360) - 180
+  const month = date.getUTCMonth() + 1
+  const day = date.getUTCDate()
+  return { longitude, latitude: declinationForDate(month, day) }
+}
+
+export interface HorizontalPosition {
+  altitudeDeg: number
+  azimuthDeg: number
+}
+
+export function solarHorizontalPositionDeg(latitudeDeg: number, declinationDeg: number, localSolarHour: number): HorizontalPosition {
+  const phi = latitudeDeg * DEG
+  const delta = declinationDeg * DEG
+  const hourAngle = (localSolarHour - 12) * 15 * DEG
+  const sinAltitude = Math.sin(phi) * Math.sin(delta) + Math.cos(phi) * Math.cos(delta) * Math.cos(hourAngle)
+  const altitudeDeg = Math.asin(Math.max(-1, Math.min(1, sinAltitude))) / DEG
+  const east = -Math.cos(delta) * Math.sin(hourAngle)
+  const north = Math.cos(phi) * Math.sin(delta) - Math.sin(phi) * Math.cos(delta) * Math.cos(hourAngle)
+  const azimuthDeg = (((Math.atan2(east, north) / DEG) % 360) + 360) % 360
+  return { altitudeDeg, azimuthDeg }
+}
+
+export interface HorizonCrossings {
+  state: DayState
+  sunriseAzimuthDeg?: number
+  sunsetAzimuthDeg?: number
+}
+
+export function horizonCrossingsDeg(latitudeDeg: number, declinationDeg: number): HorizonCrossings {
+  const result = dayLength(latitudeDeg, declinationDeg)
+  if (result.state !== 'normal') return { state: result.state }
+  const cosAzimuth = Math.sin(declinationDeg * DEG) / Math.cos(latitudeDeg * DEG)
+  const clamped = Math.max(-1, Math.min(1, cosAzimuth))
+  const sunrise = (Math.acos(clamped) / DEG)
+  return { state: 'normal', sunriseAzimuthDeg: sunrise, sunsetAzimuthDeg: 360 - sunrise }
+}
+
 export function formatClock(hour: number): string {
   const normalized = ((hour % 24) + 24) % 24
   const hours = Math.floor(normalized)

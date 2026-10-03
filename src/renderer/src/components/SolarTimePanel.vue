@@ -2,14 +2,14 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import dayjs, { type Dayjs } from 'dayjs'
-import { CaretRightOutlined, LineChartOutlined, PauseOutlined } from '@ant-design/icons-vue'
+import { CaretRightOutlined, LineChartOutlined, PauseOutlined, RetweetOutlined } from '@ant-design/icons-vue'
 import { useSolarStore } from '@renderer/stores/solar'
 import { useClimateStore } from '@renderer/stores/climate'
 import SolarChartPanel from '@renderer/components/SolarChartPanel.vue'
 
 const store = useSolarStore()
 const climateStore = useClimateStore()
-const { hour, isPlaying } = storeToRefs(store)
+const { hour, isPlaying, isAnnualPlaying } = storeToRefs(store)
 const chartOpen = ref(false)
 
 const dateValue = computed(() => dayjs(store.date))
@@ -54,6 +54,17 @@ onBeforeUnmount(() => {
       <PauseOutlined v-if="isPlaying" />
       <CaretRightOutlined v-else />
     </a-button>
+    <a-tooltip title="直射点回归运动（按年推进日期）">
+      <a-button
+        :type="isAnnualPlaying ? 'primary' : 'default'"
+        shape="circle"
+        :aria-label="isAnnualPlaying ? '暂停直射点回归运动' : '播放直射点回归运动'"
+        @click="store.toggleAnnualPlaying()"
+      >
+        <PauseOutlined v-if="isAnnualPlaying" />
+        <RetweetOutlined v-else />
+      </a-button>
+    </a-tooltip>
     <a-date-picker
       :value="dateValue"
       size="small"

@@ -12,6 +12,9 @@ import { useAiStore } from '@renderer/stores/ai'
 import { useUpdaterStore } from '@renderer/stores/updater'
 import { thematicLayerCatalog, useClimateStore } from '@renderer/stores/climate'
 import { useSolarStore } from '@renderer/stores/solar'
+import { useAtmosphereStore } from '@renderer/stores/atmosphere'
+import { useHydrologyStore } from '@renderer/stores/hydrology'
+import { useLandformStore } from '@renderer/stores/landform'
 import { useCesiumViewer } from '@renderer/composables/useCesiumViewer'
 import { useDrawing, measureShape } from '@renderer/composables/useDrawing'
 import { useThematicLayers } from '@renderer/composables/useThematicLayers'
@@ -28,6 +31,24 @@ import PlaceSearchBox from '@renderer/components/PlaceSearchBox.vue'
 import WindParticles from '@renderer/components/WindParticles.vue'
 import MonthTimeline from '@renderer/components/MonthTimeline.vue'
 import SolarTimePanel from '@renderer/components/SolarTimePanel.vue'
+import SolarPathPanel from '@renderer/components/SolarPathPanel.vue'
+import ObliquityPanel from '@renderer/components/ObliquityPanel.vue'
+import RotationSpeedPanel from '@renderer/components/RotationSpeedPanel.vue'
+import ThermalCirculationPanel from '@renderer/components/ThermalCirculationPanel.vue'
+import AtmosphereHeatingPanel from '@renderer/components/AtmosphereHeatingPanel.vue'
+import AtmosphereLayersPanel from '@renderer/components/AtmosphereLayersPanel.vue'
+import TyphoonOverlay from '@renderer/components/TyphoonOverlay.vue'
+import WalkerCirculationOverlay from '@renderer/components/WalkerCirculationOverlay.vue'
+import EnsoPanel from '@renderer/components/EnsoPanel.vue'
+import WaterCyclePanel from '@renderer/components/WaterCyclePanel.vue'
+import OceanPropertyPanel from '@renderer/components/OceanPropertyPanel.vue'
+import TideWavePanel from '@renderer/components/TideWavePanel.vue'
+import WaterBodyPanel from '@renderer/components/WaterBodyPanel.vue'
+import FoldFaultPanel from '@renderer/components/FoldFaultPanel.vue'
+import RiverLandformPanel from '@renderer/components/RiverLandformPanel.vue'
+import LandformGuidePanel from '@renderer/components/LandformGuidePanel.vue'
+import ExogenicPanel from '@renderer/components/ExogenicPanel.vue'
+import EarthLayersPanel from '@renderer/components/EarthLayersPanel.vue'
 import TimezonePanel from '@renderer/components/TimezonePanel.vue'
 import ThematicLegend from '@renderer/components/ThematicLegend.vue'
 import FrontalCyclone from '@renderer/components/FrontalCyclone.vue'
@@ -65,6 +86,9 @@ const { flyToShape } = useDrawing(viewer)
 const { comparison: timezoneComparison, clearComparison: clearTimezone } = useTimezoneCompare(viewer)
 const climateStore = useClimateStore()
 const solarStore = useSolarStore()
+const atmosphereStore = useAtmosphereStore()
+const hydrologyStore = useHydrologyStore()
+const landformStore = useLandformStore()
 const { overlays: thematicOverlays } = storeToRefs(climateStore)
 useThematicLayers(viewer)
 
@@ -79,7 +103,7 @@ const selectedShape = computed(() => shapes.value.find((shape) => shape.id === s
 const levelSwitcherVisible = computed(() => isGlobeReady.value && camera.value.height < 5000000)
 const showGlobeLoading = computed(() => !isGlobeReady.value && !globeError.value)
 const isLabOpen = ref(false)
-const labActive = computed(() => climateStore.hasActiveOverlay || solarStore.active || activeTool.value === 'timezone')
+const labActive = computed(() => climateStore.hasActiveOverlay || solarStore.active || solarStore.motionPanel !== null || atmosphereStore.panel !== null || hydrologyStore.panel !== null || landformStore.panel !== null || activeTool.value === 'timezone')
 const drawHint = computed(() => {
   if (!activeTool.value) return ''
   if (activeTool.value === 'timezone') return '单击选取两个地点对比地方时 · Esc 退出'
@@ -727,6 +751,8 @@ function deleteSelectedShape(): void {
     <FailureBanner />
     <WindParticles v-if="thematicOverlays['wind-particles']" :viewer="viewer" />
     <FrontalCyclone v-if="thematicOverlays['frontal-cyclone']" :viewer="viewer" />
+    <TyphoonOverlay v-if="thematicOverlays['typhoon']" :viewer="viewer" />
+    <WalkerCirculationOverlay v-if="thematicOverlays['enso']" :viewer="viewer" :phase="climateStore.ensoPhase" />
     <GlobeToolbar
       :active-tool="activeTool"
       :shape-count="shapes.length"
@@ -757,6 +783,22 @@ function deleteSelectedShape(): void {
     <PlaceSearchBox @select="flyToPlace" />
     <MonthTimeline />
     <SolarTimePanel />
+    <SolarPathPanel v-if="solarStore.motionPanel === 'solar-path'" @close="solarStore.setMotionPanel(null)" />
+    <ObliquityPanel v-if="solarStore.motionPanel === 'obliquity'" @close="solarStore.setMotionPanel(null)" />
+    <RotationSpeedPanel v-if="solarStore.motionPanel === 'rotation-speed'" @close="solarStore.setMotionPanel(null)" />
+    <ThermalCirculationPanel v-if="atmosphereStore.panel === 'circulation'" @close="atmosphereStore.setPanel(null)" />
+    <AtmosphereHeatingPanel v-if="atmosphereStore.panel === 'heating'" @close="atmosphereStore.setPanel(null)" />
+    <AtmosphereLayersPanel v-if="atmosphereStore.panel === 'layers'" @close="atmosphereStore.setPanel(null)" />
+    <EnsoPanel v-if="thematicOverlays['enso']" @close="climateStore.setOverlay('enso', false)" />
+    <WaterCyclePanel v-if="hydrologyStore.panel === 'water-cycle'" :viewer="viewer" @close="hydrologyStore.setPanel(null)" />
+    <OceanPropertyPanel v-if="hydrologyStore.panel === 'ocean-property'" @close="hydrologyStore.setPanel(null)" />
+    <TideWavePanel v-if="hydrologyStore.panel === 'tide'" @close="hydrologyStore.setPanel(null)" />
+    <WaterBodyPanel v-if="hydrologyStore.panel === 'water-bodies'" @close="hydrologyStore.setPanel(null)" />
+    <FoldFaultPanel v-if="landformStore.panel === 'fold-fault'" :viewer="viewer" @close="landformStore.setPanel(null)" />
+    <RiverLandformPanel v-if="landformStore.panel === 'river'" :viewer="viewer" @close="landformStore.setPanel(null)" />
+    <LandformGuidePanel v-if="landformStore.panel === 'landform-guide'" :viewer="viewer" @close="landformStore.setPanel(null)" />
+    <ExogenicPanel v-if="landformStore.panel === 'exogenic'" :viewer="viewer" @close="landformStore.setPanel(null)" />
+    <EarthLayersPanel v-if="landformStore.panel === 'earth-layers'" @close="landformStore.setPanel(null)" />
     <TimezonePanel v-if="timezoneComparison" :comparison="timezoneComparison" @clear="clearTimezone" />
     <ThematicLegend />
     <ThematicInfoCard />

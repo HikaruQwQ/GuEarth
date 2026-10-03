@@ -2,6 +2,7 @@ import { onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import * as Cesium from 'cesium'
 import type { EarthquakeEvent, EarthquakeFeed } from '../../../preload'
 import { thematicLayerCatalog, useClimateStore, type ThematicLayerId } from '@renderer/stores/climate'
+import { useSolarStore } from '@renderer/stores/solar'
 import { useFailureStore } from '@renderer/stores/failure'
 import { beltLabel, beltLabelPosition, beltOpacity, beltRing } from '@renderer/thematic/rainBelt'
 import { summerMonsoonArrows, winterMonsoonArrows, type MonsoonArrow } from '@renderer/thematic/monsoonArrows'
@@ -12,6 +13,10 @@ import { beltCenter, beltRingDegrees, pressureBelts, windBeltLatitude, windBelts
 import { koppenZones } from '@renderer/thematic/koppenZones'
 import { nearestBoundary, plateBoundaries, plateBoundaryKindName } from '@renderer/thematic/plateBoundaries'
 import { volcanoes } from '@renderer/thematic/volcanoes'
+import { temperatureZoneBands, temperatureZoneLines } from '@renderer/thematic/temperatureZones'
+import { typhoonIntensityStyles, typhoonTracks } from '@renderer/thematic/typhoonTracks'
+import { ensoAnomalyColor, ensoPhaseMeta } from '@renderer/thematic/ensoPhases'
+import { subsolarPointDeg } from '@renderer/thematic/solarMath'
 
 const WARM_COLOR = '#f5222d'
 const COLD_COLOR = '#1677ff'
@@ -24,6 +29,13 @@ const PLATE_DIVERGENT_COLOR = '#1677ff'
 const PLATE_CONVERGENT_COLOR = '#f5222d'
 const PLATE_TRANSFORM_COLOR = '#fa8c16'
 const VOLCANO_COLOR = '#fa541c'
+const SUBSOLAR_COLOR = '#fa8c16'
+const ZONE_LINE_COLOR = 'rgba(0, 0, 0, 0.55)'
+const TYPHOON_INTENSITY_COLOR = '#f5222d'
+const TYPHOON_TRACK_COLOR = '#fa541c'
+const TYPHOON_ANCHOR_LON = 138
+const TYPHOON_ANCHOR_LAT = 15
+const ENSO_BAND_LATITUDE = 20
 const FRONTAL_CYCLONE_LON = 125
 const FRONTAL_CYCLONE_LAT = 34
 const BELT_LABEL_LON = 150
@@ -81,6 +93,7 @@ function arrowLabelAt(arrow: MonsoonArrow): [number, number] {
 
 export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void {
   const store = useClimateStore()
+  const solarStore = useSolarStore()
   const failureStore = useFailureStore()
   const sources = new Map<ThematicLayerId, Cesium.CustomDataSource>()
   const coriolisProgress = ref(0)
@@ -586,6 +599,202 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     void addEarthquakeEntities(dataSource)
   }
 
+  function buildTemperatureZones(dataSource: Cesium.CustomDataSource): void {
+    for (const band of temperatureZoneBands) {
+      const color = Cesium.Color.fromCssColorString(band.color)
+      const properties = new Cesium.PropertyBag({ name: band.name, layerId: 'temperature-zones', summary: band.summary })
+      for (const west of [-180, -90, 0, 90]) {
+        const south = Math.max(-89.9, band.south)
+        const north = Math.min(89.9, band.north)
+        dataSource.entities.add({
+          properties,
+          polygon: {
+            hierarchy: new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray([
+              west, south, west + 90, south, west + 90, north, west, north
+            ])),
+            material: new Cesium.ColorMaterialProperty(color.withAlpha(0.12))
+          }
+        })
+      }
+      dataSource.entities.add({
+        properties,
+        position: Cesium.Cartesian3.fromDegrees(band.labelAt[0], band.labelAt[1]),
+        label: {
+          text: band.name,
+          font: labelFont(14, 600),
+          fillColor: color,
+          showBackground: true,
+          backgroundColor: Cesium.Color.WHITE.withAlpha(0.72),
+          backgroundPadding: new Cesium.Cartesian2(7, 4),
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+        }
+      })
+    }
+    const lineColor = Cesium.Color.fromCssColorString(ZONE_LINE_COLOR)
+    for (const line of temperatureZoneLines) {
+      const properties = new Cesium.PropertyBag({ name: line.name, layerId: 'temperature-zones', summary: line.summary })
+      dataSource.entities.add({
+        properties,
+        polyline: {
+          positions: Cesium.Cartesian3.fromDegreesArray([-180, line.latitude, -90, line.latitude, 0, line.latitude, 90, line.latitude, 180, line.latitude]),
+          clampToGround: true,
+          width: 2,
+          material: new Cesium.PolylineDashMaterialProperty({ color: lineColor })
+        }
+      })
+      dataSource.entities.add({
+        properties,
+        position: Cesium.Cartesian3.fromDegrees(line.labelLon, line.latitude),
+        label: {
+          text: `${line.name}（${Math.abs(line.latitude).toFixed(1)}°${line.latitude > 0 ? 'N' : 'S'}）`,
+          font: labelFont(12, 600),
+          fillColor: Cesium.Color.fromCssColorString('rgba(0, 0, 0, 0.65)'),
+          showBackground: true,
+          backgroundColor: Cesium.Color.WHITE.withAlpha(0.72),
+          backgroundPadding: new Cesium.Cartesian2(6, 3),
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+        }
+      })
+    }
+    const subsolarColor = Cesium.Color.fromCssColorString(SUBSOLAR_COLOR)
+    dataSource.entities.add({
+      properties: new Cesium.PropertyBag({
+        name: '太阳直射点',
+        layerId: 'temperature-zones',
+        summary: '太阳光线垂直照射的地面位置。直射点以直射纬度在最北 23.5°N 与最南 23.5°S 之间做回归运动：春分指向赤道，夏至最北，秋分返回赤道，冬至最南，周期为一个回归年。调节日期、时刻或播放「回归运动」即可观察其移动。'
+      }),
+      position: new Cesium.CallbackPositionProperty(() => {
+        const point = subsolarPointDeg(solarStore.utcMs)
+        return Cesium.Cartesian3.fromDegrees(point.longitude, point.latitude)
+      }, false, Cesium.ReferenceFrame.FIXED),
+      point: {
+        pixelSize: 10,
+        color: subsolarColor,
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 2,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
+      },
+      label: {
+        text: new Cesium.CallbackProperty(() => {
+          const point = subsolarPointDeg(solarStore.utcMs)
+          return `直射点 ${Math.abs(point.latitude).toFixed(1)}°${point.latitude >= 0 ? 'N' : 'S'}`
+        }, false),
+        font: labelFont(13, 600),
+        fillColor: subsolarColor,
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset: new Cesium.Cartesian2(0, -16),
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
+      }
+    })
+  }
+
+  function buildTyphoon(dataSource: Cesium.CustomDataSource): void {
+    dataSource.entities.add({
+      properties: new Cesium.PropertyBag({
+        name: '台风（热带气旋）结构锚点',
+        layerId: 'typhoon',
+        summary: '台风是形成于热带、副热带洋面上强度达到一定级别的热带气旋（中心风力 12 级以上），西北太平洋是全球台风发生最多的海区。结构自内向外分为三部分：台风眼（中心 10~50 千米范围内无风少云、气压最低）、眼墙（环绕眼区的高耸对流云墙，狂风暴雨最强烈）、外围漩涡风雨区（螺旋云雨带，风速与降水向外减弱）。北半球气流逆时针向中心辐合旋转，夏秋季（7~10 月）最活跃。'
+      }),
+      position: Cesium.Cartesian3.fromDegrees(TYPHOON_ANCHOR_LON, TYPHOON_ANCHOR_LAT),
+      point: {
+        pixelSize: 8,
+        color: Cesium.Color.fromCssColorString(TYPHOON_INTENSITY_COLOR),
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 2,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+      }
+    })
+    for (const track of typhoonTracks) {
+      const trackColor = Cesium.Color.fromCssColorString(TYPHOON_TRACK_COLOR)
+      const properties = new Cesium.PropertyBag({ name: `${track.year} 年第${track.name}台风路径`, layerId: 'typhoon', summary: track.summary })
+      for (let index = 0; index < track.points.length - 1; index += 1) {
+        const from = track.points[index]
+        const to = track.points[index + 1]
+        const stronger = Math.max(
+          Object.keys(typhoonIntensityStyles).indexOf(from.intensity),
+          Object.keys(typhoonIntensityStyles).indexOf(to.intensity)
+        )
+        const intensityKey = Object.keys(typhoonIntensityStyles)[stronger] as keyof typeof typhoonIntensityStyles
+        dataSource.entities.add({
+          properties,
+          polyline: {
+            positions: Cesium.Cartesian3.fromDegreesArray([from.longitude, from.latitude, to.longitude, to.latitude]),
+            clampToGround: true,
+            width: 3.5,
+            material: Cesium.Color.fromCssColorString(typhoonIntensityStyles[intensityKey].color).withAlpha(0.9)
+          }
+        })
+      }
+      for (const point of track.points) {
+        const note = point.note ? `。${point.note}` : ''
+        dataSource.entities.add({
+          properties: new Cesium.PropertyBag({
+            name: `${track.name}（${track.englishName}，${track.year}）`,
+            layerId: 'typhoon',
+            summary: `${track.year} 年台风「${track.name}」（${track.englishName}）路径点：位于 ${point.longitude.toFixed(1)}°E，${Math.abs(point.latitude).toFixed(1)}°${point.latitude >= 0 ? 'N' : 'S'}，强度为${typhoonIntensityStyles[point.intensity].name}${note}。${track.summary}`
+          }),
+          position: Cesium.Cartesian3.fromDegrees(point.longitude, point.latitude),
+          point: {
+            pixelSize: 6,
+            color: Cesium.Color.fromCssColorString(typhoonIntensityStyles[point.intensity].color),
+            outlineColor: Cesium.Color.WHITE,
+            outlineWidth: 1.5,
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+          }
+        })
+      }
+      const mid = track.points[Math.floor(track.points.length / 2)]
+      dataSource.entities.add({
+        properties,
+        position: Cesium.Cartesian3.fromDegrees(mid.longitude, mid.latitude),
+        label: {
+          text: `${track.name}·${track.year}`,
+          font: labelFont(12, 600),
+          fillColor: trackColor,
+          outlineColor: Cesium.Color.WHITE,
+          outlineWidth: 2,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          pixelOffset: new Cesium.Cartesian2(0, -12),
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+        }
+      })
+    }
+  }
+
+  function buildEnso(dataSource: Cesium.CustomDataSource): void {
+    const phase = ensoPhaseMeta[store.ensoPhase]
+    for (const item of phase.bands) {
+      dataSource.entities.add({
+        properties: new Cesium.PropertyBag({
+          name: `ENSO 海温距平：${phase.name}`,
+          layerId: 'enso',
+          summary: `${phase.summary} 对地理格局的影响：${phase.impacts.map((line) => line).join('；')}。`
+        }),
+        rectangle: {
+          coordinates: Cesium.Rectangle.fromDegrees(item.west, -ENSO_BAND_LATITUDE, item.east, ENSO_BAND_LATITUDE),
+          material: Cesium.Color.fromCssColorString(ensoAnomalyColor(item.anomaly)).withAlpha(0.8)
+        }
+      })
+    }
+    dataSource.entities.add({
+      properties: new Cesium.PropertyBag({
+        name: 'Niño3.4 关键监测区',
+        layerId: 'enso',
+        summary: 'Niño3.4 区（5°N–5°S，170°W–120°W）海温距平是判定厄尔尼诺与拉尼娜的主要指标：距平持续 ≥ +0.5℃ 判定为厄尔尼诺事件，≤ -0.5℃ 判定为拉尼娜事件。'
+      }),
+      polyline: {
+        positions: Cesium.Cartesian3.fromDegreesArray([-170, -5, -120, -5, -120, 5, -170, 5, -170, -5]),
+        clampToGround: true,
+        width: 2.5,
+        material: Cesium.Color.fromCssColorString('#531dab')
+      }
+    })
+  }
+
   const builders: Record<ThematicLayerId, (dataSource: Cesium.CustomDataSource) => void> = {
     'wind-particles': () => undefined,
     'pressure-belts': buildPressureBelts,
@@ -597,7 +806,10 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     'ocean-currents': buildOceanCurrents,
     'climate-zones': buildClimateZones,
     'coriolis-demo': buildCoriolis,
-    'plate-tectonics': buildPlateTectonics
+    'plate-tectonics': buildPlateTectonics,
+    'temperature-zones': buildTemperatureZones,
+    'typhoon': buildTyphoon,
+    'enso': buildEnso
   }
 
   const enableViews: Partial<Record<ThematicLayerId, LayerView>> = {
@@ -609,7 +821,10 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     'winter-monsoon': { longitude: 108, latitude: 32, height: 7500000 },
     'climate-zones': { longitude: 104, latitude: 34, height: 5200000 },
     'coriolis-demo': { longitude: 100, latitude: 0, height: 12000000 },
-    'plate-tectonics': { longitude: 180, latitude: 5, height: 17000000 }
+    'plate-tectonics': { longitude: 180, latitude: 5, height: 17000000 },
+    'temperature-zones': { longitude: 20, latitude: 0, height: 17000000 },
+    'typhoon': { longitude: 132, latitude: 18, height: 10500000 },
+    'enso': { longitude: -155, latitude: 0, height: 9500000 }
   }
 
   function syncOverlays(): void {
@@ -620,7 +835,11 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
       const existing = sources.get(layer.id)
       if (enabled && !existing) {
         const dataSource = new Cesium.CustomDataSource(layer.id)
-        builders[layer.id](dataSource)
+        try {
+          builders[layer.id](dataSource)
+        } catch (error) {
+          console.error(`[thematic] failed to build layer: ${layer.id}`, error)
+        }
         void current.dataSources.add(dataSource)
         sources.set(layer.id, dataSource)
         const view = enableViews[layer.id]
@@ -635,6 +854,24 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
   }
 
   watch(() => store.overlays, syncOverlays, { deep: true })
+  watch(
+    () => store.ensoPhase,
+    () => {
+      const current = viewer.value
+      const existing = sources.get('enso')
+      if (!current || current.isDestroyed() || !existing) return
+      current.dataSources.remove(existing, true)
+      sources.delete('enso')
+      const dataSource = new Cesium.CustomDataSource('enso')
+      try {
+        buildEnso(dataSource)
+      } catch (error) {
+        console.error('[thematic] failed to rebuild ENSO layer', error)
+      }
+      void current.dataSources.add(dataSource)
+      sources.set('enso', dataSource)
+    }
+  )
   failureStore.registerRetry('dataset', async () => {
     const dataSource = sources.get('plate-tectonics')
     if (!dataSource) {
