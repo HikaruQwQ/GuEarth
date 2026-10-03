@@ -594,13 +594,17 @@ function registerIpcHandlers(): void {
   })
 }
 
+function displayAppName(): string {
+  return app.getLocale().toLowerCase().startsWith('zh') ? '咕咕地球' : 'GuEarth'
+}
+
 function createWindow(): void {
   const win = new BrowserWindow({
     width: 1440,
     height: 900,
     show: false,
     autoHideMenuBar: true,
-    title: 'GuEarth',
+    title: displayAppName(),
     icon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -611,6 +615,7 @@ function createWindow(): void {
   })
 
   win.on('ready-to-show', () => win.show())
+  win.on('page-title-updated', (event) => event.preventDefault())
 
   win.webContents.setWindowOpenHandler((details) => {
     if (/^https?:\/\//i.test(details.url)) void shell.openExternal(details.url)
