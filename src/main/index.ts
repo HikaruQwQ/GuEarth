@@ -1,4 +1,9 @@
+import * as Sentry from '@sentry/electron/main'
 import { app, shell, BrowserWindow, dialog, ipcMain, net, protocol } from 'electron'
+
+Sentry.init({
+  dsn: 'https://28239780e3a5ede424bde1114849f448@o4509333304573952.ingest.us.sentry.io/4512192370769920'
+})
 import { execFileSync } from 'child_process'
 import { join } from 'path'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'fs'
