@@ -125,6 +125,14 @@ export interface AiChatTurn {
   content: string
 }
 
+export interface AiContextEntry {
+  role: 'user' | 'assistant' | 'tool'
+  content: string
+  callId?: string
+  name?: string
+  isError?: boolean
+}
+
 export interface AiContextCategory {
   key: 'system' | 'user' | 'assistant' | 'tool'
   label: string
@@ -295,8 +303,8 @@ const api = {
     getSettings: (): Promise<AiSettings> => ipcRenderer.invoke('ai:get-settings'),
     updateSettings: (settings: AiSettings): Promise<AiSettings> => ipcRenderer.invoke('ai:update-settings', settings),
     chat: (sessionId: string, turns: AiChatTurn[], tools: AiToolDefinition[]): Promise<void> => ipcRenderer.invoke('ai:chat', sessionId, turns, tools),
-    getContextStats: (turns: AiChatTurn[]): Promise<AiContextStats> => ipcRenderer.invoke('ai:context-stats', turns),
-    compressContext: (turns: AiChatTurn[]): Promise<AiContextCompressionResult> => ipcRenderer.invoke('ai:compress-context', turns),
+    getContextStats: (entries: AiContextEntry[]): Promise<AiContextStats> => ipcRenderer.invoke('ai:context-stats', entries),
+    compressContext: (entries: AiContextEntry[]): Promise<AiContextCompressionResult> => ipcRenderer.invoke('ai:compress-context', entries),
     stop: (sessionId: string): Promise<void> => ipcRenderer.invoke('ai:stop', sessionId),
     toolResult: (sessionId: string, callId: string, ok: boolean, result: unknown): Promise<void> => ipcRenderer.invoke('ai:tool-result', sessionId, callId, ok, result),
     chatHistory: {
