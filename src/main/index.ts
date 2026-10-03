@@ -644,8 +644,13 @@ function registerIpcHandlers(): void {
   })
   ipcMain.handle('scenes:load', (): SceneDocument => scenes)
   ipcMain.handle('scenes:save', (_event, document: unknown): void => {
-    scenes = normalizeSceneDocument(document)
-    saveScenes()
+    try {
+      scenes = normalizeSceneDocument(document)
+      saveScenes()
+    } catch (error) {
+      console.error('[scenes] save failed:', error)
+      throw error instanceof Error ? error : new Error(String(error))
+    }
   })
   ipcMain.handle('recordings:get-directory', (): Promise<string | null> => usableRecordingDirectory())
   ipcMain.handle('recordings:choose-directory', async (event): Promise<string | null> => {

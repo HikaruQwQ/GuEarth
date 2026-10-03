@@ -14,7 +14,7 @@ export interface SceneEditPayload {
 const props = defineProps<{
   open: boolean
   scenes: TeachingScene[]
-  saveError: boolean
+  saveError: string
 }>()
 
 const emit = defineEmits<{
@@ -88,7 +88,7 @@ function confirmEdit(): void {
         <template #icon><PlusOutlined /></template>
         保存当前画面为场景
       </Button>
-      <a-alert v-if="saveError" type="error" show-icon message="场景保存失败，请重试" class="panel-alert" />
+      <a-alert v-if="saveError" type="error" show-icon :message="saveError" class="panel-alert" />
     </div>
     <div class="scene-list">
       <div v-if="!scenes.length" class="scene-empty">

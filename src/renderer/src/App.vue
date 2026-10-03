@@ -467,6 +467,7 @@ aiStore.registerTool({
     try {
       const scene = scenePlayer.captureScene(name, narration)
       await scenesStore.addScene(scene)
+      if (scenesStore.saveError) return { error: `场景保存失败：${scenesStore.saveError}` }
       return { status: 'ok', id: scene.id, name, hint: '场景已保存，可在底部工具栏「教学场景」面板中查看、排序与播放' }
     } catch (error) {
       return { error: error instanceof Error ? error.message : '地球尚未就绪，无法捕获当前画面' }

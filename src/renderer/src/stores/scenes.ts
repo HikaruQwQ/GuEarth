@@ -20,7 +20,7 @@ const idleRecording: RecordingSessionState = { state: 'idle', title: '', current
 export const useScenesStore = defineStore('scenes', () => {
   const scenes = ref<TeachingScene[]>([])
   const hydrated = ref(false)
-  const saveError = ref(false)
+  const saveError = ref('')
   const isPresenting = ref(false)
   const recording = ref<RecordingSessionState>({ ...idleRecording })
 
@@ -36,11 +36,12 @@ export const useScenesStore = defineStore('scenes', () => {
   }
 
   async function persist(): Promise<void> {
-    saveError.value = false
+    saveError.value = ''
     try {
-      await window.guEarth.scenes.save({ scenes: scenes.value })
-    } catch {
-      saveError.value = true
+      const plain = JSON.parse(JSON.stringify({ scenes: scenes.value })) as { scenes: TeachingScene[] }
+      await window.guEarth.scenes.save(plain)
+    } catch (error) {
+      saveError.value = error instanceof Error ? error.message.replace(/^Error invoking remote method 'scenes:save':\s*/, '') : '场景保存失败，请重试'
     }
   }
 
