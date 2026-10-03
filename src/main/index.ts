@@ -2,9 +2,10 @@ import { app, shell, BrowserWindow, ipcMain, net, protocol } from 'electron'
 import { execFileSync } from 'child_process'
 import { join } from 'path'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'fs'
+import { writeFile } from 'fs/promises'
 import { createHash } from 'crypto'
 import icon from '../../resources/icon.png?asset'
-import type { AnnotationDocument, AnnotationEntry, GeoPosition, GuEarthSettings, GuEarthSettingsPatch, PlaceSearchProvider, ProviderCredentialStatus, StoredShape, TileCacheEntry, TileCacheStats, TileKey } from '../preload'
+import type { AnnotationDocument, AnnotationEntry, GeoPosition, GuEarthSettings, GuEarthSettingsPatch, PlaceSearchProvider, ProviderCredentialStatus, RecordingSaveResult, SceneCamera, SceneDocument, SceneSnapshot, SceneSimTime, StoredShape, TeachingScene, TileCacheEntry, TileCacheStats, TileKey } from '../preload'
 import { assertEncryptionAvailable, assertSafeId, clearProviderKey, hasProviderKey, initKeyVault, readProviderKey, writeProviderKey } from './keyVault'
 import { baiduLngLatToTile, tileCenter, wgs84ToBd09 } from './geo'
 import { AiSettingsStore } from './ai/settingsStore'
@@ -48,8 +49,10 @@ const TILE_TTL_MS = 86_400_000
 let settingsPath = ''
 let tileCachePath = ''
 let annotationsPath = ''
+let scenesPath = ''
 let settings: PersistedSettings = { ...defaultSettings, providerCredentials: {} }
 let annotations: AnnotationDocument = { shapes: [], entries: [] }
+let scenes: SceneDocument = { scenes: [] }
 const aiSettings = new AiSettingsStore()
 const aiChatHistory = new AiChatHistoryStore()
 
@@ -355,6 +358,98 @@ function saveAnnotations(): void {
   renameSync(tempPath, annotationsPath)
 }
 
+const MOTION_PANEL_IDS = new Set(['solar-path', 'obliquity', 'rotation-speed'])
+const SCENE_MAX = 200
+
+function normalizeNumber(value: unknown, min: number, max: number, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback
+}
+
+function normalizeSceneCamera(value: unknown): SceneCamera {
+  if (!isRecord(value)) throw new Error('无效的场景视角')
+  const longitude = Number(value.longitude)
+  const latitude = Number(value.latitude)
+  const height = Number(value.height)
+  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) throw new Error('无效的场景视角')
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) throw new Error('无效的场景视角')
+  if (!Number.isFinite(height) || height <= 0 || height > 20000000) throw new Error('无效的场景视角')
+  const heading = normalizeNumber(value.heading, -360, 360, 0)
+  const pitch = normalizeNumber(value.pitch, -90, 90, -90)
+  return { longitude, latitude, height, heading, pitch }
+}
+
+function normalizeSceneSimTime(value: unknown): SceneSimTime | null {
+  if (value === null || value === undefined) return null
+  if (!isRecord(value) || typeof value.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value.date)) throw new Error('无效的模拟时间')
+  return { date: value.date, hour: normalizeNumber(value.hour, 0, 24, 12) }
+}
+
+function normalizeSceneSnapshot(value: unknown): SceneSnapshot {
+  if (!isRecord(value)) throw new Error('无效的场景快照')
+  const overlays = Array.isArray(value.overlays)
+    ? [...new Set(value.overlays.filter((item): item is string => typeof item === 'string').map((item) => safeId(item)))]
+    : []
+  if (overlays.length > 14) throw new Error('无效的专题图层')
+  const motionPanel = typeof value.motionPanel === 'string' && MOTION_PANEL_IDS.has(value.motionPanel) ? value.motionPanel : null
+  return {
+    camera: normalizeSceneCamera(value.camera),
+    basemapId: safeId(value.basemapId ?? 'osm'),
+    overlays,
+    month: Math.round(normalizeNumber(value.month, 1, 12, 7)),
+    simTime: normalizeSceneSimTime(value.simTime),
+    motionPanel
+  }
+}
+
+function normalizeTeachingScene(value: unknown): TeachingScene {
+  if (!isRecord(value)) throw new Error('无效的教学场景')
+  const id = safeId(value.id)
+  const name = typeof value.name === 'string' ? value.name.trim().slice(0, 80) : ''
+  if (!name) throw new Error('场景名称不能为空')
+  return {
+    id,
+    name,
+    narration: typeof value.narration === 'string' ? value.narration.slice(0, 500) : '',
+    dwellMs: Math.round(normalizeNumber(value.dwellMs, 1000, 60000, 6000)),
+    flyDurationMs: Math.round(normalizeNumber(value.flyDurationMs, 500, 15000, 3500)),
+    snapshot: normalizeSceneSnapshot(value.snapshot),
+    createdAt: typeof value.createdAt === 'number' && Number.isFinite(value.createdAt) ? value.createdAt : Date.now()
+  }
+}
+
+function normalizeSceneDocument(value: unknown): SceneDocument {
+  if (!isRecord(value) || !Array.isArray(value.scenes)) throw new Error('无效的场景目录')
+  if (value.scenes.length > SCENE_MAX) throw new Error('场景目录过大')
+  const scenes = value.scenes.map(normalizeTeachingScene)
+  if (new Set(scenes.map((scene) => scene.id)).size !== scenes.length) throw new Error('重复的场景')
+  return { scenes }
+}
+
+function readScenes(): SceneDocument {
+  if (!existsSync(scenesPath)) return { scenes: [] }
+  try {
+    return normalizeSceneDocument(JSON.parse(readFileSync(scenesPath, 'utf8')))
+  } catch {
+    return { scenes: [] }
+  }
+}
+
+function saveScenes(): void {
+  const tempPath = `${scenesPath}.tmp`
+  writeFileSync(tempPath, JSON.stringify(scenes), 'utf8')
+  renameSync(tempPath, scenesPath)
+}
+
+const RECORDING_EXTENSIONS: Record<string, string> = {
+  'video/mp4': 'mp4',
+  'video/webm': 'webm'
+}
+
+function recordingExtension(mimeType: unknown): string {
+  if (typeof mimeType !== 'string') return 'webm'
+  return RECORDING_EXTENSIONS[mimeType.split(';')[0]] ?? 'webm'
+}
+
 function registerIpcHandlers(): void {
   ipcMain.handle('system:fonts', (): string[] => {
     const families = new Set(['Arial', 'Segoe UI', 'Microsoft YaHei'])
@@ -473,6 +568,23 @@ function registerIpcHandlers(): void {
     annotations = normalizeAnnotations(document)
     saveAnnotations()
   })
+  ipcMain.handle('scenes:load', (): SceneDocument => scenes)
+  ipcMain.handle('scenes:save', (_event, document: unknown): void => {
+    scenes = normalizeSceneDocument(document)
+    saveScenes()
+  })
+  ipcMain.handle('recordings:save', async (_event, data: unknown, mimeType: unknown): Promise<RecordingSaveResult> => {
+    if (!(data instanceof ArrayBuffer) || data.byteLength === 0) throw new Error('无效的录制数据')
+    const directory = join(app.getPath('videos'), 'GuEarth')
+    mkdirSync(directory, { recursive: true })
+    const now = new Date()
+    const pad = (value: number): string => String(value).padStart(2, '0')
+    const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+    const path = join(directory, `GuEarth-${stamp}.${recordingExtension(mimeType)}`)
+    await writeFile(path, Buffer.from(data))
+    shell.showItemInFolder(path)
+    return { path, bytes: statSync(path).size }
+  })
 }
 
 function createWindow(): void {
@@ -510,11 +622,13 @@ app.whenReady().then(() => {
   settingsPath = join(userDataPath, 'settings.json')
   tileCachePath = join(userDataPath, 'tile-cache')
   annotationsPath = join(userDataPath, 'annotations.json')
+  scenesPath = join(userDataPath, 'scenes.json')
   initKeyVault(join(userDataPath, 'credentials'))
   initDatasets(userDataPath)
   mkdirSync(tileCachePath, { recursive: true })
   settings = readSettings()
   annotations = readAnnotations()
+  scenes = readScenes()
   aiSettings.init(join(userDataPath, 'ai-settings.json'))
   aiChatHistory.init(join(userDataPath, 'ai-chat-history.json'))
   registerIpcHandlers()

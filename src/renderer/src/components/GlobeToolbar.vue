@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { AimOutlined, AppstoreOutlined, ArrowRightOutlined, CheckCircleOutlined, ClearOutlined, DownloadOutlined, EnvironmentOutlined, ExperimentOutlined, EyeOutlined, FontSizeOutlined, GatewayOutlined, HomeOutlined, NodeIndexOutlined, QuestionCircleOutlined, RobotOutlined, TagsOutlined } from '@ant-design/icons-vue'
+import { AimOutlined, AppstoreOutlined, ArrowRightOutlined, CheckCircleOutlined, ClearOutlined, DownloadOutlined, EnvironmentOutlined, ExperimentOutlined, EyeOutlined, FontSizeOutlined, GatewayOutlined, HomeOutlined, NodeIndexOutlined, PlaySquareOutlined, QuestionCircleOutlined, RobotOutlined, TagsOutlined } from '@ant-design/icons-vue'
 import { Button, Tooltip } from 'ant-design-vue'
 import type { Component } from 'vue'
 import type { DrawTool } from '@renderer/stores/drawing'
@@ -22,6 +22,7 @@ defineEmits<{
   openAnnotations: []
   openAssistant: []
   openSetupGuide: []
+  openScenes: []
   home: []
   tool: [tool: DrawTool]
   clearShapes: []
@@ -64,6 +65,11 @@ const updateTooltip = computed(() => {
       <a-tooltip title="地理实验室" placement="top">
         <a-button type="text" class="toolbar-btn" :class="{ active: labActive }" aria-label="地理实验室" data-guide-target="lab" @click="$emit('toggleLab')">
           <ExperimentOutlined />
+        </a-button>
+      </a-tooltip>
+      <a-tooltip title="教学场景" placement="top">
+        <a-button type="text" class="toolbar-btn" aria-label="教学场景" @click="$emit('openScenes')">
+          <PlaySquareOutlined />
         </a-button>
       </a-tooltip>
     </div>
