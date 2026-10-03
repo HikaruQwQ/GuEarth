@@ -133,7 +133,8 @@ export const koppenZones: KoppenZone[] = [
     name: '冰原气候',
     color: '#d9d9d9',
     boxes: [
-      [-180, 180, -90, -68],
+      [-180, 0, -90, -68],
+      [0, 180, -90, -68],
       [-58, -20, 60, 84]
     ],
     labelAt: [20, -80],

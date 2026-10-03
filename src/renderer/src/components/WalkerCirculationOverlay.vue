@@ -6,7 +6,7 @@ import { ensoPhaseMeta, type EnsoPhase } from '@renderer/thematic/ensoPhases'
 const props = defineProps<{ viewer?: Cesium.Viewer; phase: EnsoPhase }>()
 
 const overlayRef = ref<HTMLDivElement>()
-const ANCHOR = Cesium.Cartesian3.fromDegrees(205, 0)
+const ANCHOR = Cesium.Cartesian3.fromDegrees(-155, 0)
 const ANCHOR_VIEW_HEIGHT = 9500000
 const scratch = new Cesium.Cartesian2()
 const scratchNormal = new Cesium.Cartesian3()
