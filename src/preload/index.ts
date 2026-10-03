@@ -179,6 +179,7 @@ export type AiChatEvent =
   | { sessionId: string; type: 'context-compression-start' }
   | { sessionId: string; type: 'context-compressed'; summary: string; retainedTurns: AiChatTurn[]; stats: AiContextStats; beforeTokens: number; afterTokens: number }
   | { sessionId: string; type: 'context-compression-error'; message: string }
+  | { sessionId: string; type: 'model-retry'; attempt: number; maxRetries: number; reason: string }
   | { sessionId: string; type: 'done' }
   | { sessionId: string; type: 'error'; message: string }
 

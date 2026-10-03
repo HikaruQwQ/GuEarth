@@ -437,12 +437,79 @@ interface RequestResult {
   toolCalls: WireToolCall[]
 }
 
-async function fetchJson(url: string, init: RequestInit): Promise<Record<string, unknown>> {
-  const response = await net.fetch(url, init)
-  if (!response.ok) {
-    const body = await response.text().catch(() => '')
-    throw new Error(`请求失败 ${response.status}：${body.slice(0, 400) || response.statusText}`)
+function httpFailureError(provider: AiProviderConfig, model: AiModelConfig, url: string, response: Response, body: string): Error {
+  const parts = [
+    `请求失败 HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`,
+    `供应商：${provider.name}`,
+    `模型：${model.id}`,
+    `接口：${url}`
+  ]
+  const requestId = response.headers.get('x-request-id') ?? response.headers.get('request-id')
+  if (requestId) parts.push(`请求ID：${requestId}`)
+  const detail = body.trim()
+  if (detail) parts.push(`服务端返回：${detail.slice(0, 1200)}`)
+  return new Error(parts.join('；'))
+}
+
+async function fetchResponse(url: string, init: RequestInit, provider: AiProviderConfig, model: AiModelConfig): Promise<Response> {
+  try {
+    return await net.fetch(url, init)
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new Error(`网络请求异常（供应商：${provider.name}；模型：${model.id}；接口：${url}）：${reason}`)
   }
+}
+
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504])
+const MAX_LLM_RETRIES = 2
+const RETRY_BASE_DELAY_MS = 800
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError'
+}
+
+function sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    const onAbort = () => {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', onAbort)
+      reject(new DOMException('Aborted', 'AbortError'))
+    }
+    if (signal.aborted) onAbort()
+    else signal.addEventListener('abort', onAbort)
+  })
+}
+
+async function fetchWithRetry(url: string, init: RequestInit, provider: AiProviderConfig, model: AiModelConfig, signal: AbortSignal, onRetry?: (attempt: number, maxRetries: number, reason: string) => void): Promise<Response> {
+  for (let attempt = 0; ; attempt += 1) {
+    let response: Response
+    try {
+      response = await fetchResponse(url, init, provider, model)
+    } catch (error) {
+      if (isAbortError(error) || attempt >= MAX_LLM_RETRIES) throw error
+      const reason = error instanceof Error ? error.message : String(error)
+      const tail = reason.includes('：') ? reason.split('：').pop() ?? reason : reason
+      onRetry?.(attempt + 1, MAX_LLM_RETRIES, `网络异常（${tail.slice(0, 60)}）`)
+      await sleepAbortable(RETRY_BASE_DELAY_MS * 2 ** attempt, signal)
+      continue
+    }
+    if (response.ok) return response
+    const body = await response.text().catch(() => '')
+    if (!RETRYABLE_STATUSES.has(response.status) || attempt >= MAX_LLM_RETRIES) {
+      throw httpFailureError(provider, model, url, response, body)
+    }
+    onRetry?.(attempt + 1, MAX_LLM_RETRIES, `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`)
+    await sleepAbortable(RETRY_BASE_DELAY_MS * 2 ** attempt, signal)
+  }
+}
+
+async function fetchJson(url: string, init: RequestInit, provider: AiProviderConfig, model: AiModelConfig, signal: AbortSignal, onRetry?: (attempt: number, maxRetries: number, reason: string) => void): Promise<Record<string, unknown>> {
+  const response = await fetchWithRetry(url, init, provider, model, signal, onRetry)
   const parsed: unknown = await response.json()
   if (typeof parsed !== 'object' || parsed === null) throw new Error('响应格式错误')
   return parsed as Record<string, unknown>
@@ -475,8 +542,9 @@ async function runOpenAiTurn(options: {
   signal: AbortSignal
   onTextDelta: (text: string) => void
   onReasoningDelta: (text: string) => void
+  onRetry?: (attempt: number, maxRetries: number, reason: string) => void
 }): Promise<RequestResult> {
-  const { provider, model, apiKey, messages, tools, signal, onTextDelta, onReasoningDelta } = options
+  const { provider, model, apiKey, messages, tools, signal, onTextDelta, onReasoningDelta, onRetry } = options
   const url = apiEndpoint(provider.baseUrl, provider.protocol, '/chat/completions')
   const body: Record<string, unknown> = {
     model: model.id,
@@ -489,9 +557,9 @@ async function runOpenAiTurn(options: {
   }
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }
   if (!model.streaming) {
-    const json = await fetchJson(url, { method: 'POST', headers, body: JSON.stringify(body), signal })
+    const json = await fetchJson(url, { method: 'POST', headers, body: JSON.stringify(body), signal }, provider, model, signal, onRetry)
     const jsonError = streamErrorText(json)
-    if (jsonError) throw streamError(`模型服务返回错误：${jsonError}`)
+    if (jsonError) throw streamError(`模型服务返回错误（${model.id}）：${jsonError}`)
     const choice = Array.isArray(json.choices) && json.choices[0] && typeof json.choices[0] === 'object' ? json.choices[0] as Record<string, unknown> : {}
     const message = typeof choice.message === 'object' && choice.message !== null ? choice.message as Record<string, unknown> : {}
     const reasoning = typeof message.reasoning_content === 'string' ? message.reasoning_content : ''
@@ -504,11 +572,7 @@ async function runOpenAiTurn(options: {
     }
   }
   body.stream = true
-  const response = await net.fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal })
-  if (!response.ok) {
-    const errorBody = await response.text().catch(() => '')
-    throw new Error(`请求失败 ${response.status}：${errorBody.slice(0, 400) || response.statusText}`)
-  }
+  const response = await fetchWithRetry(url, { method: 'POST', headers, body: JSON.stringify(body), signal }, provider, model, signal, onRetry)
   let text = ''
   let reasoning = ''
   const toolAccumulator = new Map<number, { id: string; name: string; args: string }>()
@@ -516,7 +580,7 @@ async function runOpenAiTurn(options: {
     if (data === '[DONE]') return
     const json = safeParseJson(data)
     const errorText = streamErrorText(json)
-    if (errorText) throw streamError(`模型服务返回错误：${errorText}`)
+    if (errorText) throw streamError(`模型服务返回错误（${model.id}）：${errorText}`)
     const choices = json.choices
     if (!Array.isArray(choices) || !choices.length) return
     const delta = (typeof choices[0] === 'object' && choices[0] !== null ? (choices[0] as Record<string, unknown>).delta : null) as Record<string, unknown> | null
@@ -558,8 +622,9 @@ async function runAnthropicTurn(options: {
   signal: AbortSignal
   onTextDelta: (text: string) => void
   onReasoningDelta: (text: string) => void
+  onRetry?: (attempt: number, maxRetries: number, reason: string) => void
 }): Promise<RequestResult> {
-  const { provider, model, apiKey, messages, tools, signal, onTextDelta, onReasoningDelta } = options
+  const { provider, model, apiKey, messages, tools, signal, onTextDelta, onReasoningDelta, onRetry } = options
   const url = apiEndpoint(provider.baseUrl, provider.protocol, '/messages')
   const budgetTokens = anthropicBudget[model.thinkingLevel] ?? anthropicBudget.medium
   const maxTokens = model.thinking ? Math.max(8_192, budgetTokens * 2) : 8_192
@@ -574,9 +639,9 @@ async function runAnthropicTurn(options: {
   if (tools.length) body.tools = tools.map((tool) => ({ name: tool.name, description: tool.description, input_schema: tool.parameters }))
   const headers = { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }
   if (!model.streaming) {
-    const json = await fetchJson(url, { method: 'POST', headers, body: JSON.stringify(body), signal })
+    const json = await fetchJson(url, { method: 'POST', headers, body: JSON.stringify(body), signal }, provider, model, signal, onRetry)
     const jsonError = streamErrorText(json)
-    if (jsonError) throw streamError(`模型服务返回错误：${jsonError}`)
+    if (jsonError) throw streamError(`模型服务返回错误（${model.id}）：${jsonError}`)
     const blocks = Array.isArray(json.content) ? json.content.filter((block): block is Record<string, unknown> => typeof block === 'object' && block !== null) : []
     const text = blocks.filter((block) => block.type === 'text').map((block) => String(block.text ?? '')).join('')
     const thinkingBlocks = blocks.filter((block) => block.type === 'thinking').map((block) => ({ thinking: String(block.thinking ?? ''), signature: String(block.signature ?? '') }))
@@ -591,11 +656,7 @@ async function runAnthropicTurn(options: {
     }
   }
   body.stream = true
-  const response = await net.fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal })
-  if (!response.ok) {
-    const errorBody = await response.text().catch(() => '')
-    throw new Error(`请求失败 ${response.status}：${errorBody.slice(0, 400) || response.statusText}`)
-  }
+  const response = await fetchWithRetry(url, { method: 'POST', headers, body: JSON.stringify(body), signal }, provider, model, signal, onRetry)
   let text = ''
   const thinkingBlocks: ThinkingBlock[] = []
   const toolCalls: WireToolCall[] = []
@@ -603,7 +664,7 @@ async function runAnthropicTurn(options: {
   await readSse(response, (data) => {
     const json = safeParseJson(data)
     const type = json.type
-    if (type === 'error') throw streamError(`模型服务返回错误：${streamErrorText(json) || '未知错误'}`)
+    if (type === 'error') throw streamError(`模型服务返回错误（${model.id}）：${streamErrorText(json) || '未知错误'}`)
     if (type === 'content_block_start') {
       const index = Number(json.index ?? 0)
       const block = typeof json.content_block === 'object' && json.content_block !== null ? json.content_block as Record<string, unknown> : {}
@@ -729,8 +790,9 @@ async function compressMessages(options: {
   apiKey: string
   messages: WireMessage[]
   signal: AbortSignal
+  onRetry?: (attempt: number, maxRetries: number, reason: string) => void
 }): Promise<CompressedContext> {
-  const { provider, model, apiKey, messages, signal } = options
+  const { provider, model, apiKey, messages, signal, onRetry } = options
   const beforeStats = contextStatsForMessages(messages, model.contextWindow)
   const system = messages.find((message) => message.role === 'system')
   const rest = messages.filter((message) => message.role !== 'system')
@@ -755,7 +817,8 @@ async function compressMessages(options: {
     tools: [],
     signal,
     onTextDelta: () => void 0,
-    onReasoningDelta: () => void 0
+    onReasoningDelta: () => void 0,
+    onRetry
   })
   const summary = summaryResult.text.trim()
   if (!summary) throw new Error('无法压缩上下文')
@@ -789,6 +852,7 @@ async function runAgent(options: {
 }): Promise<void> {
   const { provider, searchProvider, memory, model, apiKey, sender, sessionId, signal, turns, tools } = options
   const send = (event: AiChatEvent) => emit(sender, event)
+  const onRetry = (attempt: number, maxRetries: number, reason: string): void => send({ sessionId, type: 'model-retry', attempt, maxRetries, reason })
   const messages: WireMessage[] = [{ role: 'system', content: buildSystemPrompt(memory) }]
   for (const turn of turns) {
     if (turn.content.trim()) messages.push({ role: turn.role, content: turn.content })
@@ -802,7 +866,7 @@ async function runAgent(options: {
     if (currentStats.usagePercent >= 80) {
       send({ sessionId, type: 'context-compression-start' })
       try {
-        const compressed = await compressMessages({ provider, model, apiKey, messages, signal })
+        const compressed = await compressMessages({ provider, model, apiKey, messages, signal, onRetry })
         messages.splice(0, messages.length, ...compressed.messages)
         send({ sessionId, type: 'context-compressed', ...compressed.result })
         send({ sessionId, type: 'context-stats', stats: compressed.result.stats })
@@ -823,7 +887,8 @@ async function runAgent(options: {
         tools: toolset,
         signal,
         onTextDelta: (text) => send({ sessionId, type: 'text-delta', text }),
-        onReasoningDelta: (text) => send({ sessionId, type: 'reasoning-delta', text })
+        onReasoningDelta: (text) => send({ sessionId, type: 'reasoning-delta', text }),
+        onRetry
       })
     } catch (error) {
       if (signal.aborted || !requestMessages.some((message) => message.image) || !imageUnsupported(error)) throw error
@@ -836,7 +901,8 @@ async function runAgent(options: {
         tools: toolset,
         signal,
         onTextDelta: (text) => send({ sessionId, type: 'text-delta', text }),
-        onReasoningDelta: (text) => send({ sessionId, type: 'reasoning-delta', text })
+        onReasoningDelta: (text) => send({ sessionId, type: 'reasoning-delta', text }),
+        onRetry
       })
     }
     signal.throwIfAborted()
