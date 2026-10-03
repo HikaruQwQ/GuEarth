@@ -298,7 +298,7 @@ function normalizeShape(value: unknown): StoredShape {
     positions,
     annotation: typeof value.annotation === 'string' ? value.annotation.slice(0, 200) : '',
     color: validColor(value.color, '#1677ff'),
-    textColor: validColor(value.textColor, '#ffffff'),
+    textColor: validColor(value.textColor, '#1f1f1f'),
     fontFamily,
     fontSize,
     textFrame: typeof value.textFrame === 'boolean' ? value.textFrame : false,

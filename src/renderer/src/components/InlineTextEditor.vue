@@ -16,6 +16,19 @@ const root = ref<HTMLDivElement>()
 const editor = ref<HTMLTextAreaElement>()
 const position = reactive<{ left: string; top: string; visibility: 'hidden' | 'visible' }>({ left: '0px', top: '0px', visibility: 'hidden' })
 let removePreRender: (() => void) | undefined
+
+function editorTextShadow(color: string, framed: boolean): string {
+  if (framed) return 'none'
+  const match = /^#([\da-f]{6})$/i.exec(color)
+  if (!match) return '0 0 3px rgba(0, 0, 0, 0.9)'
+  const red = Number.parseInt(match[1].slice(0, 2), 16)
+  const green = Number.parseInt(match[1].slice(2, 4), 16)
+  const blue = Number.parseInt(match[1].slice(4, 6), 16)
+  const luminance = (red * 0.299 + green * 0.587 + blue * 0.114) / 255
+  const halo = luminance > 0.55 ? 'rgba(0, 0, 0, 0.9)' : 'rgba(255, 255, 255, 0.96)'
+  return `0 0 2px ${halo}, 0 0 4px ${halo}`
+}
+
 const editorStyle = computed<CSSProperties>(() => {
   const shape = props.shape
   if (!shape || shape.kind !== 'text') return {}
@@ -26,6 +39,7 @@ const editorStyle = computed<CSSProperties>(() => {
     color: shape.textColor,
     fontFamily: `"${shape.fontFamily}", sans-serif`,
     fontSize: `${shape.fontSize}px`,
+    textShadow: editorTextShadow(shape.textColor, shape.textFrame),
     backgroundColor: shape.textFrame ? 'rgba(255, 255, 255, 0.96)' : 'transparent',
     borderColor: shape.textFrame ? shape.color : 'transparent'
   }

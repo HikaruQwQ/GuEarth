@@ -9,7 +9,7 @@ export type DrawFontFamily = string
 
 export const DEFAULT_DRAW_STYLE = {
   color: '#1677ff',
-  textColor: '#ffffff',
+  textColor: '#1f1f1f',
   fontFamily: 'Arial' as DrawFontFamily,
   fontSize: 13,
   textFrame: false,

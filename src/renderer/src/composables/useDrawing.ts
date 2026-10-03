@@ -52,6 +52,11 @@ function polygonArea(cartesians: Cesium.Cartesian3[]): number {
   return total
 }
 
+function textOutlineColor(color: Cesium.Color): Cesium.Color {
+  const luminance = color.red * 0.299 + color.green * 0.587 + color.blue * 0.114
+  return luminance > 0.55 ? Cesium.Color.BLACK : Cesium.Color.WHITE
+}
+
 function formatDistance(meters: number): string {
   return meters >= 1000 ? `${(meters / 1000).toFixed(2)} km` : `${meters.toFixed(1)} m`
 }
@@ -217,6 +222,7 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
       text,
       font: `${shape.fontSize}px ${shape.fontFamily}`,
       fillColor: textColor,
+      outlineColor: textOutlineColor(textColor),
       show: shape.kind !== 'text' || store.selectedShapeId !== shape.id,
       showBackground: shape.kind === 'text' && shape.textFrame,
       backgroundColor: Cesium.Color.WHITE.withAlpha(0.94),
