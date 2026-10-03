@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/status-0.1.8%20early-f4f4f5?style=flat-square&labelColor=18181b" alt="0.1.8 early">
+  <img src="https://img.shields.io/badge/status-0.1.9%20early-f4f4f5?style=flat-square&labelColor=18181b" alt="0.1.9 early">
   <img src="https://img.shields.io/badge/platform-Windows%20x64-f4f4f5?style=flat-square&labelColor=18181b" alt="Windows x64">
 
 GuEarth 是一个仍在早期开发中的桌面数字地球，面向地理教学。它把真实影像和地形装进一个本地运行的 3D 地球，配合教学工具、主题模块和 AI 助手，让晨昏线、气压带、河流地貌这些"讲不动的"内容动起来。
