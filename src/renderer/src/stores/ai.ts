@@ -46,7 +46,18 @@ export interface ChatMessage {
 
 export interface RendererTool {
   definition: AiToolDefinition
+  label: string
   execute: (args: Record<string, unknown>) => Promise<unknown>
+}
+
+const MAIN_PROCESS_TOOL_LABELS: Record<string, string> = {
+  search_place: '地点检索',
+  web_search: '联网搜索',
+  retrieve_knowledge: '知识库检索'
+}
+
+export function toolLabel(name: string): string {
+  return rendererTools.get(name)?.label ?? MAIN_PROCESS_TOOL_LABELS[name] ?? '工具调用'
 }
 
 let eventListenerBound = false

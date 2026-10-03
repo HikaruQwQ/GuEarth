@@ -32,6 +32,8 @@ const SYSTEM_PROMPT = [
   '- 需要在地图上标注地点时：add_marker 添加命名标记点（单个传 name/longitude/latitude，多个地点用 markers 数组批量添加，单次最多 20 个，返回各标记 id）；draw_shape 绘制线或多边形，省略 name 时自动标注长度或面积，适合测距、测面、展示边界与路线。',
   '- 添加标记或绘图后，用 fly_to 飞往该处向用户展示；讲解时可引用工具返回的 measurement 数值。',
   '- 用户要删除标记或图形时：先用 list_shapes 查看现有标注（含 id 与名称），再调用 remove_shape 按 id 或名称删除；多个标注时用 ids/names 数组一次性批量删除，不要逐个调用。',
+  '- 讲解时可用 add_text_marker 在指定位置放置文字说明（如「板块碰撞挤压边界」）、用 add_arrow 画箭头表示方向（板块运动、洋流流向、风向），与 add_marker 一样会持久保存并返回 id。',
+  '- 用户要求整理标注、分类归档时：先用 list_shapes 了解现有标注与文件夹结构，用 manage_folders 批量创建/重命名/删除文件夹（单次最多 20 个操作，路径用「/」分隔），再用 move_markers 按 id 或名称批量把标注移入目标文件夹（可设 createFolder 为 true 自动创建路径中缺失的文件夹）。',
   '- 用户让你看当前画面（“看看这里”“这是不是某种地貌”“我在看哪里”）时：先调用 capture_view 获取当前视角截图与地理范围，再结合画面、地形与地理知识判断；截图以图片形式提供，若结果 status 为 vision_disabled，说明当前模型未开启视觉输入，请依据返回的 camera 与 extent 文本尽量作答，并按 guidance 提醒用户可在 AI 设置中为该模型开启「视觉」开关。',
   '- 用户问昼夜、晨昏线、极昼极夜、昼夜长短、正午太阳高度、时差或地方时类问题时：先调用 set_sim_time 设置日期与时刻（北京时间）开启昼夜光照，再用 fly_to（高度 8000000-15000000）展示晨昏线，夏至与冬至对比极圈效果最佳；比较昼夜长短或太阳高度随纬度差异时，用 query_solar 查询多个纬度（如 0、23.5、40、66.5、80）后归纳规律；讲解地方时与时差时给出“地方时 = UTC + 经度÷15”的计算示例。',
   '- 用户问气压带风带、气候类型成因、锋面气旋、洋流等大气与水圈运动问题时：用 set_layer 开启对应图层（pressure-belts 气压带与风带、koppen-zones 世界气候类型、frontal-cyclone 锋面气旋、ocean-currents 世界洋流）；讲气压带风带季节移动时用 month 参数先设 1 月再设 7 月对比位置（如副热带高压与赤道低压随太阳直射点移动），并提醒用户可直接点击图层要素查看成因；讲气候成因时按“受哪个气压带/风带控制（终年或交替）、海陆位置、地形”的框架归纳。',
@@ -791,6 +793,7 @@ async function runAgent(options: {
 function summarizeToolResult(content: string): string {
   const parsed = safeParseJson(content)
   if (typeof parsed.error === 'string') return parsed.error.slice(0, 60)
+  if (typeof parsed.message === 'string' && parsed.message.trim()) return parsed.message.slice(0, 60)
   if (Array.isArray(parsed.matches)) return parsed.matches.length ? `${parsed.matches.length} 条知识条目` : '知识库未命中'
   if (Array.isArray(parsed.references)) return parsed.references.length ? `${parsed.references.length} 条来源` : '未找到相关网页'
   if (Array.isArray(parsed.places)) return `${parsed.places.length} 个地点`

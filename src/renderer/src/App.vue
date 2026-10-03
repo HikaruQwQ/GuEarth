@@ -8,7 +8,7 @@ import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { useGlobeStore } from '@renderer/stores/globe'
 import { useFailureStore } from '@renderer/stores/failure'
-import { DEFAULT_DRAW_STYLE, useDrawingStore, type DrawnShape, type DrawTool, type GeoPosition } from '@renderer/stores/drawing'
+import { useDrawingStore, type DrawnShape, type DrawTool } from '@renderer/stores/drawing'
 import { useAiStore } from '@renderer/stores/ai'
 import { useUpdaterStore } from '@renderer/stores/updater'
 import { thematicLayerCatalog, useClimateStore } from '@renderer/stores/climate'
@@ -17,7 +17,8 @@ import { useAtmosphereStore } from '@renderer/stores/atmosphere'
 import { useHydrologyStore } from '@renderer/stores/hydrology'
 import { useLandformStore } from '@renderer/stores/landform'
 import { useCesiumViewer } from '@renderer/composables/useCesiumViewer'
-import { useDrawing, measureShape } from '@renderer/composables/useDrawing'
+import { useDrawing } from '@renderer/composables/useDrawing'
+import { registerAnnotationTools } from '@renderer/ai/annotationTools'
 import { useThematicLayers } from '@renderer/composables/useThematicLayers'
 import { useTimezoneCompare } from '@renderer/composables/useTimezoneCompare'
 import { datePartsOf, dayLength, declinationForDate, formatClock, isValidDate, noonAltitudeDeg, sunTimes } from '@renderer/thematic/solarMath'
@@ -116,6 +117,7 @@ const drawHint = computed(() => {
 })
 
 aiStore.registerTool({
+  label: '视角飞行',
   definition: {
     name: 'fly_to',
     description: '将地球视角飞行到指定 WGS-84 经纬度坐标处，用于向用户展示地点或地貌。',
@@ -141,6 +143,7 @@ aiStore.registerTool({
 })
 
 aiStore.registerTool({
+  label: '地形高程查询',
   definition: {
     name: 'query_terrain',
     description: '查询某 WGS-84 经纬度位置的地表海拔（米，椭球高）。用于讲解地形、山脉高度等。',
@@ -174,6 +177,7 @@ aiStore.registerTool({
 })
 
 aiStore.registerTool({
+  label: '获取当前视角',
   definition: {
     name: 'get_camera',
     description: '获取当前地球视角：中心点经纬度、视点高度、朝向与俯仰角。用于回答“我现在看到的是哪里”。',
@@ -188,181 +192,10 @@ aiStore.registerTool({
   })
 })
 
-const MAX_MARKER_BATCH = 20
-
-function parsePositions(raw: unknown, minCount: number): GeoPosition[] | null {
-  if (!Array.isArray(raw)) return null
-  const positions: GeoPosition[] = []
-  for (const item of raw) {
-    if (typeof item !== 'object' || item === null) continue
-    const record = item as Record<string, unknown>
-    const longitude = Number(record.longitude)
-    const latitude = Number(record.latitude)
-    if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) continue
-    if (longitude < -180 || longitude > 180 || latitude < -90 || latitude > 90) continue
-    if (!positions.some((existing) => existing.longitude === longitude && existing.latitude === latitude)) positions.push({ longitude, latitude, height: 0 })
-  }
-  return positions.length >= minCount && positions.length <= 500 ? positions : null
-}
-
-function collectStrings(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return []
-  return raw.flatMap((item) => (typeof item === 'string' && item.trim() ? [item.trim()] : []))
-}
+registerAnnotationTools()
 
 aiStore.registerTool({
-  definition: {
-    name: 'add_marker',
-    description: '在地图上添加带名称的标记点，持久保存并可在标注面板中管理。单个标记传 name/longitude/latitude；多个标记传 markers 数组一次批量添加（单次最多 20 个）。返回标记 id，可用于后续删除。',
-    parameters: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', description: '标记名称，将显示在地图上（如“珠穆朗玛峰”）' },
-        longitude: { type: 'number', description: '经度（WGS-84，-180 到 180）' },
-        latitude: { type: 'number', description: '纬度（WGS-84，-90 到 90）' },
-        markers: {
-          type: 'array',
-          description: '批量添加：标记对象数组，单项含 name、longitude、latitude；与单个 name/longitude/latitude 二选一',
-          items: {
-            type: 'object',
-            properties: {
-              name: { type: 'string', description: '标记名称' },
-              longitude: { type: 'number', description: '经度（WGS-84）' },
-              latitude: { type: 'number', description: '纬度（WGS-84）' }
-            },
-            required: ['name', 'longitude', 'latitude']
-          }
-        }
-      }
-    }
-  },
-  execute: async (args) => {
-    const entries: unknown[] = Array.isArray(args.markers) ? args.markers : [args]
-    if (entries.length > MAX_MARKER_BATCH) return { error: `单次最多添加 ${MAX_MARKER_BATCH} 个标记，请分批调用` }
-    const added: { id: string; name: string; longitude: number; latitude: number }[] = []
-    let skipped = 0
-    for (const entry of entries) {
-      const record = typeof entry === 'object' && entry !== null ? entry as Record<string, unknown> : {}
-      const name = typeof record.name === 'string' ? record.name.trim().slice(0, 200) : ''
-      const positions = parsePositions([record], 1)
-      if (!name || !positions) { skipped += 1; continue }
-      const id = crypto.randomUUID()
-      drawingStore.addShape({ ...DEFAULT_DRAW_STYLE, id, kind: 'point', positions, annotation: name, createdAt: Date.now() })
-      added.push({ id, name, longitude: positions[0].longitude, latitude: positions[0].latitude })
-    }
-    if (!added.length) return { error: '没有有效标记：需要名称与 WGS-84 经纬度坐标' }
-    if (entries.length === 1) return { status: 'ok', id: added[0].id, kind: 'point', name: added[0].name, longitude: added[0].longitude, latitude: added[0].latitude }
-    return { status: 'ok', added: added.length, skipped: skipped || undefined, markers: added }
-  }
-})
-
-aiStore.registerTool({
-  definition: {
-    name: 'draw_shape',
-    description: '在地图上绘制线或闭合多边形，持久保存。线自动标注总长度、多边形自动标注面积，适合测距、测面、展示边界或路线；传入 name 则显示名称替代测量值。',
-    parameters: {
-      type: 'object',
-      properties: {
-        kind: { type: 'string', enum: ['polyline', 'polygon'], description: 'polyline 为线（至少 2 个顶点），polygon 为多边形（至少 3 个顶点）' },
-        points: {
-          type: 'array',
-          description: '顶点坐标数组，按绘制顺序排列',
-          items: {
-            type: 'object',
-            properties: {
-              longitude: { type: 'number', description: '经度（WGS-84）' },
-              latitude: { type: 'number', description: '纬度（WGS-84）' }
-            },
-            required: ['longitude', 'latitude']
-          }
-        },
-        name: { type: 'string', description: '可选名称；省略时图上显示自动测量的长度或面积' }
-      },
-      required: ['kind', 'points']
-    }
-  },
-  execute: async (args) => {
-    let kind: 'polyline' | 'polygon' | null = null
-    if (args.kind === 'polygon') kind = 'polygon'
-    else if (args.kind === 'polyline') kind = 'polyline'
-    if (!kind) return { error: 'kind 必须为 polyline 或 polygon' }
-    const positions = parsePositions(args.points, kind === 'polygon' ? 3 : 2)
-    if (!positions) return { error: `坐标无效：${kind === 'polygon' ? '多边形需要至少 3 个' : '线需要至少 2 个'}有效且不重复的经纬度顶点` }
-    const name = typeof args.name === 'string' ? args.name.trim().slice(0, 200) : ''
-    const shape = { ...DEFAULT_DRAW_STYLE, id: crypto.randomUUID(), kind, positions, annotation: name, createdAt: Date.now() }
-    drawingStore.addShape(shape)
-    const measurement = measureShape(shape)
-    return { status: 'ok', id: shape.id, kind, name: name || undefined, vertices: positions.length, measurement: measurement || undefined }
-  }
-})
-
-aiStore.registerTool({
-  definition: {
-    name: 'list_shapes',
-    description: '列出地图上现有的全部标注（点标记、线、多边形），含 id、名称、类型、首个顶点坐标与测量值。删除前或回答“地图上有哪些标注”时使用。',
-    parameters: { type: 'object', properties: {} }
-  },
-  execute: async () => ({
-    shapes: shapes.value.map((shape) => ({
-      id: shape.id,
-      kind: shape.kind,
-      name: shape.annotation || undefined,
-      vertices: shape.positions.length,
-      longitude: shape.positions.length ? Math.round(shape.positions[0].longitude * 10000) / 10000 : undefined,
-      latitude: shape.positions.length ? Math.round(shape.positions[0].latitude * 10000) / 10000 : undefined,
-      measurement: measureShape(shape) || undefined
-    }))
-  })
-})
-
-aiStore.registerTool({
-  definition: {
-    name: 'remove_shape',
-    description: '删除地图上的标注：按 id 精确删除（id 来自 add_marker/draw_shape 返回值或 list_shapes）或按名称精确匹配删除（同名标注全部删除）；ids/names 数组为批量形式，可与单个 id/name 混用。',
-    parameters: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: '标注 id' },
-        ids: { type: 'array', description: '批量删除：标注 id 数组', items: { type: 'string' } },
-        name: { type: 'string', description: '标注名称（精确匹配）' },
-        names: { type: 'array', description: '批量删除：标注名称数组（精确匹配，同名全部删除）', items: { type: 'string' } }
-      }
-    }
-  },
-  execute: async (args) => {
-    const ids = new Set(collectStrings(args.ids))
-    if (typeof args.id === 'string' && args.id.trim()) ids.add(args.id.trim())
-    const names = new Set(collectStrings(args.names))
-    if (typeof args.name === 'string' && args.name.trim()) names.add(args.name.trim())
-    if (!ids.size && !names.size) return { error: '需要提供 id/ids 或 name/names' }
-    const missingIds: string[] = []
-    const missingNames: string[] = []
-    let removed = 0
-    for (const id of ids) {
-      if (!shapes.value.some((shape) => shape.id === id)) { missingIds.push(id); continue }
-      drawingStore.removeShape(id)
-      removed += 1
-    }
-    for (const name of names) {
-      const matched = shapes.value.filter((shape) => shape.annotation === name)
-      if (!matched.length) { missingNames.push(name); continue }
-      for (const shape of matched) drawingStore.removeShape(shape.id)
-      removed += matched.length
-    }
-    if (!removed) {
-      const target = missingIds[0] ?? missingNames[0]
-      return { error: `未找到标注「${target}」，可先调用 list_shapes 查看` }
-    }
-    return {
-      status: 'ok',
-      removed,
-      missingIds: missingIds.length ? missingIds : undefined,
-      missingNames: missingNames.length ? missingNames : undefined
-    }
-  }
-})
-
-aiStore.registerTool({
+  label: '视角截图',
   definition: {
     name: 'capture_view',
     description: '截取当前地球视角的纯地图画面（不含任何界面控件）作为图片，并返回观察上下文：中心经纬度、视点高度、朝向、俯仰角与可见地理范围。用于回答“看看这里”“这是不是某种地貌”“我现在看到的是什么”等基于当前画面的问题。',
@@ -430,6 +263,7 @@ aiStore.registerTool({
 })
 
 aiStore.registerTool({
+  label: '模拟时间设置',
   definition: {
     name: 'set_sim_time',
     description: '设置太阳光照模拟的日期与时刻（北京时间）并开启昼夜光照渲染，用于演示晨昏线、昼夜交替、极昼极夜与太阳直射点季节移动。',
@@ -466,6 +300,7 @@ aiStore.registerTool({
 })
 
 aiStore.registerTool({
+  label: '昼夜与太阳高度计算',
   definition: {
     name: 'query_solar',
     description: '计算某纬度在指定日期的昼长、正午太阳高度角、日出日落地方时与极昼/极夜状态。用于讲解昼夜长短、太阳高度随纬度与季节的变化。',
@@ -506,6 +341,7 @@ aiStore.registerTool({
 })
 
 aiStore.registerTool({
+  label: '专题图层开关',
   definition: {
     name: 'set_layer',
     description: '开关教学专题图层并可选设置月份（1-12），用于讲解气压带与风带、气候类型、锋面气旋、洋流等。气压带风带图层会随月份在1月与7月位置间移动，适合对比讲解。',
@@ -548,6 +384,7 @@ aiStore.registerTool({
 })
 
 aiStore.registerTool({
+  label: '地貌成因分析',
   definition: {
     name: 'explain_landform',
     description: '查询某 WGS-84 经纬度的地表海拔与最近的板块边界（名称、边界类型、距离），用于分析地貌成因、讲解板块运动与地表形态塑造。',

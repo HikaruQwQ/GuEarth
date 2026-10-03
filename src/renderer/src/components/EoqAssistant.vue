@@ -4,7 +4,7 @@ import { storeToRefs } from 'pinia'
 import MarkdownIt from 'markdown-it'
 import { Bubble, Sender } from 'ant-design-x-vue'
 import { CloseCircleOutlined, CloseOutlined, CompassOutlined, DeleteOutlined, HistoryOutlined, LeftOutlined, PlusOutlined, ReloadOutlined, RightOutlined, SettingOutlined } from '@ant-design/icons-vue'
-import { useAiStore, type ChatMessage, type ReasoningPart, type ToolStep } from '@renderer/stores/ai'
+import { useAiStore, toolLabel, type ChatMessage, type ReasoningPart, type ToolStep } from '@renderer/stores/ai'
 import type { StoredAiConversation } from '../../../preload'
 import ContextMeter from './ContextMeter.vue'
 import WebSearchStep from './WebSearchStep.vue'
@@ -98,22 +98,6 @@ function submitCurrentSuggestion(): void {
 
 onMounted(startRotate)
 onUnmounted(stopRotate)
-
-const toolLabels: Record<string, string> = {
-  search_place: '地点检索',
-  fly_to: '视角飞行',
-  query_terrain: '地形高程查询',
-  get_camera: '获取当前视角',
-  add_marker: '添加标记',
-  draw_shape: '绘制图形',
-  list_shapes: '标注列表',
-  remove_shape: '删除标注',
-  capture_view: '视角截图'
-}
-
-function toolLabel(name: string): string {
-  return toolLabels[name] ?? name
-}
 
 const md = new MarkdownIt({ breaks: true, linkify: true })
 md.validateLink = (url) => /^https?:\/\//i.test(url)
