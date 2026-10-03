@@ -1,8 +1,8 @@
-import { app, shell, BrowserWindow, ipcMain, net, protocol } from 'electron'
+import { app, shell, BrowserWindow, dialog, ipcMain, net, protocol } from 'electron'
 import { execFileSync } from 'child_process'
 import { join } from 'path'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'fs'
-import { mkdir, open, rename as renameFile, unlink } from 'fs/promises'
+import { access, constants, open, rename as renameFile, stat, unlink } from 'fs/promises'
 import type { FileHandle } from 'fs/promises'
 import { createHash, randomUUID } from 'crypto'
 import icon from '../../resources/icon.png?asset'
@@ -28,6 +28,7 @@ interface PersistedSettings {
   providerCredentials: Record<string, ProviderCredentialStatus>
   sceneMode: '2D' | '3D'
   setupGuideDismissed: boolean | null
+  recordingDirectory: string | null
 }
 
 const defaultSettings: PersistedSettings = {
@@ -44,7 +45,8 @@ const defaultSettings: PersistedSettings = {
   },
   providerCredentials: {},
   sceneMode: '3D',
-  setupGuideDismissed: null
+  setupGuideDismissed: null,
+  recordingDirectory: null
 }
 
 const TILE_TTL_MS = 86_400_000
@@ -101,7 +103,8 @@ function readSettings(): PersistedSettings {
       providerStyles: normalizedStyles,
       providerCredentials,
       sceneMode: parsed.sceneMode === '2D' ? '2D' : '3D',
-      setupGuideDismissed: typeof parsed.setupGuideDismissed === 'boolean' ? parsed.setupGuideDismissed : null
+      setupGuideDismissed: typeof parsed.setupGuideDismissed === 'boolean' ? parsed.setupGuideDismissed : null,
+      recordingDirectory: typeof parsed.recordingDirectory === 'string' && parsed.recordingDirectory.trim() ? parsed.recordingDirectory : null
     }
   } catch {
     return { ...defaultSettings, providerCredentials: {} }
@@ -117,6 +120,19 @@ function credentialStatus(providerId: string): ProviderCredentialStatus {
   const saved = settings.providerCredentials[providerId]
   if (!configured) return { configured: false, updatedAt: saved?.updatedAt ?? null }
   return { configured: true, updatedAt: saved?.updatedAt ?? null }
+}
+
+async function usableRecordingDirectory(): Promise<string | null> {
+  const directory = settings.recordingDirectory
+  if (!directory) return null
+  try {
+    const info = await stat(directory)
+    if (!info.isDirectory()) return null
+    await access(directory, constants.W_OK)
+    return directory
+  } catch {
+    return null
+  }
 }
 
 function settingsSnapshot(): GuEarthSettings {
@@ -610,10 +626,31 @@ function registerIpcHandlers(): void {
     scenes = normalizeSceneDocument(document)
     saveScenes()
   })
+  ipcMain.handle('recordings:get-directory', (): Promise<string | null> => usableRecordingDirectory())
+  ipcMain.handle('recordings:choose-directory', async (event): Promise<string | null> => {
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    const options = {
+      title: '选择视频保存文件夹',
+      properties: ['openDirectory', 'createDirectory'] as ('openDirectory' | 'createDirectory')[]
+    }
+    const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
+    if (result.canceled || !result.filePaths[0]) return null
+    const directory = result.filePaths[0]
+    try {
+      const info = await stat(directory)
+      if (!info.isDirectory()) throw new Error('请选择文件夹')
+      await access(directory, constants.W_OK)
+    } catch {
+      throw new Error('所选文件夹不可写，请选择其他文件夹')
+    }
+    settings.recordingDirectory = directory
+    saveSettings()
+    return directory
+  })
   ipcMain.handle('recordings:start', async (event, mimeType: unknown): Promise<string> => {
     const extension = recordingExtension(mimeType)
-    const directory = join(app.getPath('videos'), 'GuEarth')
-    await mkdir(directory, { recursive: true })
+    const directory = await usableRecordingDirectory()
+    if (!directory) throw new Error('请先选择可用的视频保存文件夹')
     const now = new Date()
     const pad = (value: number): string => String(value).padStart(2, '0')
     const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`

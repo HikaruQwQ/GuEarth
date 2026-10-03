@@ -326,6 +326,8 @@ const api = {
     save: (document: SceneDocument): Promise<void> => ipcRenderer.invoke('scenes:save', document)
   },
   recordings: {
+    getDirectory: (): Promise<string | null> => ipcRenderer.invoke('recordings:get-directory'),
+    chooseDirectory: (): Promise<string | null> => ipcRenderer.invoke('recordings:choose-directory'),
     start: (mimeType: string): Promise<string> => ipcRenderer.invoke('recordings:start', mimeType),
     append: (recordingId: string, data: ArrayBuffer): Promise<void> => ipcRenderer.invoke('recordings:append', recordingId, data),
     finish: (recordingId: string): Promise<RecordingSaveResult> => ipcRenderer.invoke('recordings:finish', recordingId),

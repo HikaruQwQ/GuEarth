@@ -108,6 +108,10 @@ const scenesStore = useScenesStore()
 const isScenesPanelOpen = ref(false)
 const scenePlayer = useScenePlayer(viewer, switchBasemap)
 const firstUseGuide = ref<InstanceType<typeof FirstUseGuide> | null>(null)
+const recordingDirectoryDialogOpen = ref(false)
+const recordingDirectoryDialogBusy = ref(false)
+const recordingDirectoryDialogError = ref('')
+let recordingDirectoryResolver: ((selected: boolean) => void) | null = null
 const isAnnotationPanelOpen = ref(false)
 const systemFonts = ref(['Arial', 'Segoe UI', 'Microsoft YaHei'])
 const selectedShape = computed(() => shapes.value.find((shape) => shape.id === selectedShapeId.value) ?? null)
@@ -501,6 +505,43 @@ aiStore.registerTool({
 
 const MAX_RECORD_STEPS = 12
 
+async function ensureRecordingDirectory(): Promise<boolean> {
+  try {
+    if (await window.guEarth.recordings.getDirectory()) return true
+  } catch {
+    recordingDirectoryDialogError.value = '暂时无法检查视频保存文件夹，请重新选择'
+  }
+  if (recordingDirectoryResolver) return false
+  recordingDirectoryDialogError.value = ''
+  recordingDirectoryDialogOpen.value = true
+  return new Promise((resolve) => {
+    recordingDirectoryResolver = resolve
+  })
+}
+
+async function chooseRecordingDirectory(): Promise<void> {
+  recordingDirectoryDialogBusy.value = true
+  recordingDirectoryDialogError.value = ''
+  try {
+    const directory = await window.guEarth.recordings.chooseDirectory()
+    if (directory) {
+      recordingDirectoryDialogOpen.value = false
+      recordingDirectoryResolver?.(true)
+      recordingDirectoryResolver = null
+    }
+  } catch (error) {
+    recordingDirectoryDialogError.value = error instanceof Error ? error.message : '选择视频保存文件夹失败'
+  } finally {
+    recordingDirectoryDialogBusy.value = false
+  }
+}
+
+function cancelRecordingDirectory(): void {
+  recordingDirectoryDialogOpen.value = false
+  recordingDirectoryResolver?.(false)
+  recordingDirectoryResolver = null
+}
+
 function parseRecordingStep(raw: unknown, index: number): RecordingStep | { error: string } {
   if (typeof raw !== 'object' || raw === null) return { error: `第 ${index + 1} 步格式无效` }
   const record = raw as Record<string, unknown>
@@ -569,7 +610,7 @@ aiStore.registerTool({
   label: '录制教学视频',
   definition: {
     name: 'record_video',
-    description: '按剧本自动录制教学视频：依次飞到各场景、开关图层、叠加标注与旁白字幕，完成后保存为视频文件（自动存到系统「影片/GuEarth」）。用户说“帮我录一个XX的介绍视频/微课”时使用，把完整剧本通过 steps 一次性传入，不要逐步调用其他工具执行。',
+    description: '按剧本自动录制教学视频：依次飞到各场景、开关图层、叠加标注与旁白字幕，完成后保存为视频文件。首次录制会请用户选择保存文件夹，后续自动复用。用户说“帮我录一个XX的介绍视频/微课”时使用，把完整剧本通过 steps 一次性传入，不要逐步调用其他工具执行。',
     parameters: {
       type: 'object',
       properties: {
@@ -612,6 +653,7 @@ aiStore.registerTool({
       if ('error' in step) return { error: step.error }
       steps.push(step)
     }
+    if (!await ensureRecordingDirectory()) return { error: '已取消视频保存文件夹选择，录制未开始' }
     const result = await scenePlayer.recordVideo(title, steps)
     if ('error' in result) return { error: result.error }
     return {
@@ -619,7 +661,7 @@ aiStore.registerTool({
       title,
       totalSteps: result.totalSteps,
       estimatedSeconds: result.estimatedSeconds,
-      message: `录制已在后台开始，共 ${result.totalSteps} 幕，约 ${result.estimatedSeconds} 秒；完成后自动保存到系统「影片/GuEarth」文件夹并打开所在位置。期间用户可按 Esc 中止（已录制部分仍会保存）。`
+      message: `录制已在后台开始，共 ${result.totalSteps} 幕，约 ${result.estimatedSeconds} 秒；完成后自动保存到已选择的文件夹并打开所在位置。期间用户可按 Esc 中止（已录制部分仍会保存）。`
     }
   }
 })
@@ -960,6 +1002,25 @@ function deleteSelectedShape(): void {
         @play="handlePlayScenes"
       />
       <ScenePlayerOverlay :player="scenePlayer.playerState" @next="scenePlayer.next()" @stop="scenePlayer.stop()" />
+      <a-modal
+        v-model:open="recordingDirectoryDialogOpen"
+        title="选择视频保存文件夹"
+        ok-text="选择文件夹"
+        cancel-text="取消录制"
+        :mask-closable="false"
+        :confirm-loading="recordingDirectoryDialogBusy"
+        @ok="chooseRecordingDirectory"
+        @cancel="cancelRecordingDirectory"
+      >
+        <a-alert
+          v-if="recordingDirectoryDialogError"
+          type="error"
+          show-icon
+          :message="recordingDirectoryDialogError"
+          class="recording-directory-error"
+        />
+        <p class="recording-directory-copy">首次录制需要一个可写的文件夹来保存视频文件。点击“选择文件夹”后，在系统窗口中选取目标位置。</p>
+      </a-modal>
     </div>
   </a-config-provider>
 </template>
@@ -1024,6 +1085,17 @@ function deleteSelectedShape(): void {
   line-height: 20px;
   pointer-events: none;
   z-index: 11;
+}
+
+.recording-directory-copy {
+  margin: 0;
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.recording-directory-error {
+  margin-bottom: 16px;
 }
 
 </style>
