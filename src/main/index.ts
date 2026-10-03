@@ -25,6 +25,7 @@ interface PersistedSettings {
   providerStyles: Record<string, string>
   providerCredentials: Record<string, ProviderCredentialStatus>
   sceneMode: '2D' | '3D'
+  setupGuideDismissed: boolean | null
 }
 
 const defaultSettings: PersistedSettings = {
@@ -40,7 +41,8 @@ const defaultSettings: PersistedSettings = {
     baidu: 'road'
   },
   providerCredentials: {},
-  sceneMode: '3D'
+  sceneMode: '3D',
+  setupGuideDismissed: null
 }
 
 const TILE_TTL_MS = 86_400_000
@@ -94,7 +96,8 @@ function readSettings(): PersistedSettings {
       tileCacheEnabled: parsed.tileCacheEnabled !== false,
       providerStyles: normalizedStyles,
       providerCredentials,
-      sceneMode: parsed.sceneMode === '2D' ? '2D' : '3D'
+      sceneMode: parsed.sceneMode === '2D' ? '2D' : '3D',
+      setupGuideDismissed: typeof parsed.setupGuideDismissed === 'boolean' ? parsed.setupGuideDismissed : null
     }
   } catch {
     return { ...defaultSettings, providerCredentials: {} }
@@ -421,6 +424,10 @@ function registerIpcHandlers(): void {
         providerStyles[safeId(providerId)] = safeId(styleId)
       }
       nextSettings.providerStyles = providerStyles
+    }
+    if (patch.setupGuideDismissed !== undefined) {
+      if (typeof patch.setupGuideDismissed !== 'boolean') throw new Error('无效的向导设置')
+      nextSettings.setupGuideDismissed = patch.setupGuideDismissed
     }
     settings = nextSettings
     saveSettings()

@@ -14,6 +14,7 @@ export interface GuEarthSettings {
   providerStyles: Record<string, string>
   providerCredentials: Record<string, ProviderCredentialStatus>
   sceneMode: '2D' | '3D'
+  setupGuideDismissed: boolean | null
 }
 
 export interface GuEarthSettingsPatch {
@@ -24,6 +25,7 @@ export interface GuEarthSettingsPatch {
   tileCacheEnabled?: boolean
   providerStyles?: Record<string, string>
   sceneMode?: '2D' | '3D'
+  setupGuideDismissed?: boolean
 }
 
 export interface TileKey {
