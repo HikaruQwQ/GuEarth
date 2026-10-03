@@ -3,6 +3,7 @@ import * as Cesium from 'cesium'
 import { DEFAULT_DRAW_STYLE, useDrawingStore, type DrawTool, type DrawnShape, type GeoPosition } from '@renderer/stores/drawing'
 import { thematicLayerCatalog } from '@renderer/stores/climate'
 import { useFeatureFocusStore, type FocusedFeature } from '@renderer/stores/featureFocus'
+import { useGlobeStore } from '@renderer/stores/globe'
 
 const SHAPE_COLOR = Cesium.Color.fromCssColorString('#1677ff')
 const LABEL_FONT = '13px SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace'
@@ -77,6 +78,30 @@ function ringOf(cartesians: Cesium.Cartesian3[]): Cesium.Cartesian3[] {
   return cartesians.length ? [...cartesians, cartesians[0]] : []
 }
 
+function isGroundPolylineSupported(viewer: Cesium.Viewer): boolean {
+  return viewer.scene.verticalExaggeration === 1
+}
+
+function terrainSurfacePositions(viewer: Cesium.Viewer, positions: Cesium.Cartesian3[]): Cesium.Cartesian3[] {
+  return positions.map((position) => {
+    const cartographic = Cesium.Cartographic.fromCartesian(position)
+    const terrainHeight = viewer.scene.globe.getHeight(cartographic)
+    const exaggeration = viewer.scene.verticalExaggeration
+    const height = (terrainHeight ?? cartographic.height / exaggeration) * exaggeration
+    return Cesium.Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, height + 1)
+  })
+}
+
+function previewPolylinePositions(viewer: Cesium.Viewer, positions: Cesium.Cartesian3[]): Cesium.Cartesian3[] {
+  return isGroundPolylineSupported(viewer) ? positions : terrainSurfacePositions(viewer, positions)
+}
+
+function polylineOptions(viewer: Cesium.Viewer, positions: Cesium.Cartesian3[], width: number, color: Cesium.Color): Cesium.PolylineGraphics.ConstructorOptions {
+  if (isGroundPolylineSupported(viewer)) return { positions, width, material: color, clampToGround: true }
+  const material = new Cesium.ColorMaterialProperty(color)
+  return { positions: new Cesium.CallbackProperty(() => terrainSurfacePositions(viewer, positions), false), width, material, depthFailMaterial: material }
+}
+
 function measurementFor(kind: DrawnShape['kind'], cartesians: Cesium.Cartesian3[]): string {
   if (kind === 'polyline' && cartesians.length >= 2) return formatDistance(pathDistance(cartesians))
   if (kind === 'polygon' && cartesians.length >= 3) return formatArea(polygonArea(cartesians))
@@ -111,6 +136,7 @@ export function measureShape(shape: DrawnShape): string {
 export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
   const store = useDrawingStore()
   const focusStore = useFeatureFocusStore()
+  const globeStore = useGlobeStore()
   const entities = new Map<string, Cesium.Entity>()
   let handler: Cesium.ScreenSpaceEventHandler | undefined
   let draft: Cesium.Cartesian3[] = []
@@ -148,16 +174,16 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
       options.point = { color, pixelSize: 10, outlineColor: Cesium.Color.WHITE, outlineWidth: 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND }
     } else if (shape.kind === 'polyline') {
       options.position = surfacePosition(centroidOf(cartesians))
-      options.polyline = { positions: cartesians, width: shape.lineWidth, material: color, clampToGround: true }
+      options.polyline = polylineOptions(current, cartesians, shape.lineWidth, color)
     } else if (shape.kind === 'polygon') {
       options.position = surfacePosition(centroidOf(cartesians))
-      options.polygon = { hierarchy: new Cesium.PolygonHierarchy(cartesians), material: color.withAlpha(0.25) }
-      options.polyline = { positions: ringOf(cartesians), width: shape.lineWidth, material: color, clampToGround: true }
+      options.polygon = { hierarchy: new Cesium.PolygonHierarchy(cartesians), material: color.withAlpha(0.25), perPositionHeight: !isGroundPolylineSupported(current) }
+      options.polyline = polylineOptions(current, ringOf(cartesians), shape.lineWidth, color)
     } else if (shape.kind === 'arrow') {
       const geometry = arrowGeometry(cartesians)
       options.position = surfacePosition(cartesians[cartesians.length - 1])
-      options.polyline = { positions: geometry.shaft, width: shape.lineWidth, material: color, clampToGround: true }
-      options.polygon = { hierarchy: new Cesium.PolygonHierarchy(geometry.head), material: color, outline: true, outlineColor: color, outlineWidth: shape.lineWidth }
+      options.polyline = polylineOptions(current, geometry.shaft, shape.lineWidth, color)
+      options.polygon = { hierarchy: new Cesium.PolygonHierarchy(geometry.head), material: color, perPositionHeight: !isGroundPolylineSupported(current), outline: true, outlineColor: color, outlineWidth: shape.lineWidth }
     } else {
       options.position = surfacePosition(cartesians[0])
       options.point = {
@@ -239,20 +265,31 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
     }
     if (tool === 'arrow') {
       options.polyline = {
-        positions: new Cesium.CallbackProperty(() => arrowGeometry(previewPositions()).shaft, false),
+        positions: new Cesium.CallbackProperty(() => previewPolylinePositions(current, arrowGeometry(previewPositions()).shaft), false),
         width: DEFAULT_DRAW_STYLE.lineWidth,
         material: SHAPE_COLOR.withAlpha(0.7),
-        clampToGround: true
+        ...(isGroundPolylineSupported(current) ? { clampToGround: true } : { depthFailMaterial: new Cesium.ColorMaterialProperty(SHAPE_COLOR.withAlpha(0.7)) })
       }
       options.polygon = {
         hierarchy: new Cesium.CallbackProperty(() => new Cesium.PolygonHierarchy(arrowGeometry(previewPositions()).head), false),
-        material: SHAPE_COLOR.withAlpha(0.7)
+        material: SHAPE_COLOR.withAlpha(0.7),
+        perPositionHeight: !isGroundPolylineSupported(current)
       }
     } else if (isPolygonTool()) {
-      options.polygon = { hierarchy: new Cesium.CallbackProperty(() => new Cesium.PolygonHierarchy(previewPositions()), false), material: SHAPE_COLOR.withAlpha(0.15) }
-      options.polyline = { positions: new Cesium.CallbackProperty(() => ringOf(previewPositions()), false), width: 2, material: SHAPE_COLOR.withAlpha(0.6), clampToGround: true }
+      options.polygon = { hierarchy: new Cesium.CallbackProperty(() => new Cesium.PolygonHierarchy(previewPositions()), false), material: SHAPE_COLOR.withAlpha(0.15), perPositionHeight: !isGroundPolylineSupported(current) }
+      options.polyline = {
+        positions: new Cesium.CallbackProperty(() => previewPolylinePositions(current, ringOf(previewPositions())), false),
+        width: 2,
+        material: SHAPE_COLOR.withAlpha(0.6),
+        ...(isGroundPolylineSupported(current) ? { clampToGround: true } : { depthFailMaterial: new Cesium.ColorMaterialProperty(SHAPE_COLOR.withAlpha(0.6)) })
+      }
     } else {
-      options.polyline = { positions: new Cesium.CallbackProperty(previewPositions, false), width: 2, material: SHAPE_COLOR.withAlpha(0.6), clampToGround: true }
+      options.polyline = {
+        positions: new Cesium.CallbackProperty(() => previewPolylinePositions(current, previewPositions()), false),
+        width: 2,
+        material: SHAPE_COLOR.withAlpha(0.6),
+        ...(isGroundPolylineSupported(current) ? { clampToGround: true } : { depthFailMaterial: new Cesium.ColorMaterialProperty(SHAPE_COLOR.withAlpha(0.6)) })
+      }
     }
     previewEntity = new Cesium.Entity(options)
     current.entities.add(previewEntity)
@@ -386,6 +423,7 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
 
   watch(() => store.shapes, syncEntities, { deep: true })
   watch(() => store.selectedShapeId, syncEntities)
+  watch(() => globeStore.terrainExaggeration, syncEntities)
 
   onMounted(() => window.addEventListener('keydown', handleKeydown))
 
