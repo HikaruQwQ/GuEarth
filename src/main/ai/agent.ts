@@ -168,7 +168,7 @@ interface AgentSession {
   sender: WebContents
 }
 
-const MAX_TOOL_ROUNDS = 8
+const MAX_TOOL_ROUNDS = 16
 const TOOL_RESULT_LIMIT = 24_000
 const RENDERER_TOOL_TIMEOUT_MS = 60_000
 const SEARCH_FAILURE_GUIDANCE_THRESHOLD = 3
@@ -645,6 +645,36 @@ function emit(sender: WebContents, event: AiChatEvent): void {
   sender.send('ai:event', event)
 }
 
+async function runModelTurn(options: {
+  provider: AiProviderConfig
+  model: AiModelConfig
+  apiKey: string
+  messages: WireMessage[]
+  tools: AiToolDefinition[]
+  signal: AbortSignal
+  sender: WebContents
+  sessionId: string
+}): Promise<RequestResult> {
+  const { provider, model, apiKey, messages, tools, signal, sender, sessionId } = options
+  const runTurn = provider.protocol === 'anthropic' ? runAnthropicTurn : runOpenAiTurn
+  const invoke = (requestMessages: WireMessage[]) => runTurn({
+    provider,
+    model,
+    apiKey,
+    messages: requestMessages,
+    tools,
+    signal,
+    onTextDelta: (text) => emit(sender, { sessionId, type: 'text-delta', text }),
+    onReasoningDelta: (text) => emit(sender, { sessionId, type: 'reasoning-delta', text })
+  })
+  try {
+    return await invoke(messages)
+  } catch (error) {
+    if (signal.aborted || !messages.some((message) => message.image) || !imageUnsupported(error)) throw error
+    return invoke(messages.map((message) => (message.image ? { ...message, image: undefined } : message)))
+  }
+}
+
 async function dispatchRendererTool(sender: WebContents, sessionId: string, callId: string, name: string, args: unknown): Promise<ToolOutcome> {
   return new Promise<ToolOutcome>((resolve) => {
     const timer = setTimeout(() => {
@@ -811,34 +841,16 @@ async function runAgent(options: {
         throw new Error('无法压缩上下文')
       }
     }
-    let requestMessages = trimHistory(messages, model.contextWindow)
-    const runTurn = provider.protocol === 'anthropic' ? runAnthropicTurn : runOpenAiTurn
-    let result: RequestResult
-    try {
-      result = await runTurn({
-        provider,
-        model,
-        apiKey,
-        messages: requestMessages,
-        tools: toolset,
-        signal,
-        onTextDelta: (text) => send({ sessionId, type: 'text-delta', text }),
-        onReasoningDelta: (text) => send({ sessionId, type: 'reasoning-delta', text })
-      })
-    } catch (error) {
-      if (signal.aborted || !requestMessages.some((message) => message.image) || !imageUnsupported(error)) throw error
-      requestMessages = requestMessages.map((message) => (message.image ? { ...message, image: undefined } : message))
-      result = await runTurn({
-        provider,
-        model,
-        apiKey,
-        messages: requestMessages,
-        tools: toolset,
-        signal,
-        onTextDelta: (text) => send({ sessionId, type: 'text-delta', text }),
-        onReasoningDelta: (text) => send({ sessionId, type: 'reasoning-delta', text })
-      })
-    }
+    const result = await runModelTurn({
+      provider,
+      model,
+      apiKey,
+      messages: trimHistory(messages, model.contextWindow),
+      tools: toolset,
+      signal,
+      sender,
+      sessionId
+    })
     signal.throwIfAborted()
     if (!model.streaming && result.text) send({ sessionId, type: 'text-delta', text: result.text })
     if (!result.toolCalls.length) {
@@ -860,7 +872,28 @@ async function runAgent(options: {
       send({ sessionId, type: 'context-stats', stats: contextStatsForMessages(messages, model.contextWindow) })
     }
   }
-  send({ sessionId, type: 'error', message: '工具调用轮次过多，已停止' })
+  messages.push({
+    role: 'user',
+    content: '已达到本轮工具调用次数上限，不要再调用任何工具，直接基于以上已获得的工具结果给出完整、连贯的总结回答，未能完成的操作向用户说明。'
+  })
+  const finalResult = await runModelTurn({
+    provider,
+    model,
+    apiKey,
+    messages: trimHistory(messages, model.contextWindow),
+    tools: [],
+    signal,
+    sender,
+    sessionId
+  })
+  signal.throwIfAborted()
+  if (!model.streaming && finalResult.text) send({ sessionId, type: 'text-delta', text: finalResult.text })
+  messages.push({ role: 'assistant', content: finalResult.text })
+  if (!finalResult.text.trim()) {
+    send({ sessionId, type: 'error', message: '工具调用轮次过多，已停止' })
+    return
+  }
+  send({ sessionId, type: 'done' })
 }
 
 function summarizeToolResult(content: string): string {
