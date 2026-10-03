@@ -258,6 +258,25 @@ function tileRemoteUrl(providerId: string, styleId: string, level: number, x: nu
   return undefined
 }
 
+const TILE_FETCH_TIMEOUT_MS = 8000
+const TILE_FETCH_ATTEMPTS = 2
+const TILE_FETCH_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8'
+}
+
+async function fetchTileWithRetry(url: string): Promise<Response> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < TILE_FETCH_ATTEMPTS; attempt++) {
+    try {
+      return await net.fetch(url, { headers: TILE_FETCH_HEADERS, signal: AbortSignal.timeout(TILE_FETCH_TIMEOUT_MS) })
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError
+}
+
 async function handleTileProtocol(request: Request): Promise<Response> {
   const parsed = new URL(request.url)
   const providerId = safeId(parsed.hostname)
@@ -273,12 +292,7 @@ async function handleTileProtocol(request: Request): Promise<Response> {
   const remoteUrl = tileRemoteUrl(providerId, styleId, level, x, y)
   if (!remoteUrl) return new Response('Unknown provider', { status: 404 })
   try {
-    const response = await net.fetch(remoteUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8'
-      }
-    })
+    const response = await fetchTileWithRetry(remoteUrl)
     if (!response.ok) {
       if (response.status === 429 || response.status >= 500) {
         const stale = cachedTileResponse(key, true)
