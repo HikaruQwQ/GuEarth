@@ -30,7 +30,7 @@ const reaches: RiverReach[] = [
   {
     id: 'middle',
     name: '中游 · 荆江河曲',
-    stage: '中游：河曲与凸凹岸',
+    stage: '中游：河曲',
     center: [112.5, 29.75, 150000],
     waypoints: [[111.8, 29.9], [112.1, 29.72], [112.4, 29.82], [112.7, 29.62], [113.0, 29.72]],
     landform: '河曲：侧蚀为主，凹岸侵蚀、凸岸堆积',
@@ -39,7 +39,7 @@ const reaches: RiverReach[] = [
   {
     id: 'lower',
     name: '下游 · 长江三角洲',
-    stage: '下游：三角洲与冲积平原',
+    stage: '下游：三角洲',
     center: [120.7, 31.6, 300000],
     waypoints: [[118.8, 31.95], [119.8, 31.75], [120.6, 31.58], [121.4, 31.42], [122.0, 31.3]],
     landform: '三角洲：流速骤降，泥沙堆积为主',
@@ -171,6 +171,11 @@ watch(
 .reach-row {
   display: flex;
   gap: 6px;
+}
+
+.reach-row :deep(.ant-btn) {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .stage-name {
