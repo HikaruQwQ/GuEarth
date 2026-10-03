@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Modal } from 'ant-design-vue'
+import zhCN from 'ant-design-vue/es/locale/zh_CN'
 import { ReloadOutlined } from '@ant-design/icons-vue'
 import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
@@ -748,116 +749,118 @@ function deleteSelectedShape(): void {
 </script>
 
 <template>
-  <div class="app">
-    <div ref="globeContainer" class="globe" :class="{ drawing: activeTool }"></div>
-    <InlineTextEditor
-      :viewer="viewer"
-      :shape="selectedShape?.kind === 'text' ? selectedShape : null"
-      @update="(annotation) => updateSelectedShape({ annotation })"
-    />
-    <div v-if="showGlobeLoading" class="globe-loading">
-      <a-spin :spinning="!globeLoadTimedOut" size="small" />
-      <span class="globe-loading-text">{{ globeLoadTimedOut ? '地图加载较慢，请检查网络' : '正在加载地图…' }}</span>
-      <span v-if="globeLoadStage" class="globe-loading-stage">{{ globeLoadStage }}</span>
-      <a-button v-if="globeLoadTimedOut" type="text" size="small" @click="handleRetry"><ReloadOutlined />重试</a-button>
+  <a-config-provider :locale="zhCN">
+    <div class="app">
+      <div ref="globeContainer" class="globe" :class="{ drawing: activeTool }"></div>
+      <InlineTextEditor
+        :viewer="viewer"
+        :shape="selectedShape?.kind === 'text' ? selectedShape : null"
+        @update="(annotation) => updateSelectedShape({ annotation })"
+      />
+      <div v-if="showGlobeLoading" class="globe-loading">
+        <a-spin :spinning="!globeLoadTimedOut" size="small" />
+        <span class="globe-loading-text">{{ globeLoadTimedOut ? '地图加载较慢，请检查网络' : '正在加载地图…' }}</span>
+        <span v-if="globeLoadStage" class="globe-loading-stage">{{ globeLoadStage }}</span>
+        <a-button v-if="globeLoadTimedOut" type="text" size="small" @click="handleRetry"><ReloadOutlined />重试</a-button>
+      </div>
+      <FailureBanner />
+      <WindParticles v-if="thematicOverlays['wind-particles']" :viewer="viewer" />
+      <FrontalCyclone v-if="thematicOverlays['frontal-cyclone']" :viewer="viewer" />
+      <TyphoonOverlay v-if="thematicOverlays['typhoon']" :viewer="viewer" />
+      <WalkerCirculationOverlay v-if="thematicOverlays['enso']" :viewer="viewer" :phase="climateStore.ensoPhase" />
+      <GlobeToolbar
+        :active-tool="activeTool"
+        :shape-count="shapes.length"
+        :level-view-active="levelViewActive"
+        :level-view-visible="levelSwitcherVisible"
+        :lab-active="labActive"
+        :update-status="updaterStore.status"
+        :update-version="updaterStore.version"
+        :update-percent="updaterStore.percent"
+        @open-layers="handleOpenLayers"
+        @open-annotations="handleOpenAnnotations"
+        @open-assistant="handleOpenAssistant"
+        @open-setup-guide="handleOpenSetupGuide"
+        @home="handleHome"
+        @tool="handleTool"
+        @clear-shapes="handleClearShapes"
+        @toggle-level-view="handleLevelViewToggle"
+        @toggle-lab="handleToggleLab"
+        @update-click="handleUpdateClick"
+      />
+      <DrawingEditToolbar
+        v-if="selectedShape && !activeTool"
+        :shape="selectedShape"
+        :fonts="systemFonts"
+        @change="updateSelectedShape"
+        @remove="deleteSelectedShape"
+      />
+      <TeachingLab :open="isLabOpen" @close="isLabOpen = false" />
+      <PlaceSearchBox @select="flyToPlace" />
+      <MonthTimeline />
+      <SolarTimePanel />
+      <SolarPathPanel v-if="solarStore.motionPanel === 'solar-path'" @close="solarStore.setMotionPanel(null)" />
+      <ObliquityPanel v-if="solarStore.motionPanel === 'obliquity'" @close="solarStore.setMotionPanel(null)" />
+      <RotationSpeedPanel v-if="solarStore.motionPanel === 'rotation-speed'" @close="solarStore.setMotionPanel(null)" />
+      <ThermalCirculationPanel v-if="atmosphereStore.panel === 'circulation'" @close="atmosphereStore.setPanel(null)" />
+      <AtmosphereHeatingPanel v-if="atmosphereStore.panel === 'heating'" @close="atmosphereStore.setPanel(null)" />
+      <AtmosphereLayersPanel v-if="atmosphereStore.panel === 'layers'" @close="atmosphereStore.setPanel(null)" />
+      <EnsoPanel v-if="thematicOverlays['enso']" @close="climateStore.setOverlay('enso', false)" />
+      <WaterCyclePanel v-if="hydrologyStore.panel === 'water-cycle'" :viewer="viewer" @close="hydrologyStore.setPanel(null)" />
+      <OceanPropertyPanel v-if="hydrologyStore.panel === 'ocean-property'" @close="hydrologyStore.setPanel(null)" />
+      <TideWavePanel v-if="hydrologyStore.panel === 'tide'" @close="hydrologyStore.setPanel(null)" />
+      <WaterBodyPanel v-if="hydrologyStore.panel === 'water-bodies'" @close="hydrologyStore.setPanel(null)" />
+      <FoldFaultPanel v-if="landformStore.panel === 'fold-fault'" :viewer="viewer" @close="landformStore.setPanel(null)" />
+      <RiverLandformPanel v-if="landformStore.panel === 'river'" :viewer="viewer" @close="landformStore.setPanel(null)" />
+      <LandformGuidePanel v-if="landformStore.panel === 'landform-guide'" :viewer="viewer" @close="landformStore.setPanel(null)" />
+      <ExogenicPanel v-if="landformStore.panel === 'exogenic'" :viewer="viewer" @close="landformStore.setPanel(null)" />
+      <EarthLayersPanel v-if="landformStore.panel === 'earth-layers'" @close="landformStore.setPanel(null)" />
+      <TimezonePanel v-if="timezoneComparison" :comparison="timezoneComparison" @clear="clearTimezone" />
+      <ThematicLegend />
+      <ThematicInfoCard />
+      <div v-if="drawHint" class="draw-hint">{{ drawHint }}</div>
+      <CameraStatus :camera="camera" />
+      <EoqAssistant />
+      <AiSettingsModal />
+      <FirstUseGuide ref="firstUseGuide" :ready="isGlobeReady" @step-change="handleSetupGuideStepChange" />
+      <UpdateDialog />
+      <AnnotationPanel
+        :open="isAnnotationPanelOpen"
+        :shapes="shapes"
+        :entries="entries"
+        :selected-shape-id="selectedShapeId"
+        :save-error="saveError"
+        @close="isAnnotationPanelOpen = false"
+        @edit="drawingStore.setSelectedShapeId"
+        @fly="handleFlyShape"
+        @remove="drawingStore.removeShape"
+      />
+      <LayerPanel
+        :open="isLayerPanelOpen"
+        :layers="layers"
+        :selected-layer-id="selectedLayerId"
+        :error="globeError"
+        :terrain-error="terrainError"
+        :loading="!isGlobeReady"
+        :terrain-provider-id="terrainProviderId"
+        :active-terrain-id="activeTerrainId"
+        :terrain-exaggeration="terrainExaggeration"
+        :terrain-lighting="terrainLighting"
+        :tile-cache-enabled="tileCacheEnabled"
+        :provider-credentials="providerCredentials"
+        @close="handleClosePanel"
+        @select="handleSelectLayer"
+        @opacity="handleOpacityChange"
+        @retry="handleRetry"
+        @terrain="handleTerrainChange"
+        @terrain-exaggeration="handleTerrainExaggeration"
+        @terrain-lighting="handleTerrainLighting"
+        @cache="handleCacheChange"
+        @credential-save="handleCredentialSave"
+        @credential-clear="handleCredentialClear"
+      />
     </div>
-    <FailureBanner />
-    <WindParticles v-if="thematicOverlays['wind-particles']" :viewer="viewer" />
-    <FrontalCyclone v-if="thematicOverlays['frontal-cyclone']" :viewer="viewer" />
-    <TyphoonOverlay v-if="thematicOverlays['typhoon']" :viewer="viewer" />
-    <WalkerCirculationOverlay v-if="thematicOverlays['enso']" :viewer="viewer" :phase="climateStore.ensoPhase" />
-    <GlobeToolbar
-      :active-tool="activeTool"
-      :shape-count="shapes.length"
-      :level-view-active="levelViewActive"
-      :level-view-visible="levelSwitcherVisible"
-      :lab-active="labActive"
-      :update-status="updaterStore.status"
-      :update-version="updaterStore.version"
-      :update-percent="updaterStore.percent"
-      @open-layers="handleOpenLayers"
-      @open-annotations="handleOpenAnnotations"
-      @open-assistant="handleOpenAssistant"
-      @open-setup-guide="handleOpenSetupGuide"
-      @home="handleHome"
-      @tool="handleTool"
-      @clear-shapes="handleClearShapes"
-      @toggle-level-view="handleLevelViewToggle"
-      @toggle-lab="handleToggleLab"
-      @update-click="handleUpdateClick"
-    />
-    <DrawingEditToolbar
-      v-if="selectedShape && !activeTool"
-      :shape="selectedShape"
-      :fonts="systemFonts"
-      @change="updateSelectedShape"
-      @remove="deleteSelectedShape"
-    />
-    <TeachingLab :open="isLabOpen" @close="isLabOpen = false" />
-    <PlaceSearchBox @select="flyToPlace" />
-    <MonthTimeline />
-    <SolarTimePanel />
-    <SolarPathPanel v-if="solarStore.motionPanel === 'solar-path'" @close="solarStore.setMotionPanel(null)" />
-    <ObliquityPanel v-if="solarStore.motionPanel === 'obliquity'" @close="solarStore.setMotionPanel(null)" />
-    <RotationSpeedPanel v-if="solarStore.motionPanel === 'rotation-speed'" @close="solarStore.setMotionPanel(null)" />
-    <ThermalCirculationPanel v-if="atmosphereStore.panel === 'circulation'" @close="atmosphereStore.setPanel(null)" />
-    <AtmosphereHeatingPanel v-if="atmosphereStore.panel === 'heating'" @close="atmosphereStore.setPanel(null)" />
-    <AtmosphereLayersPanel v-if="atmosphereStore.panel === 'layers'" @close="atmosphereStore.setPanel(null)" />
-    <EnsoPanel v-if="thematicOverlays['enso']" @close="climateStore.setOverlay('enso', false)" />
-    <WaterCyclePanel v-if="hydrologyStore.panel === 'water-cycle'" :viewer="viewer" @close="hydrologyStore.setPanel(null)" />
-    <OceanPropertyPanel v-if="hydrologyStore.panel === 'ocean-property'" @close="hydrologyStore.setPanel(null)" />
-    <TideWavePanel v-if="hydrologyStore.panel === 'tide'" @close="hydrologyStore.setPanel(null)" />
-    <WaterBodyPanel v-if="hydrologyStore.panel === 'water-bodies'" @close="hydrologyStore.setPanel(null)" />
-    <FoldFaultPanel v-if="landformStore.panel === 'fold-fault'" :viewer="viewer" @close="landformStore.setPanel(null)" />
-    <RiverLandformPanel v-if="landformStore.panel === 'river'" :viewer="viewer" @close="landformStore.setPanel(null)" />
-    <LandformGuidePanel v-if="landformStore.panel === 'landform-guide'" :viewer="viewer" @close="landformStore.setPanel(null)" />
-    <ExogenicPanel v-if="landformStore.panel === 'exogenic'" :viewer="viewer" @close="landformStore.setPanel(null)" />
-    <EarthLayersPanel v-if="landformStore.panel === 'earth-layers'" @close="landformStore.setPanel(null)" />
-    <TimezonePanel v-if="timezoneComparison" :comparison="timezoneComparison" @clear="clearTimezone" />
-    <ThematicLegend />
-    <ThematicInfoCard />
-    <div v-if="drawHint" class="draw-hint">{{ drawHint }}</div>
-    <CameraStatus :camera="camera" />
-    <EoqAssistant />
-    <AiSettingsModal />
-    <FirstUseGuide ref="firstUseGuide" :ready="isGlobeReady" @step-change="handleSetupGuideStepChange" />
-    <UpdateDialog />
-    <AnnotationPanel
-      :open="isAnnotationPanelOpen"
-      :shapes="shapes"
-      :entries="entries"
-      :selected-shape-id="selectedShapeId"
-      :save-error="saveError"
-      @close="isAnnotationPanelOpen = false"
-      @edit="drawingStore.setSelectedShapeId"
-      @fly="handleFlyShape"
-      @remove="drawingStore.removeShape"
-    />
-    <LayerPanel
-      :open="isLayerPanelOpen"
-      :layers="layers"
-      :selected-layer-id="selectedLayerId"
-      :error="globeError"
-      :terrain-error="terrainError"
-      :loading="!isGlobeReady"
-      :terrain-provider-id="terrainProviderId"
-      :active-terrain-id="activeTerrainId"
-      :terrain-exaggeration="terrainExaggeration"
-      :terrain-lighting="terrainLighting"
-      :tile-cache-enabled="tileCacheEnabled"
-      :provider-credentials="providerCredentials"
-      @close="handleClosePanel"
-      @select="handleSelectLayer"
-      @opacity="handleOpacityChange"
-      @retry="handleRetry"
-      @terrain="handleTerrainChange"
-      @terrain-exaggeration="handleTerrainExaggeration"
-      @terrain-lighting="handleTerrainLighting"
-      @cache="handleCacheChange"
-      @credential-save="handleCredentialSave"
-      @credential-clear="handleCredentialClear"
-    />
-  </div>
+  </a-config-provider>
 </template>
 
 <style scoped>
