@@ -3,6 +3,8 @@ import { CloseOutlined } from '@ant-design/icons-vue'
 import { thematicLayerCatalog, useClimateStore, type ThematicLayerId } from '@renderer/stores/climate'
 import { useSolarStore, type MotionPanel as SolarMotionPanel } from '@renderer/stores/solar'
 import { useAtmosphereStore, type AtmospherePanel } from '@renderer/stores/atmosphere'
+import { useHydrologyStore, type HydrologyPanel } from '@renderer/stores/hydrology'
+import { useLandformStore, type LandformPanel } from '@renderer/stores/landform'
 import { useDrawingStore } from '@renderer/stores/drawing'
 
 interface LabEntry {
@@ -26,7 +28,16 @@ const emit = defineEmits<{ close: [] }>()
 const climateStore = useClimateStore()
 const solarStore = useSolarStore()
 const atmosphereStore = useAtmosphereStore()
+const hydrologyStore = useHydrologyStore()
+const landformStore = useLandformStore()
 const drawingStore = useDrawingStore()
+
+function closeAllPanels(): void {
+  solarStore.setMotionPanel(null)
+  atmosphereStore.setPanel(null)
+  hydrologyStore.setPanel(null)
+  landformStore.setPanel(null)
+}
 
 function layerEntry(id: ThematicLayerId): LabEntry {
   const layer = thematicLayerCatalog.find((item) => item.id === id)
@@ -46,8 +57,9 @@ function solarPanelEntry(panel: SolarMotionPanel, name: string, description: str
     description,
     active: () => solarStore.motionPanel === panel,
     toggle: () => {
-      atmosphereStore.setPanel(null)
-      solarStore.setMotionPanel(solarStore.motionPanel === panel ? null : panel)
+      const next = solarStore.motionPanel !== panel
+      closeAllPanels()
+      if (next) solarStore.setMotionPanel(panel)
     }
   }
 }
@@ -59,8 +71,37 @@ function atmospherePanelEntry(panel: AtmospherePanel, name: string, description:
     description,
     active: () => atmosphereStore.panel === panel,
     toggle: () => {
-      solarStore.setMotionPanel(null)
-      atmosphereStore.setPanel(atmosphereStore.panel === panel ? null : panel)
+      const next = atmosphereStore.panel !== panel
+      closeAllPanels()
+      if (next) atmosphereStore.setPanel(panel)
+    }
+  }
+}
+
+function hydroPanelEntry(panel: HydrologyPanel, name: string, description: string): LabEntry {
+  return {
+    key: panel,
+    name,
+    description,
+    active: () => hydrologyStore.panel === panel,
+    toggle: () => {
+      const next = hydrologyStore.panel !== panel
+      closeAllPanels()
+      if (next) hydrologyStore.setPanel(panel)
+    }
+  }
+}
+
+function landformPanelEntry(panel: LandformPanel, name: string, description: string): LabEntry {
+  return {
+    key: panel,
+    name,
+    description,
+    active: () => landformStore.panel === panel,
+    toggle: () => {
+      const next = landformStore.panel !== panel
+      closeAllPanels()
+      if (next) landformStore.setPanel(panel)
     }
   }
 }
@@ -122,12 +163,43 @@ const chapters: LabChapter[] = [
   {
     id: 'water',
     title: '第三章 · 地球上的水',
-    entries: [layerEntry('ocean-currents')]
+    entries: [
+      {
+        key: 'enso',
+        name: 'ENSO（厄尔尼诺与拉尼娜）',
+        description: '三相位海温距平着色 + 沃克环流剖面，点击海区看影响',
+        active: () => climateStore.overlays['enso'],
+        toggle: () => climateStore.setOverlay('enso', !climateStore.overlays['enso'])
+      },
+      hydroPanelEntry('water-cycle', '水循环', '海陆间循环环节动画，联动飞往西太平洋'),
+      hydroPanelEntry('ocean-property', '海水温度与盐度', '表层海水温度、盐度随纬度分布曲线'),
+      hydroPanelEntry('tide', '潮汐与波浪', '波浪水质点轨道运动、大小潮日地月示意'),
+      hydroPanelEntry('water-bodies', '陆地水体与河流补给', '降水/冰川/地下水/湖泊补给与流量过程线'),
+      {
+        key: 'current-wind-link',
+        name: '洋流成因联动',
+        description: '同时点亮世界洋流与气压带风带，演示风海流成因',
+        active: () => climateStore.overlays['ocean-currents'] && climateStore.overlays['pressure-belts'],
+        toggle: () => {
+          const next = !(climateStore.overlays['ocean-currents'] && climateStore.overlays['pressure-belts'])
+          climateStore.setOverlay('ocean-currents', next)
+          climateStore.setOverlay('pressure-belts', next)
+        }
+      },
+      layerEntry('ocean-currents')
+    ]
   },
   {
     id: 'landform',
     title: '第四章 · 地表形态的塑造',
-    entries: [layerEntry('plate-tectonics')]
+    entries: [
+      landformPanelEntry('fold-fault', '褶皱与断层', '背斜向斜、地垒地堑剖面，飞往华山/东非裂谷'),
+      landformPanelEntry('river', '河流地貌发育', 'V形谷→河曲→三角洲，沿河飞览+真实高程剖面'),
+      landformPanelEntry('landform-guide', '典型地貌识别', '喀斯特/雅丹/冰川/海岸/黄土，实地观察'),
+      landformPanelEntry('exogenic', '外力作用过程', '风化→侵蚀→搬运→堆积→固结成岩链条'),
+      landformPanelEntry('earth-layers', '地球的圈层结构', '地壳/地幔/地核切球剖面与地震波界线'),
+      layerEntry('plate-tectonics')
+    ]
   }
 ]
 

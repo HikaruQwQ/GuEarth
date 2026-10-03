@@ -15,6 +15,7 @@ import { nearestBoundary, plateBoundaries, plateBoundaryKindName } from '@render
 import { volcanoes } from '@renderer/thematic/volcanoes'
 import { temperatureZoneBands, temperatureZoneLines } from '@renderer/thematic/temperatureZones'
 import { typhoonIntensityStyles, typhoonTracks } from '@renderer/thematic/typhoonTracks'
+import { ensoAnomalyColor, ensoPhaseMeta } from '@renderer/thematic/ensoPhases'
 import { subsolarPointDeg } from '@renderer/thematic/solarMath'
 
 const WARM_COLOR = '#f5222d'
@@ -763,6 +764,36 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     }
   }
 
+  function buildEnso(dataSource: Cesium.CustomDataSource): void {
+    const phase = ensoPhaseMeta[store.ensoPhase]
+    for (const item of phase.bands) {
+      dataSource.entities.add({
+        properties: new Cesium.PropertyBag({
+          name: `ENSO 海温距平：${phase.name}`,
+          layerId: 'enso',
+          summary: `${phase.summary} 对地理格局的影响：${phase.impacts.map((line) => line).join('；')}。`
+        }),
+        rectangle: {
+          coordinates: Cesium.Rectangle.fromDegrees(item.west, -5, item.east, 5),
+          material: Cesium.Color.fromCssColorString(ensoAnomalyColor(item.anomaly)).withAlpha(0.8)
+        }
+      })
+    }
+    dataSource.entities.add({
+      properties: new Cesium.PropertyBag({
+        name: 'Niño3.4 关键监测区',
+        layerId: 'enso',
+        summary: 'Niño3.4 区（5°N–5°S，170°W–120°W）海温距平是判定厄尔尼诺与拉尼娜的主要指标：距平持续 ≥ +0.5℃ 判定为厄尔尼诺事件，≤ -0.5℃ 判定为拉尼娜事件。'
+      }),
+      polyline: {
+        positions: Cesium.Cartesian3.fromDegreesArray([190, -5, 240, -5, 240, 5, 190, 5, 190, -5]),
+        clampToGround: true,
+        width: 2.5,
+        material: Cesium.Color.fromCssColorString('#531dab')
+      }
+    })
+  }
+
   const builders: Record<ThematicLayerId, (dataSource: Cesium.CustomDataSource) => void> = {
     'wind-particles': () => undefined,
     'pressure-belts': buildPressureBelts,
@@ -776,7 +807,8 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     'coriolis-demo': buildCoriolis,
     'plate-tectonics': buildPlateTectonics,
     'temperature-zones': buildTemperatureZones,
-    'typhoon': buildTyphoon
+    'typhoon': buildTyphoon,
+    'enso': buildEnso
   }
 
   const enableViews: Partial<Record<ThematicLayerId, LayerView>> = {
@@ -790,7 +822,8 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     'coriolis-demo': { longitude: 100, latitude: 0, height: 12000000 },
     'plate-tectonics': { longitude: 180, latitude: 5, height: 17000000 },
     'temperature-zones': { longitude: 20, latitude: 0, height: 17000000 },
-    'typhoon': { longitude: 132, latitude: 18, height: 10500000 }
+    'typhoon': { longitude: 132, latitude: 18, height: 10500000 },
+    'enso': { longitude: 205, latitude: 0, height: 9500000 }
   }
 
   function syncOverlays(): void {
@@ -816,6 +849,20 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
   }
 
   watch(() => store.overlays, syncOverlays, { deep: true })
+  watch(
+    () => store.ensoPhase,
+    () => {
+      const current = viewer.value
+      const existing = sources.get('enso')
+      if (!current || current.isDestroyed() || !existing) return
+      current.dataSources.remove(existing, true)
+      sources.delete('enso')
+      const dataSource = new Cesium.CustomDataSource('enso')
+      buildEnso(dataSource)
+      void current.dataSources.add(dataSource)
+      sources.set('enso', dataSource)
+    }
+  )
   failureStore.registerRetry('dataset', async () => {
     const dataSource = sources.get('plate-tectonics')
     if (!dataSource) {

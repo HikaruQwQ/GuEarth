@@ -38,6 +38,13 @@ const koppenEntries = koppenZones.map((zone) => ({ name: zone.name, color: zone.
         <span class="swatch" :style="{ background: zone.color }"></span><span>{{ zone.name }}</span>
       </div>
     </div>
+    <div v-if="store.overlays['enso']" class="legend-group">
+      <div class="legend-item"><span class="swatch" style="background: #1677ff"></span><span>海温距平 ≤ -1.5℃</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #bae7ff"></span><span>接近正常</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #fa8c16"></span><span>距平 +0.5~+2℃</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #fa541c"></span><span>距平 ≥ +2℃</span></div>
+      <div class="legend-item"><span class="swatch" style="background: #531dab"></span><span>Niño3.4 关键监测区</span></div>
+    </div>
     <div v-if="store.overlays['frontal-cyclone']" class="legend-group">
       <div class="legend-item"><span class="swatch" style="background: #f5222d"></span><span>暖锋</span></div>
       <div class="legend-item"><span class="swatch" style="background: #1677ff"></span><span>冷锋</span></div>
