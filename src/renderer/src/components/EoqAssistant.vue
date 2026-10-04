@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, h, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import MarkdownIt from 'markdown-it'
-import { Bubble, Sender } from 'ant-design-x-vue'
-import { CloseCircleOutlined, CloseOutlined, CompassOutlined, DeleteOutlined, HistoryOutlined, LeftOutlined, PlusOutlined, ReloadOutlined, RightOutlined, SettingOutlined, UpOutlined } from '@ant-design/icons-vue'
+import { Bubble, Sender, Suggestion } from 'ant-design-x-vue'
+import type { VNode } from 'vue'
+import { CloseCircleOutlined, CloseOutlined, CompassOutlined, CompressOutlined, DeleteOutlined, HistoryOutlined, LeftOutlined, PlusOutlined, ReloadOutlined, RightOutlined, SettingOutlined, UpOutlined } from '@ant-design/icons-vue'
 import { useAiStore, toolLabel, type ChatMessage, type ReasoningPart, type ToolStep } from '@renderer/stores/ai'
 import type { AiModelConfig, AiProviderConfig, StoredAiConversation } from '../../../preload'
 import ContextMeter from './ContextMeter.vue'
@@ -29,6 +30,102 @@ const modelProviders = computed(() => settings.value.providers.filter((provider)
 const activeProvider = computed(() => settings.value.providers.find((provider) => provider.id === settings.value.activeProviderId))
 const activeModel = computed(() => activeProvider.value?.models.find((model) => model.id === settings.value.activeModelId))
 const activeModelLabel = computed(() => activeModel.value?.label || activeModel.value?.id || '选择模型')
+
+interface AgentCommand {
+  name: string
+  label: string
+  description: string
+  icon: typeof CompressOutlined
+  run: () => void | Promise<void>
+}
+
+interface AgentSuggestionItem {
+  value: string
+  label: string
+  icon: VNode
+  extra: string
+}
+
+const commandMenuOpen = ref(false)
+const agentCommands: AgentCommand[] = [
+  { name: '/compact', label: '压缩上下文', description: '总结较早的对话，保留最近消息', icon: CompressOutlined, run: () => store.compressContext() }
+]
+const commandQuery = computed(() => {
+  const value = draft.value.trimStart()
+  if (!value.startsWith('/')) return ''
+  return value.slice(1).split(/\s/)[0].toLowerCase()
+})
+const filteredCommands = computed(() => agentCommands.filter((command) => !commandQuery.value || command.name.slice(1).startsWith(commandQuery.value)))
+const commandItems = computed<AgentSuggestionItem[]>(() => filteredCommands.value.map((command) => ({
+  value: command.name,
+  label: command.name,
+  icon: h(command.icon),
+  extra: `${command.label} · ${command.description}`
+})))
+
+function updateCommandMenu(): void {
+  commandMenuOpen.value = draft.value.trimStart().startsWith('/') && !isStreaming.value && filteredCommands.value.length > 0
+}
+
+function selectCommand(command: AgentCommand): void {
+  draft.value = ''
+  commandMenuOpen.value = false
+  void command.run()
+}
+
+function handleDraftChange(value: string, onTrigger?: (info?: unknown | false) => void): void {
+  draft.value = value
+  updateCommandMenu()
+  if (commandMenuOpen.value) onTrigger?.()
+  else onTrigger?.(false)
+}
+
+function completeCommand(onTrigger?: (info?: unknown | false) => void): boolean {
+  const command = filteredCommands.value[0]
+  if (!command) return false
+  draft.value = command.name
+  updateCommandMenu()
+  if (commandMenuOpen.value) onTrigger?.()
+  else onTrigger?.(false)
+  return true
+}
+
+function handleSuggestionKeyDown(event: KeyboardEvent, onKeyDown?: (event: KeyboardEvent) => void, onTrigger?: (info?: unknown | false) => void): void {
+  if (commandMenuOpen.value && event.key === 'Tab' && !event.shiftKey) {
+    if (completeCommand(onTrigger)) {
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      return
+    }
+  }
+  if (commandMenuOpen.value && ['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(event.key)) {
+    onKeyDown?.(event)
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    return
+  }
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    runCommandOrSubmit(draft.value)
+    return
+  }
+  onKeyDown?.(event)
+}
+
+function runCommandOrSubmit(value: string | undefined): void {
+  const text = (typeof value === 'string' && value.trim() ? value : draft.value).trim()
+  const command = text.match(/^\/([^\s]+)(?:\s+.*)?$/)?.[1].toLowerCase()
+  if (command) {
+    const matched = agentCommands.find((item) => item.name.slice(1) === command)
+    if (matched) {
+      selectCommand(matched)
+      return
+    }
+  }
+  commandMenuOpen.value = false
+  submit(text)
+}
 
 function clampDrawerWidth(width: number): number {
   return Math.min(drawerMaxWidth.value, Math.max(drawerMinWidth.value, Math.round(width)))
@@ -453,14 +550,27 @@ watch(currentConversationId, () => {
         </template>
       </a-dropdown>
     </div>
-    <Sender
-      v-model:value="draft"
-      :loading="isStreaming"
-      placeholder="问一问地球，例如：帮我找典型的流水侵蚀地貌"
-      :submit-type="'enter'"
-      @submit="submit"
-      @cancel="handleCancel"
-    />
+    <Suggestion
+      :open="commandMenuOpen"
+      :items="commandItems"
+      :block="true"
+      root-class-name="eoq-command-suggestion"
+      @open-change="commandMenuOpen = $event"
+      @select="(value) => selectCommand(agentCommands.find((command) => command.name === value) ?? agentCommands[0])"
+    >
+      <template #default="suggestion">
+        <Sender
+          v-model:value="draft"
+          :loading="isStreaming"
+          placeholder="问一问地球，例如：帮我找典型的流水侵蚀地貌"
+          :submit-type="false"
+          @submit="runCommandOrSubmit"
+          @change="handleDraftChange($event, suggestion?.onTrigger)"
+          @keydown="handleSuggestionKeyDown($event, suggestion?.onKeyDown, suggestion?.onTrigger)"
+          @cancel="handleCancel"
+        />
+      </template>
+    </Suggestion>
     <p class="ai-disclaimer" title="内容由 AI 生成，咕咕地球不为其生成的内容负责，请谨慎甄别">内容由 AI 生成，咕咕地球不为其生成的内容负责，请谨慎甄别</p>
   </a-drawer>
 
