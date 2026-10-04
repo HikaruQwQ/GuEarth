@@ -64,6 +64,7 @@ import EoqAssistant from '@renderer/components/EoqAssistant.vue'
 import AiSettingsModal from '@renderer/components/AiSettingsModal.vue'
 import UpdateDialog from '@renderer/components/UpdateDialog.vue'
 import FailureBanner from '@renderer/components/FailureBanner.vue'
+import CrashDialog from '@renderer/components/CrashDialog.vue'
 import FirstUseGuide from '@renderer/components/FirstUseGuide.vue'
 
 const store = useGlobeStore()
@@ -892,6 +893,7 @@ function deleteSelectedShape(): void {
         <a-button v-if="globeLoadTimedOut" type="text" size="small" @click="handleRetry"><ReloadOutlined />重试</a-button>
       </div>
       <FailureBanner />
+      <CrashDialog />
       <WindParticles v-if="thematicOverlays['wind-particles']" :viewer="viewer" />
       <FrontalCyclone v-if="thematicOverlays['frontal-cyclone']" :viewer="viewer" />
       <TyphoonOverlay v-if="thematicOverlays['typhoon']" :viewer="viewer" />

@@ -1,8 +1,15 @@
 import * as Sentry from '@sentry/electron/main'
-import { app, shell, BrowserWindow, dialog, ipcMain, net, protocol } from 'electron'
+import { app, shell, BrowserWindow, clipboard, dialog, ipcMain, net, protocol } from 'electron'
+import { attachConsoleLogTee, logger } from '../common/logger'
+
+attachConsoleLogTee('main')
 
 Sentry.init({
-  dsn: 'https://28239780e3a5ede424bde1114849f448@o4509333304573952.ingest.us.sentry.io/4512192370769920'
+  dsn: 'https://28239780e3a5ede424bde1114849f448@o4509333304573952.ingest.us.sentry.io/4512192370769920',
+  beforeSend(event) {
+    event.extra = { ...event.extra, mainProcessLogs: logger.dump(80) }
+    return event
+  }
 })
 import { execFileSync } from 'child_process'
 import { join } from 'path'
@@ -113,7 +120,8 @@ function readSettings(): PersistedSettings {
       setupGuideDismissed: typeof parsed.setupGuideDismissed === 'boolean' ? parsed.setupGuideDismissed : null,
       recordingDirectory: typeof parsed.recordingDirectory === 'string' && parsed.recordingDirectory.trim() ? parsed.recordingDirectory : null
     }
-  } catch {
+  } catch (error) {
+    logger.error('settings', '读取设置失败，已使用默认设置', error)
     return { ...defaultSettings, providerCredentials: {} }
   }
 }
@@ -388,7 +396,8 @@ function readAnnotations(): AnnotationDocument {
       }
     })
     return { shapes, entries: shapes.map((shape) => ({ type: 'shape' as const, id: shape.id })) }
-  } catch {
+  } catch (error) {
+    logger.warn('annotations', '读取标注失败，已按空目录处理', error)
     return { shapes: [], entries: [] }
   }
 }
@@ -470,7 +479,8 @@ function readScenes(): SceneDocument {
   if (!existsSync(scenesPath)) return { scenes: [] }
   try {
     return normalizeSceneDocument(JSON.parse(readFileSync(scenesPath, 'utf8')))
-  } catch {
+  } catch (error) {
+    logger.warn('scenes', '读取教学场景失败，已按空目录处理', error)
     return { scenes: [] }
   }
 }
@@ -734,6 +744,20 @@ function registerIpcHandlers(): void {
     if (writer.senderId !== event.sender.id) throw new Error('录制会话已失效')
     await discardRecordingWriter(recordingId, writer)
   })
+  ipcMain.handle('logging:copy-report', (_event, rendererDump: unknown): void => {
+    if (typeof rendererDump !== 'string') throw new Error('无效的日志数据')
+    clipboard.writeText([
+      '=== GuEarth 诊断日志 ===',
+      `版本 ${app.getVersion()} | Electron ${process.versions.electron} | Chrome ${process.versions.chrome} | Node ${process.versions.node} | ${process.platform} ${process.getSystemVersion()}`,
+      `生成时间 ${new Date().toLocaleString()}`,
+      '',
+      '== 渲染进程 ==',
+      rendererDump || '（无日志）',
+      '',
+      '== 主进程 ==',
+      logger.dump() || '（无日志）'
+    ].join('\n'))
+  })
 }
 
 function displayAppName(): string {
@@ -764,6 +788,17 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
+  win.webContents.on('render-process-gone', (_event, details) => {
+    logger.error('window', `渲染进程退出（${details.reason}）`, `exitCode=${details.exitCode}`)
+    Sentry.captureMessage(`渲染进程退出：${details.reason}`, { level: 'fatal', extra: { exitCode: details.exitCode } })
+  })
+
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return
+    logger.error('window', '页面加载失败', `${errorCode} ${errorDescription} ${validatedURL}`)
+    Sentry.captureMessage('渲染页面加载失败', { level: 'error', extra: { errorCode, errorDescription, url: validatedURL } })
+  })
+
   if (process.env['ELECTRON_RENDERER_URL']) {
     win.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
@@ -772,6 +807,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  logger.info('app', '应用启动', `version=${app.getVersion()} packaged=${app.isPackaged}`)
   const userDataPath = app.getPath('userData')
   settingsPath = join(userDataPath, 'settings.json')
   tileCachePath = join(userDataPath, 'tile-cache')
@@ -789,6 +825,7 @@ app.whenReady().then(() => {
   registerIpcHandlers()
   registerAiIpcHandlers(aiSettings, aiChatHistory, aiMemories)
   initUpdater(join(userDataPath, 'updates'))
+  logger.info('app', '主进程服务就绪')
   protocol.handle('guearth-tile', async (request) => {
     const response = await handleTileProtocol(request)
     response.headers.set('Access-Control-Allow-Origin', '*')
@@ -803,4 +840,14 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+let gpuCrashReportedAt = 0
+
+app.on('child-process-gone', (_event, details) => {
+  if (details.type !== 'GPU') return
+  logger.error('gpu', `GPU 进程退出（${details.reason}）`, `exitCode=${details.exitCode}`)
+  if (Date.now() - gpuCrashReportedAt < 60_000) return
+  gpuCrashReportedAt = Date.now()
+  Sentry.captureMessage(`GPU 进程退出：${details.reason}`, { level: 'error', extra: { exitCode: details.exitCode } })
 })

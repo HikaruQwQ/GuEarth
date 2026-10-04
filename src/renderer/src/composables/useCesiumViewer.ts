@@ -3,6 +3,8 @@ import * as Cesium from 'cesium'
 import { useGlobeStore, providerCatalog, terrainCatalog, type ProviderMeta } from '@renderer/stores/globe'
 import { useSolarStore } from '@renderer/stores/solar'
 import { useFailureStore } from '@renderer/stores/failure'
+import { captureError, captureWarning } from '@renderer/lib/crashReporter'
+import { logger, stringifyLogValue } from '../../../common/logger'
 import type { PlaceSuggestion } from '../../../preload'
 import { createPolarCaps } from './polarCaps'
 
@@ -61,6 +63,10 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
   let terrainRequestSeq = 0
   let activeBasemapId = ''
   let lastTileErrorAt = 0
+  let lastTileErrorLoggedAt = 0
+  let lastRenderErrorAt = 0
+  let renderErrorReported = false
+  let loadTimeoutReported = false
   let loadTimeoutTimer: number | undefined
   let tileProgressListener: ((pending: number) => void) | undefined
   let selectedPlaceMarker: Cesium.Entity | undefined
@@ -180,6 +186,10 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     const detail = typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
       ? error.message
       : `${name}瓦片请求失败`
+    if (Date.now() - lastTileErrorLoggedAt > 5000) {
+      lastTileErrorLoggedAt = Date.now()
+      logger.warn('basemap', `${name}瓦片加载失败`, detail)
+    }
     store.setGlobeError('地图数据加载失败，正在使用已缓存的部分', detail)
   }
 
@@ -205,7 +215,9 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
       imageryLayerStyles.set(id, styleId)
       return { ok: true }
     } catch (error) {
-      return { ok: false, reason: 'create', message: `${provider.meta.name}加载失败`, detail: error instanceof Error ? error.message : '' }
+      const detail = error instanceof Error ? error.message : ''
+      logger.warn('basemap', `${provider.meta.name}加载失败`, detail)
+      return { ok: false, reason: 'create', message: `${provider.meta.name}加载失败`, detail }
     } finally {
       layersInFlight.delete(id)
     }
@@ -299,6 +311,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     } catch (error) {
       if (requestSeq !== terrainRequestSeq) return
       const detail = error instanceof Error ? error.message : ''
+      logger.warn('terrain', `${terrainName(id)}不可用`, detail)
       if (id === 'ellipsoid') {
         store.setTerrainError('地形不可用，且无法降级为平滑球面', detail)
         return
@@ -337,6 +350,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
       window.setTimeout(() => {
         if (settled) return
         settled = true
+        logger.warn('terrain', `${terrainName(id)}加载超时，已降级为平滑球面`)
         failureStore.reportDegrade(`${terrainName(id)}加载超时，已降级为平滑球面`)
         void terrainRegistry.ellipsoid().then((provider) => resolve({ provider, id: 'ellipsoid' }))
       }, TERRAIN_RESOLVE_BUDGET_MS)
@@ -346,8 +360,9 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
       const resolved = await Promise.race([attempt, timeout])
       settled = true
       return resolved
-    } catch {
+    } catch (error) {
       settled = true
+      logger.warn('terrain', `${terrainName(id)}不可用，已降级为平滑球面`, error)
       failureStore.reportDegrade(`${terrainName(id)}不可用，已降级为平滑球面`)
       return { provider: await terrainRegistry.ellipsoid(), id: 'ellipsoid' }
     }
@@ -359,8 +374,24 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
       loadTimeoutTimer = undefined
       evaluateGlobeReady()
       if (store.isGlobeReady) return
+      logger.warn('globe', `地球加载超时（${GLOBE_LOAD_TIMEOUT_MS / 1000} 秒未就绪）`, `stage=${store.globeLoadStage}`)
+      if (!loadTimeoutReported) {
+        loadTimeoutReported = true
+        captureWarning('globe-load', `地球加载超时（${GLOBE_LOAD_TIMEOUT_MS / 1000} 秒未就绪）`, { stage: store.globeLoadStage })
+      }
       store.setGlobeLoadTimedOut(true)
     }, GLOBE_LOAD_TIMEOUT_MS)
+  }
+
+  function handleSceneRenderError(_scene: Cesium.Scene, error: unknown): void {
+    if (Date.now() - lastRenderErrorAt < 5000) return
+    lastRenderErrorAt = Date.now()
+    if (!renderErrorReported) {
+      renderErrorReported = true
+      captureError('globe-render', error instanceof Error ? error : new Error(stringifyLogValue(error)))
+      return
+    }
+    logger.warn('globe', '场景渲染错误（持续发生，已上报过首次错误）', error)
   }
 
   function detachTileProgress(): void {
@@ -537,6 +568,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
         viewer.value.scene.preUpdate.addEventListener(updateDepthTestDistance)
         viewer.value.scene.preUpdate.addEventListener(updateCollectionDepthTestDistances)
         viewer.value.scene.preUpdate.addEventListener(updateHorizonLabelVisibility)
+        viewer.value.scene.renderError.addEventListener(handleSceneRenderError)
         viewer.value.camera.moveEnd.addEventListener(updateCameraState)
         updateCameraState()
         attachTileProgress()
@@ -572,6 +604,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
           store.setGlobeError(result.message, result.detail)
         })()
       } catch (error) {
+        captureError('globe-init', error, { stage: store.globeLoadStage })
         store.setGlobeError('地球初始化失败', error instanceof Error ? error.message : '')
       }
     })()
@@ -588,6 +621,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     currentViewer.scene.preUpdate.removeEventListener(updateDepthTestDistance)
     currentViewer.scene.preUpdate.removeEventListener(updateCollectionDepthTestDistances)
     currentViewer.scene.preUpdate.removeEventListener(updateHorizonLabelVisibility)
+    currentViewer.scene.renderError.removeEventListener(handleSceneRenderError)
     currentViewer.destroy()
     viewer.value = undefined
     selectedPlaceMarker = undefined

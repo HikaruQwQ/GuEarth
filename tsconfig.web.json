@@ -16,6 +16,7 @@
     }
   },
   "include": [
+    "src/common/**/*",
     "src/renderer/src/**/*",
     "src/renderer/src/**/*.vue",
     "src/preload/index.d.ts"

@@ -7,11 +7,26 @@ import Antd from 'ant-design-vue'
 import 'ant-design-vue/dist/reset.css'
 import App from './App.vue'
 import './assets/main.css'
+import { attachConsoleLogTee, logger } from '../../common/logger'
+import { installGlobalErrorListeners, notifyCrashMessage } from './lib/crashReporter'
+
+attachConsoleLogTee('renderer')
 
 Sentry.init({
   dsn: 'https://28239780e3a5ede424bde1114849f448@o4509333304573952.ingest.us.sentry.io/4512192370769920',
-  integrations: (defaults) => defaults.filter((integration) => integration.name !== 'Breadcrumbs' && integration.name !== 'Console')
+  integrations: (defaults) => defaults.filter((integration) => integration.name !== 'Breadcrumbs' && integration.name !== 'Console'),
+  beforeSend(event) {
+    event.extra = { ...event.extra, rendererLogs: logger.dump(80) }
+    const level = event.level ?? (event.exception ? 'error' : 'info')
+    if (level === 'error' || level === 'fatal') {
+      const exception = event.exception?.values?.at(-1)
+      notifyCrashMessage([exception?.type, exception?.value ?? event.message].filter(Boolean).join(': '))
+    }
+    return event
+  }
 })
+
+installGlobalErrorListeners()
 
 dayjs.locale('zh-cn')
 

@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, net } from 'electron'
 import { spawn } from 'child_process'
 import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, type WriteStream } from 'fs'
 import { join } from 'path'
+import { logger } from '../common/logger'
 import type { UpdateState, UpdaterEvent } from '../preload'
 
 const DEFAULT_UPDATE_BASE_URL = 'https://guearth-updater.isla.fan'
@@ -139,6 +140,7 @@ async function downloadUpdate(): Promise<void> {
     rmSync(tempPath, { force: true })
     status = 'available'
     const reason = error instanceof Error ? error.message : '未知错误'
+    logger.error('updater', '更新下载失败', reason)
     emit({ type: 'error', message: `更新下载失败：${reason}，可点击底部下载按钮重试` })
   }
 }
@@ -150,6 +152,7 @@ function installUpdate(): void {
     installer.once('error', () => void 0)
     installer.unref()
   } catch {
+    logger.error('updater', '安装程序启动失败', installerPath)
     rmSync(installerPath, { force: true })
     status = 'available'
     emit({ type: 'error', message: '安装程序启动失败，已清除安装包，请重新下载更新' })

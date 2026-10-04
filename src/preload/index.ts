@@ -346,6 +346,9 @@ const api = {
   system: {
     fonts: (): Promise<string[]> => ipcRenderer.invoke('system:fonts')
   },
+  logs: {
+    copy: (rendererDump: string): Promise<void> => ipcRenderer.invoke('logging:copy-report', rendererDump)
+  },
   places: {
     search: (keyword: string, provider?: PlaceSearchProvider): Promise<PlaceSearchResult> => ipcRenderer.invoke('places:search', keyword, provider)
   },
