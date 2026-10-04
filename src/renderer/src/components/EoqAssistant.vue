@@ -34,7 +34,6 @@ const activeModelLabel = computed(() => activeModel.value?.label || activeModel.
 interface AgentCommand {
   name: string
   label: string
-  description: string
   icon: typeof CompressOutlined
   run: () => void | Promise<void>
 }
@@ -47,9 +46,10 @@ interface AgentSuggestionItem {
 const commandMenuOpen = ref(false)
 const activeCommandIndex = ref(0)
 const agentCommands: AgentCommand[] = [
-  { name: '/new', label: '新建会话', description: '开始一个空白会话', icon: PlusOutlined, run: () => store.newConversation() },
-  { name: '/compact', label: '压缩上下文', description: '总结较早的对话，保留最近消息', icon: CompressOutlined, run: () => store.compressContext() },
-  { name: '/settings', label: 'AI 设置', description: '模型、搜索与记忆配置', icon: SettingOutlined, run: () => store.setSettingsOpen(true) }
+  { name: '/new', label: '新建会话', icon: PlusOutlined, run: () => store.newConversation() },
+  { name: '/resume', label: '历史会话', icon: HistoryOutlined, run: () => { historyOpen.value = true } },
+  { name: '/compact', label: '压缩上下文', icon: CompressOutlined, run: () => store.compressContext() },
+  { name: '/settings', label: 'AI 设置', icon: SettingOutlined, run: () => store.setSettingsOpen(true) }
 ]
 const commandQuery = computed(() => {
   const value = draft.value.trimStart()
@@ -62,7 +62,7 @@ const commandItems = computed<AgentSuggestionItem[]>(() => filteredCommands.valu
   label: h('div', { class: ['eoq-command-option', { 'eoq-command-option-active': index === activeCommandIndex.value }] }, [
     h('span', { class: 'eoq-command-option-icon' }, h(command.icon)),
     h('span', { class: 'eoq-command-option-name' }, command.name),
-    h('span', { class: 'eoq-command-option-description' }, `${command.label} · ${command.description}`)
+    h('span', { class: 'eoq-command-option-label' }, command.label)
   ])
 })))
 const activeCommand = computed(() => filteredCommands.value[activeCommandIndex.value] ?? filteredCommands.value[0])
@@ -427,7 +427,7 @@ watch(currentConversationId, () => {
           <a-tooltip v-if="messages.length > 0" title="新建会话">
             <a-button type="text" aria-label="新建会话" :disabled="isStreaming" @click="store.newConversation()"><PlusOutlined /></a-button>
           </a-tooltip>
-          <a-dropdown v-else v-model:open="historyOpen" :trigger="['click']" placement="bottomRight" :overlay-style="{ width: '300px' }">
+          <a-dropdown v-model:open="historyOpen" :trigger="['click']" placement="bottomRight" :overlay-style="{ width: '300px' }">
             <a-button type="text" aria-label="历史会话" aria-haspopup="menu" :aria-expanded="historyOpen"><HistoryOutlined /></a-button>
             <template #overlay>
               <a-menu class="history-menu" @click="handleHistoryMenuClick">
@@ -714,13 +714,14 @@ h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28p
 
 <style>
 .eoq-command-suggestion .ant-cascader-menu-item{padding:0}
+.eoq-command-suggestion .ant-cascader-menu-item-content{min-width:0}
 .ant-cascader-dropdown.eoq-command-suggestion .ant-cascader-menu .ant-cascader-menu-item-active,
 .ant-cascader-dropdown.eoq-command-suggestion .ant-cascader-menu .ant-cascader-menu-item-active:hover{background-color:transparent;font-weight:400}
-.eoq-command-option{display:flex;align-items:center;gap:8px;width:320px;padding:5px 12px;font-size:13px;line-height:22px}
+.eoq-command-option{display:flex;align-items:center;gap:8px;width:100%;padding:5px 12px;font-size:13px;line-height:22px}
 .eoq-command-option:hover{background-color:rgba(0,0,0,.04)}
 .eoq-command-option-icon{display:flex;flex-shrink:0;color:rgba(0,0,0,.45);font-size:14px}
 .eoq-command-option-name{flex-shrink:0;width:80px;color:rgba(0,0,0,.88)}
-.eoq-command-option-description{flex:1;min-width:0;color:rgba(0,0,0,.45);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.eoq-command-option-label{flex:1;min-width:0;color:rgba(0,0,0,.45);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .eoq-command-option-active,.eoq-command-option-active:hover{background-color:#e6f4ff}
 .eoq-command-option-active .eoq-command-option-name{color:#1677ff;font-weight:600}
 </style>
