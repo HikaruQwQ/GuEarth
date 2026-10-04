@@ -150,8 +150,9 @@ aiStore.registerTool({
     const height = args.height === undefined ? 60000 : Number(args.height)
     if (!Number.isFinite(longitude) || !Number.isFinite(latitude) || longitude < -180 || longitude > 180 || latitude < -90 || latitude > 90) return { error: '坐标无效，需要 WGS-84 经纬度' }
     if (!Number.isFinite(height) || height <= 0 || height > 20000000) return { error: '视点高度无效' }
-    flyTo(longitude, latitude, height)
-    return { status: 'ok', message: `视角已飞往 ${longitude.toFixed(4)}, ${latitude.toFixed(4)}`, longitude, latitude, height }
+    const actualHeight = await flyTo(longitude, latitude, height)
+    if (actualHeight === undefined) return { error: '飞行已取消' }
+    return { status: 'ok', message: `视角已飞往 ${longitude.toFixed(4)}, ${latitude.toFixed(4)}`, longitude, latitude, height: actualHeight }
   }
 })
 

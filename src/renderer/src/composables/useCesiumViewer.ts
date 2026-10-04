@@ -7,20 +7,21 @@ import { captureError, captureWarning } from '@renderer/lib/crashReporter'
 import { logger, stringifyLogValue } from '../../../common/logger'
 import type { PlaceSuggestion } from '../../../preload'
 import { createPolarCaps } from './polarCaps'
+import { createBasemapImageryProvider } from './basemapImagery'
+import { resolveFlightDestination } from './terrainFlight'
 
 interface LayerProvider {
   meta: ProviderMeta
   createImageryProvider: (styleId: string) => Promise<Cesium.ImageryProvider>
 }
 
-const protocolTileUrl = (id: string, styleId: string): string => `guearth-tile://${id}/${styleId}/{z}/{x}/{y}`
 const providerMeta = (id: string): ProviderMeta => providerCatalog.find((provider) => provider.id === id) ?? providerCatalog[0]
 
 const layerRegistry: Record<string, LayerProvider> = {
-  osm: { meta: providerMeta('osm'), createImageryProvider: async (styleId) => new Cesium.UrlTemplateImageryProvider({ url: protocolTileUrl('osm', styleId), credit: '© OpenStreetMap contributors' }) },
-  'esri-imagery': { meta: providerMeta('esri-imagery'), createImageryProvider: async (styleId) => new Cesium.UrlTemplateImageryProvider({ url: protocolTileUrl('esri-imagery', styleId), credit: '© Esri' }) },
-  opentopomap: { meta: providerMeta('opentopomap'), createImageryProvider: async (styleId) => new Cesium.UrlTemplateImageryProvider({ url: protocolTileUrl('opentopomap', styleId), credit: '© OpenTopoMap contributors' }) },
-  baidu: { meta: providerMeta('baidu'), createImageryProvider: async (styleId) => new Cesium.UrlTemplateImageryProvider({ url: protocolTileUrl('baidu', styleId), credit: '© 百度地图' }) }
+  osm: { meta: providerMeta('osm'), createImageryProvider: async (styleId) => createBasemapImageryProvider('osm', styleId) },
+  'esri-imagery': { meta: providerMeta('esri-imagery'), createImageryProvider: async (styleId) => createBasemapImageryProvider('esri-imagery', styleId) },
+  opentopomap: { meta: providerMeta('opentopomap'), createImageryProvider: async (styleId) => createBasemapImageryProvider('opentopomap', styleId) },
+  baidu: { meta: providerMeta('baidu'), createImageryProvider: async (styleId) => createBasemapImageryProvider('baidu', styleId) }
 }
 
 const terrainRegistry: Record<string, () => Promise<Cesium.TerrainProvider>> = {
@@ -61,6 +62,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
   const solarStore = useSolarStore()
   const failureStore = useFailureStore()
   let generation = 0
+  let flightRequestSequence = 0
   let terrainRequestSeq = 0
   let activeBasemapId = ''
   let lastTileErrorAt = 0
@@ -201,6 +203,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
   function applyTerrain(terrain: Cesium.TerrainProvider): void {
     const currentViewer = viewer.value
     if (!currentViewer || currentViewer.isDestroyed()) return
+    flightRequestSequence += 1
     currentViewer.terrainProvider = terrain
     if (polarCaps) currentViewer.scene.primitives.remove(polarCaps)
     polarCaps = createPolarCaps(terrain)
@@ -504,6 +507,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
   })
 
   function toggleLevelView(): void {
+    flightRequestSequence += 1
     if (!viewer.value || viewer.value.isDestroyed()) return
     const currentViewer = viewer.value
     const camera = currentViewer.camera
@@ -540,13 +544,19 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     }
   }
 
-  function flyTo(longitude: number, latitude: number, height: number): void {
-    if (!viewer.value || viewer.value.isDestroyed()) return
-    if (longitude < -180 || longitude > 180 || latitude < -90 || latitude > 90 || height <= 0) return
-    viewer.value.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(longitude, latitude, height), duration: 1.2, complete: updateCameraState })
+  async function flyTo(longitude: number, latitude: number, height: number): Promise<number | undefined> {
+    const currentViewer = viewer.value
+    if (!currentViewer || currentViewer.isDestroyed()) return
+    if (![longitude, latitude, height].every(Number.isFinite) || longitude < -180 || longitude > 180 || latitude < -90 || latitude > 90 || height <= 0) return
+    const requestSequence = ++flightRequestSequence
+    const destination = await resolveFlightDestination(currentViewer.scene, longitude, latitude, height)
+    if (viewer.value !== currentViewer || currentViewer.isDestroyed() || requestSequence !== flightRequestSequence) return
+    currentViewer.camera.flyTo({ destination, duration: 1.2, complete: updateCameraState })
+    return Cesium.Cartographic.fromCartesian(destination).height
   }
 
   function flyToPlace(place: PlaceSuggestion): void {
+    flightRequestSequence += 1
     const currentViewer = viewer.value
     if (!currentViewer || currentViewer.isDestroyed()) return
     const { longitude, latitude } = place
@@ -683,7 +693,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     flyToPlace,
     toggleLevelView,
     setTerrain: (id: string) => { store.setTerrainProvider(id); void setTerrain(id, generation) },
-    setTerrainExaggeration: (value: number) => { store.setTerrainExaggeration(value); const currentViewer = viewer.value; if (currentViewer && !currentViewer.isDestroyed()) currentViewer.scene.verticalExaggeration = store.terrainExaggeration },
+    setTerrainExaggeration: (value: number) => { flightRequestSequence += 1; store.setTerrainExaggeration(value); const currentViewer = viewer.value; if (currentViewer && !currentViewer.isDestroyed()) currentViewer.scene.verticalExaggeration = store.terrainExaggeration },
     setTerrainLighting: (value: boolean) => {
       store.setTerrainLighting(value)
       const currentViewer = viewer.value
