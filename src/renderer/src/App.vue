@@ -84,6 +84,7 @@ const {
   terrainExaggeration,
   terrainLighting,
   tileCacheEnabled,
+  networkProxy,
   providerCredentials
 } =
   storeToRefs(store)
@@ -750,6 +751,10 @@ function handleCacheChange(value: boolean): void {
   store.setTileCacheEnabled(value)
 }
 
+function handleNetworkProxy(value: string): void {
+  store.setNetworkProxy(value)
+}
+
 async function handleCredentialSave(id: string, apiKey: string, securityKey?: string): Promise<void> {
   try {
     const status = await window.guEarth.settings.setProviderApiKey(id, apiKey)
@@ -979,6 +984,7 @@ function deleteSelectedShape(): void {
         :terrain-exaggeration="terrainExaggeration"
         :terrain-lighting="terrainLighting"
         :tile-cache-enabled="tileCacheEnabled"
+        :network-proxy="networkProxy"
         :provider-credentials="providerCredentials"
         @close="handleClosePanel"
         @select="handleSelectLayer"
@@ -988,6 +994,7 @@ function deleteSelectedShape(): void {
         @terrain-exaggeration="handleTerrainExaggeration"
         @terrain-lighting="handleTerrainLighting"
         @cache="handleCacheChange"
+        @network-proxy="handleNetworkProxy"
         @credential-save="handleCredentialSave"
         @credential-clear="handleCredentialClear"
       />

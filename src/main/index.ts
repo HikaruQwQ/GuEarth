@@ -1,6 +1,7 @@
 import * as Sentry from '@sentry/electron/main'
-import { app, shell, BrowserWindow, clipboard, dialog, ipcMain, net, protocol } from 'electron'
+import { app, shell, BrowserWindow, clipboard, dialog, ipcMain, net, protocol, session } from 'electron'
 import { attachConsoleLogTee, logger } from '../common/logger'
+import { normalizeNetworkProxy } from '../common/networkProxy'
 
 attachConsoleLogTee('main')
 
@@ -18,7 +19,7 @@ import { access, constants, open, rename as renameFile, stat, unlink } from 'fs/
 import type { FileHandle } from 'fs/promises'
 import { createHash, randomUUID } from 'crypto'
 import icon from '../../resources/icon.png?asset'
-import type { AnnotationDocument, AnnotationEntry, GeoPosition, GuEarthSettings, GuEarthSettingsPatch, PlaceSearchProvider, ProviderCredentialStatus, RecordingSaveResult, SceneCamera, SceneDocument, SceneSnapshot, SceneSimTime, StoredShape, TeachingScene, TileCacheEntry, TileCacheStats, TileKey } from '../preload'
+import type { AnnotationDocument, AnnotationEntry, GeoPosition, GuEarthSettings, GuEarthSettingsPatch, NetworkProxyTestResult, PlaceSearchProvider, ProviderCredentialStatus, RecordingSaveResult, SceneCamera, SceneDocument, SceneSnapshot, SceneSimTime, StoredShape, TeachingScene, TileCacheEntry, TileCacheStats, TileKey } from '../preload'
 import { assertEncryptionAvailable, assertSafeId, clearProviderKey, hasProviderKey, initKeyVault, readProviderKey, writeProviderKey } from './keyVault'
 import { baiduLngLatToTile, tileCenter, wgs84ToBd09 } from './geo'
 import { AiSettingsStore } from './ai/settingsStore'
@@ -37,6 +38,7 @@ interface PersistedSettings {
   terrainExaggeration: number
   terrainLighting: boolean
   tileCacheEnabled: boolean
+  networkProxy: string
   providerStyles: Record<string, string>
   providerCredentials: Record<string, ProviderCredentialStatus>
   sceneMode: '2D' | '3D'
@@ -50,6 +52,7 @@ const defaultSettings: PersistedSettings = {
   terrainExaggeration: 2,
   terrainLighting: false,
   tileCacheEnabled: true,
+  networkProxy: '',
   providerStyles: {
     osm: 'standard',
     'esri-imagery': 'satellite',
@@ -114,6 +117,7 @@ function readSettings(): PersistedSettings {
       terrainExaggeration: typeof parsed.terrainExaggeration === 'number' && Number.isFinite(parsed.terrainExaggeration) ? Math.min(5, Math.max(1, parsed.terrainExaggeration)) : defaultSettings.terrainExaggeration,
       terrainLighting: parsed.terrainLighting === true,
       tileCacheEnabled: parsed.tileCacheEnabled !== false,
+      networkProxy: normalizeNetworkProxy(parsed.networkProxy),
       providerStyles: normalizedStyles,
       providerCredentials,
       sceneMode: parsed.sceneMode === '2D' ? '2D' : '3D',
@@ -128,6 +132,20 @@ function readSettings(): PersistedSettings {
 
 function saveSettings(): void {
   writeFileSync(settingsPath, JSON.stringify(settings), 'utf8')
+}
+
+function proxyConfig(proxy: string): Parameters<Electron.Session['setProxy']>[0] {
+  if (proxy === '') return { mode: 'system' }
+  if (proxy === 'direct') return { mode: 'direct' }
+  return { mode: 'fixed_servers', proxyRules: proxy, proxyBypassRules: '<local>' }
+}
+
+async function applyNetworkProxy(): Promise<void> {
+  try {
+    await session.defaultSession.setProxy(proxyConfig(normalizeNetworkProxy(settings.networkProxy)))
+  } catch (error) {
+    logger.warn('settings', '应用网络代理失败', error)
+  }
 }
 
 function credentialStatus(providerId: string): ProviderCredentialStatus {
@@ -589,6 +607,12 @@ function registerIpcHandlers(): void {
       if (typeof patch.tileCacheEnabled !== 'boolean') throw new Error('无效的缓存设置')
       nextSettings.tileCacheEnabled = patch.tileCacheEnabled
     }
+    if (patch.networkProxy !== undefined) {
+      if (typeof patch.networkProxy !== 'string') throw new Error('无效的代理设置')
+      const normalized = normalizeNetworkProxy(patch.networkProxy)
+      if (normalized === '' && patch.networkProxy.trim() !== '') throw new Error('无效的代理地址')
+      nextSettings.networkProxy = normalized
+    }
     if (patch.providerStyles !== undefined) {
       if (!isRecord(patch.providerStyles)) throw new Error('无效的影像样式')
       const providerStyles = { ...settings.providerStyles }
@@ -603,6 +627,7 @@ function registerIpcHandlers(): void {
     }
     settings = nextSettings
     saveSettings()
+    if (patch.networkProxy !== undefined) void applyNetworkProxy()
     return settingsSnapshot()
   })
   ipcMain.handle('settings:set-provider-api-key', (_event, providerId: string, apiKey: string): ProviderCredentialStatus => {
@@ -622,6 +647,22 @@ function registerIpcHandlers(): void {
     return status
   })
   ipcMain.handle('settings:has-provider-api-key', (_event, providerId: string): ProviderCredentialStatus => credentialStatus(safeId(providerId)))
+  ipcMain.handle('settings:test-network-proxy', async (_event, proxy: unknown): Promise<NetworkProxyTestResult> => {
+    const raw = typeof proxy === 'string' ? proxy : ''
+    const normalized = normalizeNetworkProxy(raw)
+    if (normalized === '' && raw.trim() !== '') return { ok: false, elapsedMs: 0, error: '无效的代理地址' }
+    const startedAt = Date.now()
+    try {
+      const testSession = session.fromPartition('guearth-network-test')
+      await testSession.setProxy(proxyConfig(normalized))
+      const response = await testSession.fetch('https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/0/0/0', { headers: TILE_FETCH_HEADERS, signal: AbortSignal.timeout(TILE_FETCH_TIMEOUT_MS) })
+      if (!response.ok) return { ok: false, elapsedMs: Date.now() - startedAt, error: `HTTP ${response.status}` }
+      await response.arrayBuffer()
+      return { ok: true, elapsedMs: Date.now() - startedAt, error: '' }
+    } catch (error) {
+      return { ok: false, elapsedMs: Date.now() - startedAt, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
   ipcMain.handle('places:search', async (_event, keyword: unknown, provider: unknown) => {
     if (typeof keyword !== 'string') throw new Error('无效的搜索关键词')
     if (provider !== undefined && provider !== 'amap' && provider !== 'baidu') throw new Error('无效的搜索源')
@@ -806,7 +847,7 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   logger.info('app', '应用启动', `version=${app.getVersion()} packaged=${app.isPackaged}`)
   const userDataPath = app.getPath('userData')
   settingsPath = join(userDataPath, 'settings.json')
@@ -817,6 +858,7 @@ app.whenReady().then(() => {
   initDatasets(userDataPath)
   mkdirSync(tileCachePath, { recursive: true })
   settings = readSettings()
+  await applyNetworkProxy()
   annotations = readAnnotations()
   scenes = readScenes()
   aiSettings.init(join(userDataPath, 'ai-settings.json'))

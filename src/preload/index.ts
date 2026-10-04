@@ -12,6 +12,7 @@ export interface GuEarthSettings {
   terrainExaggeration: number
   terrainLighting: boolean
   tileCacheEnabled: boolean
+  networkProxy: string
   providerStyles: Record<string, string>
   providerCredentials: Record<string, ProviderCredentialStatus>
   sceneMode: '2D' | '3D'
@@ -24,9 +25,16 @@ export interface GuEarthSettingsPatch {
   terrainExaggeration?: number
   terrainLighting?: boolean
   tileCacheEnabled?: boolean
+  networkProxy?: string
   providerStyles?: Record<string, string>
   sceneMode?: '2D' | '3D'
   setupGuideDismissed?: boolean
+}
+
+export interface NetworkProxyTestResult {
+  ok: boolean
+  elapsedMs: number
+  error: string
 }
 
 export interface TileKey {
@@ -319,7 +327,8 @@ const api = {
     update: (patch: GuEarthSettingsPatch): Promise<GuEarthSettings> => ipcRenderer.invoke('settings:update', patch),
     setProviderApiKey: (providerId: string, apiKey: string): Promise<ProviderCredentialStatus> => ipcRenderer.invoke('settings:set-provider-api-key', providerId, apiKey),
     clearProviderApiKey: (providerId: string): Promise<ProviderCredentialStatus> => ipcRenderer.invoke('settings:clear-provider-api-key', providerId),
-    hasProviderApiKey: (providerId: string): Promise<ProviderCredentialStatus> => ipcRenderer.invoke('settings:has-provider-api-key', providerId)
+    hasProviderApiKey: (providerId: string): Promise<ProviderCredentialStatus> => ipcRenderer.invoke('settings:has-provider-api-key', providerId),
+    testNetworkProxy: (proxy: string): Promise<NetworkProxyTestResult> => ipcRenderer.invoke('settings:test-network-proxy', proxy)
   },
   tiles: {
     get: (key: TileKey): Promise<TileCacheEntry | null> => ipcRenderer.invoke('tiles:get', key),
