@@ -19,6 +19,9 @@ const LABEL_STYLE: Cesium.LabelGraphics.ConstructorOptions = {
   disableDepthTestDistance: Number.POSITIVE_INFINITY
 }
 
+type EllipsoidalOccluderLike = { cameraPosition: Cesium.Cartesian3; isPointVisible: (point: Cesium.Cartesian3) => boolean }
+const createEllipsoidalOccluder = Cesium as unknown as { EllipsoidalOccluder: new (ellipsoid: Cesium.Ellipsoid, position: Cesium.Cartesian3) => EllipsoidalOccluderLike }
+
 function toGeo(cartesian: Cesium.Cartesian3): GeoPosition {
   const cartographic = Cesium.Cartographic.fromCartesian(cartesian)
   return { longitude: Cesium.Math.toDegrees(cartographic.longitude), latitude: Cesium.Math.toDegrees(cartographic.latitude), height: cartographic.height }
@@ -97,9 +100,9 @@ function isGroundPolylineSupported(viewer: Cesium.Viewer): boolean {
   return viewer.scene.verticalExaggeration === 1
 }
 
-function terrainPath(positions: Cesium.Cartesian3[]): Cesium.Cartographic[] {
+function terrainPath(positions: Cesium.Cartesian3[], maxSegments: number): Cesium.Cartographic[] {
   const points = positions.map((position) => Cesium.Cartographic.fromCartesian(position))
-  const spacing = Math.max(200, pathDistance(positions) / 512)
+  const spacing = Math.max(200, pathDistance(positions) / maxSegments)
   const path: Cesium.Cartographic[] = []
   for (let index = 1; index < points.length; index += 1) {
     const from = points[index - 1]
@@ -129,16 +132,16 @@ function terrainSurfacePositions(viewer: Cesium.Viewer, path: Cesium.Cartographi
 
 function previewPolylinePositions(viewer: Cesium.Viewer, positions: Cesium.Cartesian3[]): Cesium.Cartesian3[] {
   const sanitized = sanitizePositions(positions)
-  return isGroundPolylineSupported(viewer) ? sanitized : terrainSurfacePositions(viewer, terrainPath(sanitized))
+  return isGroundPolylineSupported(viewer) ? sanitized : terrainSurfacePositions(viewer, terrainPath(sanitized, 128))
 }
 
-function polylineOptions(viewer: Cesium.Viewer, positions: Cesium.Cartesian3[], width: number, color: Cesium.Color): Cesium.PolylineGraphics.ConstructorOptions | undefined {
+function polylineOptions(viewer: Cesium.Viewer, positions: Cesium.Cartesian3[], width: number, color: Cesium.Color): { graphics: Cesium.PolylineGraphics.ConstructorOptions; drapedPath?: Cesium.Cartographic[] } | undefined {
   const sanitized = sanitizePositions(positions)
   if (sanitized.length < 2) return undefined
-  if (isGroundPolylineSupported(viewer)) return { positions: sanitized, width, material: color, clampToGround: true }
+  if (isGroundPolylineSupported(viewer)) return { graphics: { positions: sanitized, width, material: color, clampToGround: true } }
   const material = new Cesium.ColorMaterialProperty(color)
-  const path = terrainPath(sanitized)
-  return { positions: new Cesium.CallbackProperty(() => terrainSurfacePositions(viewer, path), false), width, material, depthFailMaterial: material }
+  const drapedPath = terrainPath(sanitized, 512)
+  return { graphics: { positions: terrainSurfacePositions(viewer, drapedPath), width, material, depthFailMaterial: material }, drapedPath }
 }
 
 function measurementFor(kind: DrawnShape['kind'], cartesians: Cesium.Cartesian3[]): string {
@@ -177,6 +180,12 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
   const focusStore = useFeatureFocusStore()
   const globeStore = useGlobeStore()
   const entities = new Map<string, Cesium.Entity>()
+  const renderSignatures = new Map<string, string>()
+  const drapedPolylines = new Map<string, { entity: Cesium.Entity; path: Cesium.Cartographic[] }>()
+  const horizonVisibility = new Map<string, boolean>()
+  const horizonOccluder = new createEllipsoidalOccluder.EllipsoidalOccluder(Cesium.Ellipsoid.WGS84, Cesium.Cartesian3.ZERO)
+  const DRAPE_REFRESH_DELAY_MS = 500
+  let drapeRefreshTimer: number | undefined
   let handler: Cesium.ScreenSpaceEventHandler | undefined
   let draft: Cesium.Cartesian3[] = []
   let cursor: Cesium.Cartesian3 | undefined
@@ -197,35 +206,98 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
     const entity = entities.get(id)
     if (entity && current) current.entities.remove(entity)
     entities.delete(id)
+    renderSignatures.delete(id)
+    drapedPolylines.delete(id)
+    horizonVisibility.delete(id)
+  }
+
+  function updateHorizonVisibility(): void {
+    const current = currentViewer()
+    if (!current) return
+    if (current.scene.mode !== Cesium.SceneMode.SCENE3D) {
+      for (const [id, visible] of horizonVisibility) {
+        if (visible) continue
+        const entity = entities.get(id)
+        if (entity) entity.show = true
+      }
+      horizonVisibility.clear()
+      return
+    }
+    horizonOccluder.cameraPosition = current.camera.positionWC
+    const time = current.clock.currentTime
+    for (const [id, entity] of entities) {
+      if (!entity.position) continue
+      const position = entity.position.getValue(time)
+      if (!position) continue
+      const visible = horizonOccluder.isPointVisible(position)
+      if (horizonVisibility.get(id) === visible) continue
+      horizonVisibility.set(id, visible)
+      entity.show = visible
+    }
+  }
+
+  function refreshDrapedPolylines(): void {
+    const current = currentViewer()
+    if (!current) return
+    for (const [id, link] of drapedPolylines) {
+      if (!current.entities.contains(link.entity)) {
+        drapedPolylines.delete(id)
+        continue
+      }
+      const polyline = link.entity.polyline
+      if (polyline) polyline.positions = new Cesium.ConstantProperty(terrainSurfacePositions(current, link.path))
+    }
+  }
+
+  function scheduleDrapeRefresh(): void {
+    if (!drapedPolylines.size || drapeRefreshTimer !== undefined) return
+    drapeRefreshTimer = window.setTimeout(() => {
+      drapeRefreshTimer = undefined
+      refreshDrapedPolylines()
+    }, DRAPE_REFRESH_DELAY_MS)
   }
 
   function renderShape(shape: DrawnShape): void {
     const current = currentViewer()
     if (!current) return
+    const groundSupported = isGroundPolylineSupported(current)
+    const textSelected = shape.kind === 'text' && store.selectedShapeId === shape.id
+    const signature = JSON.stringify([shape.kind, shape.color, shape.textColor, shape.fontFamily, shape.fontSize, shape.textFrame, shape.lineWidth, shape.annotation, textSelected, groundSupported, shape.positions])
+    if (entities.has(shape.id) && renderSignatures.get(shape.id) === signature) return
     removeEntity(shape.id)
     const cartesians = shape.positions.map(toCartesian)
     if (!cartesians.length) return
     const color = Cesium.Color.fromCssColorString(shape.color) ?? SHAPE_COLOR
     const textColor = Cesium.Color.fromCssColorString(shape.textColor) ?? Cesium.Color.WHITE
     const options: Cesium.Entity.ConstructorOptions = { id: shape.id }
+    let drapedPath: Cesium.Cartographic[] | undefined
     if (shape.kind === 'point') {
       options.position = surfacePosition(cartesians[0])
       options.point = { color, pixelSize: 10, outlineColor: Cesium.Color.WHITE, outlineWidth: 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY }
     } else if (shape.kind === 'polyline') {
       options.position = surfacePosition(centroidOf(cartesians))
       const polyline = polylineOptions(current, cartesians, shape.lineWidth, color)
-      if (polyline) options.polyline = polyline
+      if (polyline) {
+        options.polyline = polyline.graphics
+        drapedPath = polyline.drapedPath
+      }
     } else if (shape.kind === 'polygon') {
       options.position = surfacePosition(centroidOf(cartesians))
       const hierarchy = sanitizePositions(cartesians)
       if (hierarchy.length >= 3) options.polygon = { hierarchy: new Cesium.PolygonHierarchy(hierarchy), material: color.withAlpha(0.25) }
       const polyline = polylineOptions(current, ringOf(cartesians), shape.lineWidth, color)
-      if (polyline) options.polyline = polyline
+      if (polyline) {
+        options.polyline = polyline.graphics
+        drapedPath = polyline.drapedPath
+      }
     } else if (shape.kind === 'arrow') {
       const geometry = arrowGeometry(cartesians)
       options.position = surfacePosition(cartesians[cartesians.length - 1])
       const polyline = polylineOptions(current, geometry.shaft, shape.lineWidth, color)
-      if (polyline) options.polyline = polyline
+      if (polyline) {
+        options.polyline = polyline.graphics
+        drapedPath = polyline.drapedPath
+      }
       const head = sanitizePositions(geometry.head)
       if (head.length >= 3) options.polygon = { hierarchy: new Cesium.PolygonHierarchy(head), material: color, outline: true, outlineColor: color, outlineWidth: shape.lineWidth }
     } else {
@@ -254,6 +326,8 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
     const entity = new Cesium.Entity(options)
     current.entities.add(entity)
     entities.set(shape.id, entity)
+    renderSignatures.set(shape.id, signature)
+    if (drapedPath) drapedPolylines.set(shape.id, { entity, path: drapedPath })
   }
 
   function syncEntities(): void {
@@ -459,6 +533,12 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
       handler.setInputAction(handleMove, Cesium.ScreenSpaceEventType.MOUSE_MOVE)
       handler.setInputAction(handleDoubleClick, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK)
       handler.setInputAction(handleRightClick, Cesium.ScreenSpaceEventType.RIGHT_CLICK)
+      entities.clear()
+      renderSignatures.clear()
+      drapedPolylines.clear()
+      horizonVisibility.clear()
+      current.scene.globe.tileLoadProgressEvent.addEventListener(scheduleDrapeRefresh)
+      current.scene.preUpdate.addEventListener(updateHorizonVisibility)
       void store.load()
       syncEntities()
     },
@@ -478,6 +558,8 @@ export function useDrawing(viewer: Ref<Cesium.Viewer | undefined>) {
 
   onBeforeUnmount(() => {
     window.removeEventListener('keydown', handleKeydown)
+    if (drapeRefreshTimer !== undefined) window.clearTimeout(drapeRefreshTimer)
+    drapeRefreshTimer = undefined
     handler?.destroy()
     handler = undefined
   })

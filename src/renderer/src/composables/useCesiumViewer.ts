@@ -44,6 +44,7 @@ const DEPTH_TEST_FREE_HEIGHT_FACTOR = 1.3
 const MIN_DEPTH_TEST_FREE_DISTANCE = 10_000
 const MAX_DEPTH_TEST_FREE_DISTANCE = 8_000_000
 const COARSE_DEPTH_TEST_DISTANCE = 100_000_000
+const COLLECTION_STAMP_INTERVAL_MS = 2000
 
 function normalizeHeading(radians: number): number {
   const degrees = Cesium.Math.toDegrees(radians) % 360
@@ -85,6 +86,9 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
   }
 
   const coarseStampedCollections = new WeakSet<object>()
+  const dataSourceDetachers = new Map<Cesium.DataSource, () => void>()
+  let defaultEntitiesDetacher: (() => void) | undefined
+  let lastCollectionStampAt = 0
 
   function applyCoarseDepthTestDistance(collection: unknown): void {
     if (!collection || coarseStampedCollections.has(collection)) return
@@ -120,6 +124,9 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
   function updateCollectionDepthTestDistances(): void {
     const currentViewer = viewer.value
     if (!currentViewer || currentViewer.isDestroyed()) return
+    const now = performance.now()
+    if (now - lastCollectionStampAt < COLLECTION_STAMP_INTERVAL_MS) return
+    lastCollectionStampAt = now
     stampCoarseDepthTestDistance(currentViewer.scene.primitives, new Set())
   }
 
@@ -143,18 +150,52 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     }, false)
   }
 
-  function updateHorizonLabelVisibility(): void {
+  function updateHorizonCamera(): void {
     const currentViewer = viewer.value
     if (!currentViewer || currentViewer.isDestroyed()) return
     horizonOccluder.cameraPosition = currentViewer.camera.positionWC
-    const wrapAll = (entities: Cesium.Entity[]): void => {
-      for (const entity of entities) {
-        if (entity.label) wrapGraphicsShowForHorizon(entity.label, entity.position)
-        if (entity.point) wrapGraphicsShowForHorizon(entity.point, entity.position)
-      }
+  }
+
+  function wrapEntityGraphics(entity: Cesium.Entity): void {
+    if (entity.label) wrapGraphicsShowForHorizon(entity.label, entity.position)
+    if (entity.point) wrapGraphicsShowForHorizon(entity.point, entity.position)
+  }
+
+  function trackEntityCollection(entities: Cesium.EntityCollection): () => void {
+    const listener = (_collection: Cesium.EntityCollection, added: Cesium.Entity[]): void => {
+      for (const entity of added) wrapEntityGraphics(entity)
     }
-    wrapAll(currentViewer.entities.values)
-    for (let index = 0; index < currentViewer.dataSources.length; index += 1) wrapAll(currentViewer.dataSources.get(index).entities.values)
+    entities.collectionChanged.addEventListener(listener)
+    for (const entity of entities.values) wrapEntityGraphics(entity)
+    return () => entities.collectionChanged.removeEventListener(listener)
+  }
+
+  function handleDataSourceAdded(_collection: Cesium.DataSourceCollection, dataSource: Cesium.DataSource): void {
+    dataSourceDetachers.set(dataSource, trackEntityCollection(dataSource.entities))
+  }
+
+  function handleDataSourceRemoved(_collection: Cesium.DataSourceCollection, dataSource: Cesium.DataSource): void {
+    dataSourceDetachers.get(dataSource)?.()
+    dataSourceDetachers.delete(dataSource)
+  }
+
+  function attachHorizonTracking(currentViewer: Cesium.Viewer): void {
+    defaultEntitiesDetacher = trackEntityCollection(currentViewer.entities)
+    for (let index = 0; index < currentViewer.dataSources.length; index += 1) {
+      const dataSource = currentViewer.dataSources.get(index)
+      dataSourceDetachers.set(dataSource, trackEntityCollection(dataSource.entities))
+    }
+    currentViewer.dataSources.dataSourceAdded.addEventListener(handleDataSourceAdded)
+    currentViewer.dataSources.dataSourceRemoved.addEventListener(handleDataSourceRemoved)
+  }
+
+  function detachHorizonTracking(currentViewer: Cesium.Viewer): void {
+    defaultEntitiesDetacher?.()
+    defaultEntitiesDetacher = undefined
+    currentViewer.dataSources.dataSourceAdded.removeEventListener(handleDataSourceAdded)
+    currentViewer.dataSources.dataSourceRemoved.removeEventListener(handleDataSourceRemoved)
+    for (const detach of dataSourceDetachers.values()) detach()
+    dataSourceDetachers.clear()
   }
 
   function applyTerrain(terrain: Cesium.TerrainProvider): void {
@@ -567,7 +608,8 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
         viewer.value.scene.preUpdate.addEventListener(updatePolarCapsVisibility)
         viewer.value.scene.preUpdate.addEventListener(updateDepthTestDistance)
         viewer.value.scene.preUpdate.addEventListener(updateCollectionDepthTestDistances)
-        viewer.value.scene.preUpdate.addEventListener(updateHorizonLabelVisibility)
+        viewer.value.scene.preUpdate.addEventListener(updateHorizonCamera)
+        attachHorizonTracking(viewer.value)
         viewer.value.scene.renderError.addEventListener(handleSceneRenderError)
         viewer.value.camera.moveEnd.addEventListener(updateCameraState)
         updateCameraState()
@@ -620,7 +662,8 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     currentViewer.scene.preUpdate.removeEventListener(updatePolarCapsVisibility)
     currentViewer.scene.preUpdate.removeEventListener(updateDepthTestDistance)
     currentViewer.scene.preUpdate.removeEventListener(updateCollectionDepthTestDistances)
-    currentViewer.scene.preUpdate.removeEventListener(updateHorizonLabelVisibility)
+    currentViewer.scene.preUpdate.removeEventListener(updateHorizonCamera)
+    detachHorizonTracking(currentViewer)
     currentViewer.scene.renderError.removeEventListener(handleSceneRenderError)
     currentViewer.destroy()
     viewer.value = undefined
