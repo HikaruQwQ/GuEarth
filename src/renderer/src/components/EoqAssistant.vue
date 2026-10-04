@@ -41,14 +41,15 @@ interface AgentCommand {
 
 interface AgentSuggestionItem {
   value: string
-  label: string
-  icon: VNode
-  extra: string
+  label: VNode
 }
 
 const commandMenuOpen = ref(false)
+const activeCommandIndex = ref(0)
 const agentCommands: AgentCommand[] = [
-  { name: '/compact', label: '压缩上下文', description: '总结较早的对话，保留最近消息', icon: CompressOutlined, run: () => store.compressContext() }
+  { name: '/new', label: '新建会话', description: '开始一个空白会话', icon: PlusOutlined, run: () => store.newConversation() },
+  { name: '/compact', label: '压缩上下文', description: '总结较早的对话，保留最近消息', icon: CompressOutlined, run: () => store.compressContext() },
+  { name: '/settings', label: 'AI 设置', description: '模型、搜索与记忆配置', icon: SettingOutlined, run: () => store.setSettingsOpen(true) }
 ]
 const commandQuery = computed(() => {
   const value = draft.value.trimStart()
@@ -56,12 +57,21 @@ const commandQuery = computed(() => {
   return value.slice(1).split(/\s/)[0].toLowerCase()
 })
 const filteredCommands = computed(() => agentCommands.filter((command) => !commandQuery.value || command.name.slice(1).startsWith(commandQuery.value)))
-const commandItems = computed<AgentSuggestionItem[]>(() => filteredCommands.value.map((command) => ({
+const commandItems = computed<AgentSuggestionItem[]>(() => filteredCommands.value.map((command, index) => ({
   value: command.name,
-  label: command.name,
-  icon: h(command.icon),
-  extra: `${command.label} · ${command.description}`
+  label: h('div', { class: ['eoq-command-option', { 'eoq-command-option-active': index === activeCommandIndex.value }] }, [
+    h('span', { class: 'eoq-command-option-icon' }, h(command.icon)),
+    h('span', { class: 'eoq-command-option-name' }, command.name),
+    h('span', { class: 'eoq-command-option-description' }, `${command.label} · ${command.description}`)
+  ])
 })))
+const activeCommand = computed(() => filteredCommands.value[activeCommandIndex.value] ?? filteredCommands.value[0])
+
+function moveActiveCommand(offset: number): void {
+  const total = filteredCommands.value.length
+  if (total === 0) return
+  activeCommandIndex.value = (activeCommandIndex.value + offset + total) % total
+}
 
 function updateCommandMenu(): void {
   commandMenuOpen.value = draft.value.trimStart().startsWith('/') && !isStreaming.value && filteredCommands.value.length > 0
@@ -75,34 +85,49 @@ function selectCommand(command: AgentCommand): void {
 
 function handleDraftChange(value: string, onTrigger?: (info?: unknown | false) => void): void {
   draft.value = value
+  activeCommandIndex.value = 0
   updateCommandMenu()
   if (commandMenuOpen.value) onTrigger?.()
   else onTrigger?.(false)
 }
 
 function completeCommand(onTrigger?: (info?: unknown | false) => void): boolean {
-  const command = filteredCommands.value[0]
+  const command = activeCommand.value
   if (!command) return false
   draft.value = command.name
+  activeCommandIndex.value = 0
   updateCommandMenu()
   if (commandMenuOpen.value) onTrigger?.()
   else onTrigger?.(false)
   return true
 }
 
-function handleSuggestionKeyDown(event: KeyboardEvent, onKeyDown?: (event: KeyboardEvent) => void, onTrigger?: (info?: unknown | false) => void): void {
-  if (commandMenuOpen.value && event.key === 'Tab' && !event.shiftKey) {
-    if (completeCommand(onTrigger)) {
+function handleSuggestionKeyDown(event: KeyboardEvent, onTrigger?: (info?: unknown | false) => void): void {
+  if (commandMenuOpen.value) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      moveActiveCommand(event.key === 'ArrowDown' ? 1 : -1)
       event.preventDefault()
       event.stopImmediatePropagation()
       return
     }
-  }
-  if (commandMenuOpen.value && ['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(event.key)) {
-    onKeyDown?.(event)
-    event.preventDefault()
-    event.stopImmediatePropagation()
-    return
+    if (event.key === 'Tab' && !event.shiftKey && completeCommand(onTrigger)) {
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      return
+    }
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      const command = activeCommand.value
+      if (command) selectCommand(command)
+      return
+    }
+    if (event.key === 'Escape') {
+      commandMenuOpen.value = false
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      return
+    }
   }
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
@@ -110,7 +135,6 @@ function handleSuggestionKeyDown(event: KeyboardEvent, onKeyDown?: (event: Keybo
     runCommandOrSubmit(draft.value)
     return
   }
-  onKeyDown?.(event)
 }
 
 function runCommandOrSubmit(value: string | undefined): void {
@@ -566,7 +590,7 @@ watch(currentConversationId, () => {
           :submit-type="false"
           @submit="runCommandOrSubmit"
           @change="handleDraftChange($event, suggestion?.onTrigger)"
-          @keydown="handleSuggestionKeyDown($event, suggestion?.onKeyDown, suggestion?.onTrigger)"
+          @keydown="handleSuggestionKeyDown($event, suggestion?.onTrigger)"
           @cancel="handleCancel"
         />
       </template>
@@ -686,4 +710,17 @@ h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28p
   .shimmer-text{animation:none;background:none;-webkit-background-clip:border-box;background-clip:border-box;color:rgba(0,0,0,.45)}
   .suggestion-fade-enter-active,.suggestion-fade-leave-active{transition:none}
 }
+</style>
+
+<style>
+.eoq-command-suggestion .ant-cascader-menu-item{padding:0}
+.ant-cascader-dropdown.eoq-command-suggestion .ant-cascader-menu .ant-cascader-menu-item-active,
+.ant-cascader-dropdown.eoq-command-suggestion .ant-cascader-menu .ant-cascader-menu-item-active:hover{background-color:transparent;font-weight:400}
+.eoq-command-option{display:flex;align-items:center;gap:8px;width:320px;padding:5px 12px;font-size:13px;line-height:22px}
+.eoq-command-option:hover{background-color:rgba(0,0,0,.04)}
+.eoq-command-option-icon{display:flex;flex-shrink:0;color:rgba(0,0,0,.45);font-size:14px}
+.eoq-command-option-name{flex-shrink:0;width:80px;color:rgba(0,0,0,.88)}
+.eoq-command-option-description{flex:1;min-width:0;color:rgba(0,0,0,.45);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.eoq-command-option-active,.eoq-command-option-active:hover{background-color:#e6f4ff}
+.eoq-command-option-active .eoq-command-option-name{color:#1677ff;font-weight:600}
 </style>
