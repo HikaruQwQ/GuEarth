@@ -7,6 +7,11 @@ export interface RecorderOverlay {
 
 const CANDIDATE_MIME_TYPES = ['video/mp4;codecs=avc1.42E01E', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
 const VIDEO_BITS_PER_SECOND = 8_000_000
+const CAPTURE_FPS = 30
+const FRAME_INTERVAL_MS = 1000 / CAPTURE_FPS
+const FRAME_RESYNC_MS = 200
+const MAX_CAPTURE_WIDTH = 1920
+const MAX_CAPTURE_HEIGHT = 1080
 const MAX_SUBTITLE_LINES = 3
 const STOP_TIMEOUT_MS = 5000
 
@@ -31,6 +36,18 @@ function wrapText(context: CanvasRenderingContext2D, text: string, maxWidth: num
   return lines.slice(0, MAX_SUBTITLE_LINES)
 }
 
+/**
+ * Fits source dimensions within 1920×1080, preserving aspect ratio before rounding
+ * each dimension to an even number of at least two pixels for H.264 encoding.
+ */
+export function captureSize(source: { width: number; height: number }): { width: number; height: number } {
+  const scale = Math.min(1, MAX_CAPTURE_WIDTH / source.width, MAX_CAPTURE_HEIGHT / source.height)
+  /** Rounds to the nearest even dimension with a two-pixel minimum. */
+  const even = (value: number): number => Math.max(2, Math.round(value / 2) * 2)
+  return { width: even(source.width * scale), height: even(source.height * scale) }
+}
+
+/** Creates controls for capturing a canvas with overlays and saving chunks through recording IPC. */
 export function createVideoRecorder(): {
   start: (source: HTMLCanvasElement, getOverlay: () => RecorderOverlay) => Promise<boolean>
   stop: () => Promise<RecordingSaveResult | null>
@@ -46,10 +63,29 @@ export function createVideoRecorder(): {
   let composeCanvas: HTMLCanvasElement | null = null
   let composeContext: CanvasRenderingContext2D | null = null
   let stream: MediaStream | null = null
-  let rafId = 0
+  let videoTrack: CanvasCaptureMediaStreamTrack | null = null
+  let pacingTimer: number | undefined
+  let nextFrameAt = 0
+  let narrationLines: { text: string; size: number; maxWidth: number; lines: string[] } | null = null
   let sourceCanvas: HTMLCanvasElement | null = null
   let overlayProvider: (() => RecorderOverlay) | null = null
 
+  /**
+   * Wraps narration using the current canvas font and caches it by text, font size,
+   * and maximum width. Returns no lines when the composition context is unavailable.
+   */
+  function narrationTextLines(text: string, size: number, maxWidth: number): string[] {
+    const context = composeContext
+    if (!context) return []
+    if (narrationLines && narrationLines.text === text && narrationLines.size === size && narrationLines.maxWidth === maxWidth) {
+      return narrationLines.lines
+    }
+    const lines = wrapText(context, text, maxWidth)
+    narrationLines = { text, size, maxWidth, lines }
+    return lines
+  }
+
+  /** Draws the source canvas, title, and wrapped narration onto the composition canvas. */
   function drawOverlay(overlay: RecorderOverlay): void {
     const context = composeContext
     const canvas = composeCanvas
@@ -76,7 +112,7 @@ export function createVideoRecorder(): {
     context.textBaseline = 'bottom'
     context.textAlign = 'center'
     const maxWidth = width * 0.82
-    const lines = wrapText(context, overlay.narration, maxWidth)
+    const lines = narrationTextLines(overlay.narration, size, maxWidth)
     const lineHeight = size * 1.4
     const boxHeight = lines.length * lineHeight + size * 0.7
     const boxTop = height - height * 0.05 - boxHeight
@@ -96,10 +132,24 @@ export function createVideoRecorder(): {
     })
   }
 
-  function renderFrame(): void {
+  /**
+   * Composites and requests a frame while recording, then schedules the next 30 Hz
+   * tick with drift correction. Paused recordings keep scheduling without drawing;
+   * inactive recordings stop scheduling, and requestFrame errors are ignored.
+   */
+  function frameTick(): void {
+    pacingTimer = undefined
     if (!recorder || recorder.state === 'inactive') return
-    if (overlayProvider) drawOverlay(overlayProvider())
-    rafId = requestAnimationFrame(renderFrame)
+    const now = performance.now()
+    if (recorder.state === 'recording' && overlayProvider) {
+      drawOverlay(overlayProvider())
+      try {
+        videoTrack?.requestFrame()
+      } catch {}
+    }
+    nextFrameAt += FRAME_INTERVAL_MS
+    if (now - nextFrameAt > FRAME_RESYNC_MS) nextFrameAt = now
+    pacingTimer = window.setTimeout(frameTick, Math.max(0, nextFrameAt - performance.now()))
   }
 
   function appendChunk(chunk: Blob): void {
@@ -124,13 +174,20 @@ export function createVideoRecorder(): {
     }
   }
 
+  /**
+   * Starts recording the source canvas and overlays, preferring manual frame capture
+   * with a 30 FPS automatic fallback. Returns false if already active or if the
+   * recorder or drawing context is unavailable; initialization errors are rethrown
+   * after discarding the recording session and releasing capture resources.
+   */
   async function start(source: HTMLCanvasElement, getOverlay: () => RecorderOverlay): Promise<boolean> {
     if (recorder && recorder.state !== 'inactive') return false
     if (typeof MediaRecorder === 'undefined') return false
     mimeType = CANDIDATE_MIME_TYPES.find((candidate) => MediaRecorder.isTypeSupported(candidate)) ?? ''
     composeCanvas = document.createElement('canvas')
-    composeCanvas.width = Math.max(2, source.width)
-    composeCanvas.height = Math.max(2, source.height)
+    const size = captureSize(source)
+    composeCanvas.width = size.width
+    composeCanvas.height = size.height
     composeContext = composeCanvas.getContext('2d', { alpha: false })
     if (!composeContext) {
       cleanup()
@@ -138,9 +195,19 @@ export function createVideoRecorder(): {
     }
     sourceCanvas = source
     overlayProvider = getOverlay
+    narrationLines = null
     drawOverlay(getOverlay())
     try {
-      stream = composeCanvas.captureStream(30)
+      const manualStream = composeCanvas.captureStream(0)
+      const track = manualStream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined
+      if (track && typeof track.requestFrame === 'function') {
+        stream = manualStream
+        videoTrack = track
+      } else {
+        for (const candidate of manualStream.getTracks()) candidate.stop()
+        stream = composeCanvas.captureStream(CAPTURE_FPS)
+        videoTrack = null
+      }
       recorder = mimeType
         ? new MediaRecorder(stream, { mimeType, videoBitsPerSecond: VIDEO_BITS_PER_SECOND })
         : new MediaRecorder(stream, { videoBitsPerSecond: VIDEO_BITS_PER_SECOND })
@@ -157,24 +224,28 @@ export function createVideoRecorder(): {
       cleanup()
       throw error instanceof Error ? error : new Error('视频录制初始化失败')
     }
-    rafId = requestAnimationFrame(renderFrame)
+    nextFrameAt = performance.now() + FRAME_INTERVAL_MS
+    pacingTimer = window.setTimeout(frameTick, FRAME_INTERVAL_MS)
     return true
   }
 
+  /** Cancels frame scheduling, stops stream tracks, and releases capture resources and cached narration. */
   function cleanup(): void {
-    if (rafId) cancelAnimationFrame(rafId)
-    rafId = 0
+    if (pacingTimer !== undefined) window.clearTimeout(pacingTimer)
+    pacingTimer = undefined
     if (recorder) {
       recorder.ondataavailable = null
       recorder.onstop = null
     }
     if (stream) for (const track of stream.getTracks()) track.stop()
     stream = null
+    videoTrack = null
     recorder = null
     composeCanvas = null
     composeContext = null
     sourceCanvas = null
     overlayProvider = null
+    narrationLines = null
   }
 
   function pause(): void {
