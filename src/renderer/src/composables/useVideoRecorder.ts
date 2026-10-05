@@ -36,12 +36,18 @@ function wrapText(context: CanvasRenderingContext2D, text: string, maxWidth: num
   return lines.slice(0, MAX_SUBTITLE_LINES)
 }
 
+/**
+ * Fits source dimensions within 1920×1080, preserving aspect ratio before rounding
+ * each dimension to an even number of at least two pixels for H.264 encoding.
+ */
 export function captureSize(source: { width: number; height: number }): { width: number; height: number } {
   const scale = Math.min(1, MAX_CAPTURE_WIDTH / source.width, MAX_CAPTURE_HEIGHT / source.height)
+  /** Rounds to the nearest even dimension with a two-pixel minimum. */
   const even = (value: number): number => Math.max(2, Math.round(value / 2) * 2)
   return { width: even(source.width * scale), height: even(source.height * scale) }
 }
 
+/** Creates controls for capturing a canvas with overlays and saving chunks through recording IPC. */
 export function createVideoRecorder(): {
   start: (source: HTMLCanvasElement, getOverlay: () => RecorderOverlay) => Promise<boolean>
   stop: () => Promise<RecordingSaveResult | null>
@@ -64,6 +70,10 @@ export function createVideoRecorder(): {
   let sourceCanvas: HTMLCanvasElement | null = null
   let overlayProvider: (() => RecorderOverlay) | null = null
 
+  /**
+   * Wraps narration using the current canvas font and caches it by text, font size,
+   * and maximum width. Returns no lines when the composition context is unavailable.
+   */
   function narrationTextLines(text: string, size: number, maxWidth: number): string[] {
     const context = composeContext
     if (!context) return []
@@ -75,6 +85,7 @@ export function createVideoRecorder(): {
     return lines
   }
 
+  /** Draws the source canvas, title, and wrapped narration onto the composition canvas. */
   function drawOverlay(overlay: RecorderOverlay): void {
     const context = composeContext
     const canvas = composeCanvas
@@ -121,6 +132,11 @@ export function createVideoRecorder(): {
     })
   }
 
+  /**
+   * Composites and requests a frame while recording, then schedules the next 30 Hz
+   * tick with drift correction. Paused recordings keep scheduling without drawing;
+   * inactive recordings stop scheduling, and requestFrame errors are ignored.
+   */
   function frameTick(): void {
     pacingTimer = undefined
     if (!recorder || recorder.state === 'inactive') return
@@ -158,6 +174,12 @@ export function createVideoRecorder(): {
     }
   }
 
+  /**
+   * Starts recording the source canvas and overlays, preferring manual frame capture
+   * with a 30 FPS automatic fallback. Returns false if already active or if the
+   * recorder or drawing context is unavailable; initialization errors are rethrown
+   * after discarding the recording session and releasing capture resources.
+   */
   async function start(source: HTMLCanvasElement, getOverlay: () => RecorderOverlay): Promise<boolean> {
     if (recorder && recorder.state !== 'inactive') return false
     if (typeof MediaRecorder === 'undefined') return false
@@ -207,6 +229,7 @@ export function createVideoRecorder(): {
     return true
   }
 
+  /** Cancels frame scheduling, stops stream tracks, and releases capture resources and cached narration. */
   function cleanup(): void {
     if (pacingTimer !== undefined) window.clearTimeout(pacingTimer)
     pacingTimer = undefined
