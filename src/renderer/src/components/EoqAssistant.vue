@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, h, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import MarkdownIt from 'markdown-it'
-import { Bubble, Sender } from 'ant-design-x-vue'
-import { CloseCircleOutlined, CloseOutlined, CompassOutlined, DeleteOutlined, HistoryOutlined, LeftOutlined, PlusOutlined, ReloadOutlined, RightOutlined, SettingOutlined, UpOutlined } from '@ant-design/icons-vue'
+import { Bubble, Sender, Suggestion } from 'ant-design-x-vue'
+import type { VNode } from 'vue'
+import { CloseCircleOutlined, CloseOutlined, CompassOutlined, CompressOutlined, DeleteOutlined, HistoryOutlined, LeftOutlined, PlusOutlined, ReloadOutlined, RightOutlined, SettingOutlined, UpOutlined } from '@ant-design/icons-vue'
 import { useAiStore, toolLabel, type ChatMessage, type ReasoningPart, type ToolStep } from '@renderer/stores/ai'
 import type { AiModelConfig, AiProviderConfig, StoredAiConversation } from '../../../preload'
 import ContextMeter from './ContextMeter.vue'
@@ -29,6 +30,126 @@ const modelProviders = computed(() => settings.value.providers.filter((provider)
 const activeProvider = computed(() => settings.value.providers.find((provider) => provider.id === settings.value.activeProviderId))
 const activeModel = computed(() => activeProvider.value?.models.find((model) => model.id === settings.value.activeModelId))
 const activeModelLabel = computed(() => activeModel.value?.label || activeModel.value?.id || '选择模型')
+
+interface AgentCommand {
+  name: string
+  label: string
+  icon: typeof CompressOutlined
+  run: () => void | Promise<void>
+}
+
+interface AgentSuggestionItem {
+  value: string
+  label: VNode
+}
+
+const commandMenuOpen = ref(false)
+const activeCommandIndex = ref(0)
+const agentCommands: AgentCommand[] = [
+  { name: '/new', label: '新建会话', icon: PlusOutlined, run: () => store.newConversation() },
+  { name: '/resume', label: '历史会话', icon: HistoryOutlined, run: () => { historyOpen.value = true } },
+  { name: '/compact', label: '压缩上下文', icon: CompressOutlined, run: () => store.compressContext() },
+  { name: '/settings', label: 'AI 设置', icon: SettingOutlined, run: () => store.setSettingsOpen(true) }
+]
+const commandQuery = computed(() => {
+  const value = draft.value.trimStart()
+  if (!value.startsWith('/')) return ''
+  return value.slice(1).split(/\s/)[0].toLowerCase()
+})
+const filteredCommands = computed(() => agentCommands.filter((command) => !commandQuery.value || command.name.slice(1).startsWith(commandQuery.value)))
+const commandItems = computed<AgentSuggestionItem[]>(() => filteredCommands.value.map((command, index) => ({
+  value: command.name,
+  label: h('div', { class: ['eoq-command-option', { 'eoq-command-option-active': index === activeCommandIndex.value }] }, [
+    h('span', { class: 'eoq-command-option-icon' }, h(command.icon)),
+    h('span', { class: 'eoq-command-option-name' }, command.name),
+    h('span', { class: 'eoq-command-option-label' }, command.label)
+  ])
+})))
+const activeCommand = computed(() => filteredCommands.value[activeCommandIndex.value] ?? filteredCommands.value[0])
+
+function moveActiveCommand(offset: number): void {
+  const total = filteredCommands.value.length
+  if (total === 0) return
+  activeCommandIndex.value = (activeCommandIndex.value + offset + total) % total
+}
+
+function updateCommandMenu(): void {
+  commandMenuOpen.value = draft.value.trimStart().startsWith('/') && !isStreaming.value && filteredCommands.value.length > 0
+}
+
+function selectCommand(command: AgentCommand): void {
+  draft.value = ''
+  commandMenuOpen.value = false
+  void command.run()
+}
+
+function handleDraftChange(value: string, onTrigger?: (info?: unknown | false) => void): void {
+  draft.value = value
+  activeCommandIndex.value = 0
+  updateCommandMenu()
+  if (commandMenuOpen.value) onTrigger?.()
+  else onTrigger?.(false)
+}
+
+function completeCommand(onTrigger?: (info?: unknown | false) => void): boolean {
+  const command = activeCommand.value
+  if (!command) return false
+  draft.value = command.name
+  activeCommandIndex.value = 0
+  updateCommandMenu()
+  if (commandMenuOpen.value) onTrigger?.()
+  else onTrigger?.(false)
+  return true
+}
+
+function handleSuggestionKeyDown(event: KeyboardEvent, onTrigger?: (info?: unknown | false) => void): void {
+  if (commandMenuOpen.value) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      moveActiveCommand(event.key === 'ArrowDown' ? 1 : -1)
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      return
+    }
+    if (event.key === 'Tab' && !event.shiftKey && completeCommand(onTrigger)) {
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      return
+    }
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      const command = activeCommand.value
+      if (command) selectCommand(command)
+      return
+    }
+    if (event.key === 'Escape') {
+      commandMenuOpen.value = false
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      return
+    }
+  }
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    runCommandOrSubmit(draft.value)
+    return
+  }
+}
+
+function runCommandOrSubmit(value: string | undefined): void {
+  const text = (typeof value === 'string' && value.trim() ? value : draft.value).trim()
+  const command = text.match(/^\/([^\s]+)(?:\s+.*)?$/)?.[1].toLowerCase()
+  if (command) {
+    const matched = agentCommands.find((item) => item.name.slice(1) === command)
+    if (matched) {
+      selectCommand(matched)
+      return
+    }
+  }
+  commandMenuOpen.value = false
+  submit(text)
+}
 
 function clampDrawerWidth(width: number): number {
   return Math.min(drawerMaxWidth.value, Math.max(drawerMinWidth.value, Math.round(width)))
@@ -306,7 +427,7 @@ watch(currentConversationId, () => {
           <a-tooltip v-if="messages.length > 0" title="新建会话">
             <a-button type="text" aria-label="新建会话" :disabled="isStreaming" @click="store.newConversation()"><PlusOutlined /></a-button>
           </a-tooltip>
-          <a-dropdown v-else v-model:open="historyOpen" :trigger="['click']" placement="bottomRight" :overlay-style="{ width: '300px' }">
+          <a-dropdown v-model:open="historyOpen" :trigger="['click']" placement="bottomRight" :overlay-style="{ width: '300px' }">
             <a-button type="text" aria-label="历史会话" aria-haspopup="menu" :aria-expanded="historyOpen"><HistoryOutlined /></a-button>
             <template #overlay>
               <a-menu class="history-menu" @click="handleHistoryMenuClick">
@@ -453,14 +574,27 @@ watch(currentConversationId, () => {
         </template>
       </a-dropdown>
     </div>
-    <Sender
-      v-model:value="draft"
-      :loading="isStreaming"
-      placeholder="问一问地球，例如：帮我找典型的流水侵蚀地貌"
-      :submit-type="'enter'"
-      @submit="submit"
-      @cancel="handleCancel"
-    />
+    <Suggestion
+      :open="commandMenuOpen"
+      :items="commandItems"
+      :block="true"
+      root-class-name="eoq-command-suggestion"
+      @open-change="commandMenuOpen = $event"
+      @select="(value) => selectCommand(agentCommands.find((command) => command.name === value) ?? agentCommands[0])"
+    >
+      <template #default="suggestion">
+        <Sender
+          v-model:value="draft"
+          :loading="isStreaming"
+          placeholder="问一问地球，例如：帮我找典型的流水侵蚀地貌"
+          :submit-type="false"
+          @submit="runCommandOrSubmit"
+          @change="handleDraftChange($event, suggestion?.onTrigger)"
+          @keydown="handleSuggestionKeyDown($event, suggestion?.onTrigger)"
+          @cancel="handleCancel"
+        />
+      </template>
+    </Suggestion>
     <p class="ai-disclaimer" title="内容由 AI 生成，咕咕地球不为其生成的内容负责，请谨慎甄别">内容由 AI 生成，咕咕地球不为其生成的内容负责，请谨慎甄别</p>
   </a-drawer>
 
@@ -576,4 +710,18 @@ h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28p
   .shimmer-text{animation:none;background:none;-webkit-background-clip:border-box;background-clip:border-box;color:rgba(0,0,0,.45)}
   .suggestion-fade-enter-active,.suggestion-fade-leave-active{transition:none}
 }
+</style>
+
+<style>
+.eoq-command-suggestion .ant-cascader-menu-item{padding:0}
+.eoq-command-suggestion .ant-cascader-menu-item-content{min-width:0}
+.ant-cascader-dropdown.eoq-command-suggestion .ant-cascader-menu .ant-cascader-menu-item-active,
+.ant-cascader-dropdown.eoq-command-suggestion .ant-cascader-menu .ant-cascader-menu-item-active:hover{background-color:transparent;font-weight:400}
+.eoq-command-option{display:flex;align-items:center;gap:8px;width:100%;padding:5px 12px;font-size:13px;line-height:22px}
+.eoq-command-option:hover{background-color:rgba(0,0,0,.04)}
+.eoq-command-option-icon{display:flex;flex-shrink:0;color:rgba(0,0,0,.45);font-size:14px}
+.eoq-command-option-name{flex-shrink:0;width:80px;color:rgba(0,0,0,.88)}
+.eoq-command-option-label{flex:1;min-width:0;color:rgba(0,0,0,.45);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.eoq-command-option-active,.eoq-command-option-active:hover{background-color:#e6f4ff}
+.eoq-command-option-active .eoq-command-option-name{color:#1677ff;font-weight:600}
 </style>
