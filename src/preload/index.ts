@@ -216,12 +216,18 @@ export interface StoredAiMessage {
   error: string
 }
 
+export interface StoredAiCompression {
+  summary: string
+  coveredMessageIds: string[]
+}
+
 export interface StoredAiConversation {
   id: string
   title: string
   createdAt: number
   updatedAt: number
   messages: StoredAiMessage[]
+  compression?: StoredAiCompression
 }
 
 export interface PlaceSuggestion {

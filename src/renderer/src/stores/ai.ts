@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { AiChatEvent, AiChatTurn, AiContextCompressionResult, AiContextEntry, AiContextStats, AiSearchReference, AiSettings, AiToolDefinition, StoredAiConversation, StoredAiMessage, StoredAiPart } from '../../../preload'
+import type { AiChatEvent, AiChatTurn, AiContextCompressionResult, AiContextEntry, AiContextStats, AiSearchReference, AiSettings, AiToolDefinition, StoredAiCompression, StoredAiConversation, StoredAiMessage, StoredAiPart } from '../../../preload'
 import { defaultAiSettings } from '../../../shared/aiSettings'
 
 export interface ToolStep {
@@ -223,6 +223,7 @@ export const useAiStore = defineStore('ai', () => {
       coveredMessageIds: new Set(completed.filter((message) => !retainedIds.has(message.id)).map((message) => message.id))
     }
     persistConversationCompression()
+    void persistConversation()
     contextStats.value = result.stats
   }
 
@@ -235,8 +236,13 @@ export const useAiStore = defineStore('ai', () => {
     compression = emptyConversationCompression()
   }
 
-  function restoreConversationCompression(id: string): void {
-    compression = compressionByConversation.get(id) ?? emptyConversationCompression()
+  function restoreConversationCompression(conversation: StoredAiConversation): void {
+    const stored = conversation.compression
+    const restored = stored
+      ? { summary: stored.summary, coveredMessageIds: new Set(stored.coveredMessageIds) }
+      : emptyConversationCompression()
+    compressionByConversation.set(conversation.id, restored)
+    compression = restored
   }
 
   async function refreshContextStats(): Promise<void> {
@@ -424,12 +430,16 @@ export const useAiStore = defineStore('ai', () => {
           : part)
       }]
     })
+    const storedCompression: StoredAiCompression | undefined = compression.summary
+      ? { summary: compression.summary, coveredMessageIds: [...compression.coveredMessageIds] }
+      : undefined
     return {
       id: currentConversationId.value,
       title: firstUser.content.slice(0, 30),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
-      messages: snapshotted
+      messages: snapshotted,
+      ...(storedCompression ? { compression: storedCompression } : {})
     }
   }
 
@@ -569,7 +579,7 @@ export const useAiStore = defineStore('ai', () => {
     if (!conversation || conversation.id === currentConversationId.value) return
     currentConversationId.value = id
     messages.value = JSON.parse(JSON.stringify(conversation.messages)) as ChatMessage[]
-    restoreConversationCompression(id)
+    restoreConversationCompression(conversation)
     void refreshContextStats()
   }
 

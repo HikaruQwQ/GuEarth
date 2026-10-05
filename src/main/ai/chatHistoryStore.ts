@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'fs'
-import type { AiSearchReference, StoredAiConversation, StoredAiMessage, StoredAiPart, StoredAiToolStep } from '../../preload'
+import type { AiSearchReference, StoredAiCompression, StoredAiConversation, StoredAiMessage, StoredAiPart, StoredAiToolStep } from '../../preload'
 
 const MAX_CONVERSATIONS = 50
 const MAX_MESSAGES = 400
@@ -85,6 +85,16 @@ function normalizeMessage(value: unknown): StoredAiMessage | null {
   }
 }
 
+function normalizeCompression(value: unknown): StoredAiCompression | undefined {
+  if (!isRecord(value)) return undefined
+  const summary = clampString(value.summary, 100_000)
+  const coveredMessageIds = Array.isArray(value.coveredMessageIds)
+    ? value.coveredMessageIds.filter((id): id is string => typeof id === 'string' && id.length > 0).map((id) => id.slice(0, 128)).slice(0, MAX_MESSAGES)
+    : []
+  if (!summary || !coveredMessageIds.length) return undefined
+  return { summary, coveredMessageIds }
+}
+
 export function normalizeConversation(value: unknown): StoredAiConversation | null {
   if (!isRecord(value)) return null
   const id = clampString(value.id, 64)
@@ -94,12 +104,14 @@ export function normalizeConversation(value: unknown): StoredAiConversation | nu
     : []
   if (!messages.some((message) => message.role === 'user')) return null
   const updatedAt = clampTimestamp(value.updatedAt, Date.now())
+  const compression = normalizeCompression(value.compression)
   return {
     id,
     title: clampString(value.title, 80) || '未命名会话',
     createdAt: clampTimestamp(value.createdAt, updatedAt),
     updatedAt,
-    messages
+    messages,
+    ...(compression ? { compression } : {})
   }
 }
 
