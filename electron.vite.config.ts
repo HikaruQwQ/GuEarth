@@ -1,5 +1,5 @@
 import { cpSync, createReadStream, existsSync, statSync } from 'fs'
-import { extname, join, resolve } from 'path'
+import { extname, join, resolve, sep } from 'path'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import type { Connect, Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
