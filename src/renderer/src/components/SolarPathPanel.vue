@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import dayjs, { type Dayjs } from 'dayjs'
 import { CaretRightOutlined, CloseOutlined, PauseOutlined } from '@ant-design/icons-vue'
 import { useSolarStore } from '@renderer/stores/solar'
@@ -95,18 +95,34 @@ let rafId = 0
 let lastTime = 0
 
 function tick(now: number): void {
+  if (!isPlaying.value) {
+    rafId = 0
+    lastTime = 0
+    return
+  }
   rafId = requestAnimationFrame(tick)
   const dt = lastTime > 0 ? Math.min(0.05, (now - lastTime) / 1000) : 0
   lastTime = now
-  if (dt > 0 && isPlaying.value) localHour.value = (localHour.value + dt * LOCAL_HOURS_PER_SECOND) % 24
+  if (dt > 0) localHour.value = (localHour.value + dt * LOCAL_HOURS_PER_SECOND) % 24
 }
 
-onMounted(() => {
+function start(): void {
+  if (rafId || !isPlaying.value) return
+  lastTime = 0
   rafId = requestAnimationFrame(tick)
+}
+
+watch(isPlaying, (playing) => {
+  if (playing) start()
+  else {
+    if (rafId) cancelAnimationFrame(rafId)
+    rafId = 0
+    lastTime = 0
+  }
 })
 
 onBeforeUnmount(() => {
-  cancelAnimationFrame(rafId)
+  if (rafId) cancelAnimationFrame(rafId)
   rafId = 0
 })
 </script>

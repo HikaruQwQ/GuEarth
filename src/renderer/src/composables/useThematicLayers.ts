@@ -109,6 +109,8 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     const dt = coriolisLast > 0 ? Math.min(0.05, (now - coriolisLast) / 1000) : 0
     coriolisLast = now
     if (dt > 0) coriolisProgress.value = (coriolisProgress.value + dt / 10) % 1
+    const currentViewer = viewer.value
+    if (currentViewer && !currentViewer.isDestroyed()) currentViewer.scene.requestRender()
   }
 
   function startCoriolis(): void {

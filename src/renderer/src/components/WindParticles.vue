@@ -231,6 +231,7 @@ function frame(): void {
     lastTime = 0
     return
   }
+  viewer.scene.requestRender()
   const now = performance.now()
   const dt = lastTime ? Math.min(0.05, (now - lastTime) / 1000) : 0
   lastTime = now

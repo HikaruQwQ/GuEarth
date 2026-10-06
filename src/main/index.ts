@@ -14,8 +14,8 @@ Sentry.init({
 })
 import { execFileSync } from 'child_process'
 import { join } from 'path'
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'fs'
-import { access, constants, open, rename as renameFile, stat, unlink } from 'fs/promises'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs'
+import { access, constants, mkdir, open, readdir, readFile, rename as renameFile, stat, stat as statFile, unlink, writeFile } from 'fs/promises'
 import type { FileHandle } from 'fs/promises'
 import { createHash, randomUUID } from 'crypto'
 import icon from '../../resources/icon.png?asset'
@@ -66,6 +66,8 @@ const defaultSettings: PersistedSettings = {
 }
 
 const TILE_TTL_MS = 86_400_000
+const TILE_CACHE_MAX_BYTES = 512 * 1024 * 1024
+const TILE_CACHE_PRUNE_INTERVAL_MS = 10 * 60 * 1000
 
 let settingsPath = ''
 let tileCachePath = ''
@@ -196,59 +198,106 @@ function toArrayBuffer(data: Buffer): ArrayBuffer {
   return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
 }
 
-function readTile(key: TileKey, allowExpired = false): TileCacheEntry | null {
+async function readTile(key: TileKey, allowExpired = false): Promise<TileCacheEntry | null> {
   const dataPath = tileDataPath(key)
   const metaPath = tileMetaPath(key)
-  if (!existsSync(dataPath) || !existsSync(metaPath)) return null
   try {
-    const metadata: unknown = JSON.parse(readFileSync(metaPath, 'utf8'))
+    const [metadataText, data] = await Promise.all([readFile(metaPath, 'utf8'), readFile(dataPath)])
+    const metadata: unknown = JSON.parse(metadataText)
     if (!isRecord(metadata) || typeof metadata.contentType !== 'string') return null
     const expiresAt = typeof metadata.expiresAt === 'number' ? metadata.expiresAt : null
     if (expiresAt !== null && expiresAt <= Date.now() && !allowExpired) return null
-    return { ...key, data: toArrayBuffer(readFileSync(dataPath)), contentType: metadata.contentType, expiresAt }
+    return { ...key, data: toArrayBuffer(data), contentType: metadata.contentType, expiresAt }
   } catch {
     return null
   }
 }
 
-function cachedTileResponse(key: TileKey, allowExpired: boolean): Response | null {
+async function cachedTileResponse(key: TileKey, allowExpired: boolean): Promise<Response | null> {
   if (!settings.tileCacheEnabled) return null
-  const cached = readTile(key, allowExpired)
+  const cached = await readTile(key, allowExpired)
   if (!cached) return null
   const expired = cached.expiresAt !== null && cached.expiresAt <= Date.now()
   return new Response(cached.data, { headers: { 'content-type': cached.contentType, 'x-guearth-cache': expired ? 'stale' : 'hit' } })
 }
 
-function writeTile(entry: TileCacheEntry): void {
+let tilePruneAt = 0
+let tilePrunePromise: Promise<void> | undefined
+
+async function listTileFiles(): Promise<Array<{ path: string; size: number; mtimeMs: number }>> {
+  const files: Array<{ path: string; size: number; mtimeMs: number }> = []
+  const pending = [tileCachePath]
+  while (pending.length) {
+    const current = pending.pop()
+    if (!current) continue
+    let entries
+    try {
+      entries = await readdir(current, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      const entryPath = join(current, entry.name)
+      if (entry.isDirectory()) {
+        pending.push(entryPath)
+        continue
+      }
+      if (!entryPath.endsWith('.bin')) continue
+      try {
+        const info = await statFile(entryPath)
+        files.push({ path: entryPath, size: info.size, mtimeMs: info.mtimeMs })
+      } catch {
+        void 0
+      }
+    }
+  }
+  return files
+}
+
+async function enforceTileCacheLimit(): Promise<void> {
+  if (tilePrunePromise) return tilePrunePromise
+  const now = Date.now()
+  if (now - tilePruneAt < TILE_CACHE_PRUNE_INTERVAL_MS) return
+  tilePruneAt = now
+  tilePrunePromise = (async () => {
+    const files = await listTileFiles()
+    let total = files.reduce((sum, file) => sum + file.size, 0)
+    if (total <= TILE_CACHE_MAX_BYTES) return
+    files.sort((a, b) => a.mtimeMs - b.mtimeMs)
+    for (const file of files) {
+      if (total <= TILE_CACHE_MAX_BYTES) break
+      await Promise.all([
+        unlink(file.path).catch(() => undefined),
+        unlink(file.path.replace(/\.bin$/, '.json')).catch(() => undefined)
+      ])
+      total -= file.size
+    }
+  })().finally(() => {
+    tilePrunePromise = undefined
+  })
+  return tilePrunePromise
+}
+
+async function writeTile(entry: TileCacheEntry): Promise<void> {
   const key: TileKey = { providerId: entry.providerId, styleId: entry.styleId, level: entry.level, x: entry.x, y: entry.y }
   const basePath = tileBasePath(key)
   try {
-    mkdirSync(join(tileCachePath, safeId(key.providerId), safeId(key.styleId), pathPart(key.level), pathPart(key.x)), { recursive: true })
-    writeFileSync(`${basePath}.bin`, Buffer.from(entry.data))
-    writeFileSync(`${basePath}.json`, JSON.stringify({ contentType: entry.contentType, expiresAt: entry.expiresAt }), 'utf8')
+    await mkdir(join(tileCachePath, safeId(key.providerId), safeId(key.styleId), pathPart(key.level), pathPart(key.x)), { recursive: true })
+    await Promise.all([
+      writeFile(`${basePath}.bin`, Buffer.from(entry.data)),
+      writeFile(`${basePath}.json`, JSON.stringify({ contentType: entry.contentType, expiresAt: entry.expiresAt }), 'utf8')
+    ])
+    void enforceTileCacheLimit()
   } catch {
     void 0
   }
 }
 
-function collectFiles(path: string): string[] {
-  if (!existsSync(path)) return []
-  return readdirSync(path, { withFileTypes: true }).flatMap((entry) => {
-    const entryPath = join(path, entry.name)
-    return entry.isDirectory() ? collectFiles(entryPath) : [entryPath]
-  })
-}
-
-function cacheStats(): TileCacheStats {
-  return collectFiles(tileCachePath).reduce<TileCacheStats>((result, path) => {
-    if (!path.endsWith('.bin')) return result
-    try {
-      const size = statSync(path).size
-      result.files += 1
-      result.bytes += size
-    } catch {
-      void 0
-    }
+async function cacheStats(): Promise<TileCacheStats> {
+  const files = await listTileFiles()
+  return files.reduce<TileCacheStats>((result, file) => {
+    result.files += 1
+    result.bytes += file.size
     return result
   }, { files: 0, bytes: 0 })
 }
@@ -313,7 +362,7 @@ async function handleTileProtocol(request: Request): Promise<Response> {
   if (!Number.isInteger(coordinates[0]) || coordinates[0] < 0 || !Number.isInteger(coordinates[1]) || !Number.isInteger(coordinates[2])) return new Response('Bad tile path', { status: 400 })
   const [level, x, y] = coordinates
   const key = { providerId, styleId, level, x, y }
-  const cached = cachedTileResponse(key, false)
+  const cached = await cachedTileResponse(key, false)
   if (cached) return cached
   const remoteUrl = tileRemoteUrl(providerId, styleId, level, x, y)
   if (!remoteUrl) return new Response('Unknown provider', { status: 404 })
@@ -321,17 +370,17 @@ async function handleTileProtocol(request: Request): Promise<Response> {
     const response = await fetchTileWithRetry(remoteUrl)
     if (!response.ok) {
       if (response.status === 429 || response.status >= 500) {
-        const stale = cachedTileResponse(key, true)
+        const stale = await cachedTileResponse(key, true)
         if (stale) return stale
       }
       return new Response(`Tile request failed: ${response.status}`, { status: response.status })
     }
     const data = await response.arrayBuffer()
     const contentType = response.headers.get('content-type') ?? 'image/png'
-    if (settings.tileCacheEnabled) writeTile({ ...key, data, contentType, expiresAt: Date.now() + TILE_TTL_MS })
+    if (settings.tileCacheEnabled) void writeTile({ ...key, data, contentType, expiresAt: Date.now() + TILE_TTL_MS })
     return new Response(data, { headers: { 'content-type': contentType, 'x-guearth-cache': 'miss' } })
   } catch {
-    const stale = cachedTileResponse(key, true)
+    const stale = await cachedTileResponse(key, true)
     if (stale) return stale
     return new Response('Tile unavailable', { status: 502 })
   }

@@ -322,8 +322,14 @@ md.renderer.rules.link_open = (tokens, index, options, _env, self) => {
   return self.renderToken(tokens, index, options)
 }
 
-function renderMarkdown(text: string): string {
-  return md.render(text)
+const markdownCache = new WeakMap<object, { text: string; html: string }>()
+
+function renderMarkdown(part: { text: string }): string {
+  const cached = markdownCache.get(part)
+  if (cached?.text === part.text) return cached.html
+  const html = md.render(part.text)
+  markdownCache.set(part, { text: part.text, html })
+  return html
 }
 
 function reasoningDurationText(part: ReasoningPart): string {
@@ -450,7 +456,11 @@ function handleRegenerate(message: ChatMessage): void {
 }
 
 watch(
-  () => messages.value.map((message) => `${message.status}:${message.content.length}:${message.parts.map((part) => part.kind === 'reasoning' ? `r${part.text.length}` : part.kind === 'text' ? `t${part.text.length}` : `o${part.step.status}:${part.step.result.length}`).join('.')}`).join(','),
+  () => {
+    const message = messages.value[messages.value.length - 1]
+    if (!message) return ''
+    return `${message.id}:${message.status}:${message.content.length}:${message.parts.map((part) => part.kind === 'reasoning' ? `r${part.text.length}` : part.kind === 'text' ? `t${part.text.length}` : `o${part.step.status}:${part.step.result.length}`).join('.')}`
+  },
   async () => {
     await nextTick()
     listRef.value?.scrollTo({ top: listRef.value.scrollHeight })
@@ -587,7 +597,7 @@ watch(currentConversationId, () => {
                 <div class="reasoning-text">{{ part.text }}</div>
               </a-collapse-panel>
             </a-collapse>
-            <div v-else-if="part.kind === 'text'" class="answer-text" v-html="renderMarkdown(part.text)"></div>
+            <div v-else-if="part.kind === 'text'" class="answer-text" v-html="renderMarkdown(part)"></div>
             <WebSearchStep
               v-else-if="part.step.name === 'web_search'"
               :step="part.step"

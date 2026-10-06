@@ -1,5 +1,5 @@
 import { cpSync, createReadStream, existsSync, statSync } from 'fs'
-import { extname, join, resolve, sep } from 'path'
+import { extname, join, resolve } from 'path'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import type { Connect, Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
@@ -58,6 +58,17 @@ export default defineConfig({
       }
     },
     plugins: [vue(), cesiumStaticPlugin()],
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            const normalizedId = id.replaceAll('\\', '/')
+            if (normalizedId.includes('/node_modules/cesium/') || normalizedId.includes('/node_modules/@cesium/')) return 'cesium'
+            return undefined
+          }
+        }
+      }
+    },
     define: {
       CESIUM_BASE_URL: JSON.stringify('./cesium/')
     }

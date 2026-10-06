@@ -271,6 +271,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     imageryLayers.forEach((layer, layerId) => { layer.show = layerId === id })
     activeBasemapId = id
     failureStore.clearFailure('basemap')
+    evaluateGlobeReady()
   }
 
   function retireImageryLayer(layer: Cesium.ImageryLayer): void {
@@ -494,6 +495,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     if (!currentViewer || currentViewer.isDestroyed()) return
     currentViewer.scene.verticalExaggeration = store.terrainExaggeration
     currentViewer.scene.globe.enableLighting = store.terrainLighting || solarStore.active
+    currentViewer.scene.requestRender()
     currentViewer.scene.globe.depthTestAgainstTerrain = true
   }
 
@@ -504,6 +506,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
       ? Cesium.JulianDate.fromDate(new Date(solarStore.utcMs))
       : Cesium.JulianDate.now()
     currentViewer.scene.globe.enableLighting = store.terrainLighting || solarStore.active
+    currentViewer.scene.requestRender()
   })
 
   function toggleLevelView(): void {
@@ -607,7 +610,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
         generation += 1
         store.setGlobeLoadStage('正在初始化地球…')
         const terrainPromise = resolveInitialTerrain(store.terrainProviderId)
-        viewer.value = new Cesium.Viewer(container.value, { baseLayer: false, baseLayerPicker: false, terrainProvider: new Cesium.EllipsoidTerrainProvider(), geocoder: false, animation: false, timeline: false, sceneModePicker: false, navigationHelpButton: false, fullscreenButton: false, homeButton: false, infoBox: false, selectionIndicator: false, useBrowserRecommendedResolution: false, contextOptions: { webgl: { preserveDrawingBuffer: true } } })
+        viewer.value = new Cesium.Viewer(container.value, { baseLayer: false, baseLayerPicker: false, terrainProvider: new Cesium.EllipsoidTerrainProvider(), geocoder: false, animation: false, timeline: false, sceneModePicker: false, navigationHelpButton: false, fullscreenButton: false, homeButton: false, infoBox: false, selectionIndicator: false, requestRenderMode: true, maximumRenderTimeChange: Infinity, useBrowserRecommendedResolution: true, contextOptions: { webgl: { preserveDrawingBuffer: true } } })
         viewer.value.scene.globe.show = false
         viewer.value.scene.globe.tileCacheSize = 1000
         store.setGlobeLoadStage('正在准备地形数据…')
@@ -634,6 +637,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
           applyTerrain(terrainSetup.provider)
           store.setActiveTerrainId(terrainSetup.id)
           current.scene.globe.show = true
+          evaluateGlobeReady()
           store.setGlobeLoadStage('正在加载地图瓦片…')
         })()
         const initialLayerId = store.selectedLayerId

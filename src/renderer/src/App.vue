@@ -1078,8 +1078,8 @@ function deleteSelectedShape(): void {
       />
       <TeachingLab :open="isLabOpen" @close="isLabOpen = false" />
       <PlaceSearchBox @select="flyToPlace" />
-      <MonthTimeline />
-      <SolarTimePanel />
+      <MonthTimeline :viewer="viewer" />
+      <SolarTimePanel :viewer="viewer" />
       <SolarPathPanel v-if="solarStore.motionPanel === 'solar-path'" @close="solarStore.setMotionPanel(null)" />
       <ObliquityPanel v-if="solarStore.motionPanel === 'obliquity'" @close="solarStore.setMotionPanel(null)" />
       <RotationSpeedPanel v-if="solarStore.motionPanel === 'rotation-speed'" @close="solarStore.setMotionPanel(null)" />
