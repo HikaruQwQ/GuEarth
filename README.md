@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/status-0.1.12%20early-f4f4f5?style=flat-square&labelColor=18181b" alt="0.1.12 early">
+  <img src="https://img.shields.io/badge/status-0.1.13%20early-f4f4f5?style=flat-square&labelColor=18181b" alt="0.1.13 early">
   <img src="https://img.shields.io/badge/platform-Windows%20x64-f4f4f5?style=flat-square&labelColor=18181b" alt="Windows x64">
 
 GuEarth 是一个仍在早期开发中的桌面数字地球，面向地理教学。它把真实影像和地形装进一个本地运行的 3D 地球，配合教学工具、主题模块和 AI 助手，让晨昏线、气压带、河流地貌这些"讲不动的"内容动起来。
@@ -27,6 +27,8 @@ GuEarth 是一个仍在早期开发中的桌面数字地球，面向地理教学
 ### 让 AI 助手陪你讲
 
 - EOQ 智能体随聊天操作地球：飞行定位、查询地形、叠加图层、讲解地貌，都能由模型直接驱动；
+- 输入 `/` 呼出快捷命令，一句话开新对话、找回历史、压缩超长对话；发错的问题可以悬停修改重发，AI 的回答也能一键重新生成；
+- 演示时直接吩咐 AI：打开晨昏线、热力环流等教学面板，切换道路 / 卫星 / 地形底图，调整地形起伏，全程动口不动手；
 - 支持DeepSeek、Qwen 等 OpenAI 兼容的模型服务，配置好 API Key 就能用；
 - 模型的回答边生成边显示，讲到哪飞到哪。
 
