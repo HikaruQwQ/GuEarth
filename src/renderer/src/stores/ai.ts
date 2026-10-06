@@ -555,8 +555,10 @@ export const useAiStore = defineStore('ai', () => {
     }
     if (userIndex < 0) return
     const question = messages.value[userIndex]
+    const text = question.content.trim()
+    if (!text) return
     messages.value = messages.value.slice(0, userIndex)
-    await send(question.content)
+    await send(text)
   }
 
   async function retryLast(): Promise<void> {
@@ -564,6 +566,8 @@ export const useAiStore = defineStore('ai', () => {
     for (let index = messages.value.length - 1; index >= 0; index -= 1) {
       const message = messages.value[index]
       if (message.role === 'assistant' && message.status === 'error') {
+        const question = messages.value[index - 1]
+        if (!question || question.role !== 'user') return
         await regenerate(message.id)
         return
       }

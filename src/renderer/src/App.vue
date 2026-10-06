@@ -504,28 +504,37 @@ aiStore.registerTool({
     }
   },
   execute: async (args) => {
-    const applied: string[] = []
-    let terrainRequested: string | undefined
+    let terrain: (typeof terrainCatalog)[number] | undefined
     if (args.terrainId !== undefined) {
-      const terrain = terrainCatalog.find((item) => item.id === args.terrainId)
+      terrain = terrainCatalog.find((item) => item.id === args.terrainId)
       if (!terrain) return { error: `未知地形 ${String(args.terrainId)}，可用地形：${terrainCatalog.map((item) => `${item.id}（${item.name}）`).join('、')}` }
-      setTerrain(terrain.id)
-      terrainRequested = terrain.id
-      applied.push(`地形切换为「${terrain.name}」`)
     }
+    let exaggeration: number | undefined
     if (args.exaggeration !== undefined) {
       const value = Number(args.exaggeration)
       if (!Number.isFinite(value) || value < 1 || value > 5) return { error: 'exaggeration 需为 1-5 的数字' }
-      setTerrainExaggeration(Math.round(value * 10) / 10)
-      applied.push(`垂直夸张 ${store.terrainExaggeration}×`)
+      exaggeration = Math.round(value * 10) / 10
     }
+    let lighting: boolean | undefined
     if (args.lighting !== undefined) {
       if (typeof args.lighting !== 'boolean') return { error: 'lighting 需为布尔值' }
-      setTerrainLighting(args.lighting)
-      applied.push(`地形光照已${args.lighting ? '开启' : '关闭'}`)
+      lighting = args.lighting
     }
-    if (!applied.length) return { error: '请至少提供 terrainId、exaggeration 或 lighting 之一' }
-    return { status: 'ok', terrainId: terrainRequested, exaggeration: store.terrainExaggeration, lighting: store.terrainLighting, message: applied.join('，') }
+    if (!terrain && exaggeration === undefined && lighting === undefined) return { error: '请至少提供 terrainId、exaggeration 或 lighting 之一' }
+    const applied: string[] = []
+    if (terrain) {
+      setTerrain(terrain.id)
+      applied.push(`地形切换为「${terrain.name}」`)
+    }
+    if (exaggeration !== undefined) {
+      setTerrainExaggeration(exaggeration)
+      applied.push(`垂直夸张 ${store.terrainExaggeration}×`)
+    }
+    if (lighting !== undefined) {
+      setTerrainLighting(lighting)
+      applied.push(`地形光照已${lighting ? '开启' : '关闭'}`)
+    }
+    return { status: 'ok', terrainId: terrain?.id, exaggeration: store.terrainExaggeration, lighting: store.terrainLighting, message: applied.join('，') }
   }
 })
 
