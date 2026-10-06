@@ -408,7 +408,7 @@ const teachingPanelCatalog: { id: string; name: string; hint: string; open: () =
   { id: 'ocean-property', name: '海水温度与盐度', hint: '展示海水温度、盐度随纬度和深度的分布', open: () => hydrologyStore.setPanel('ocean-property') },
   { id: 'tide', name: '潮汐与波浪', hint: '演示潮汐周期、大潮小潮与潮差', open: () => hydrologyStore.setPanel('tide') },
   { id: 'water-bodies', name: '陆地水体与河流补给', hint: '演示河流补给类型与径流变化过程', open: () => hydrologyStore.setPanel('water-bodies') },
-  { id: 'fold-fault', hint: '展示褶皱与断层岩层剖面，可实地飞往典型地点', name: '褶皱与断层', open: () => landformStore.setPanel('fold-fault') },
+  { id: 'fold-fault', name: '褶皱与断层', hint: '展示褶皱与断层岩层剖面，可实地飞往典型地点', open: () => landformStore.setPanel('fold-fault') },
   { id: 'river', name: '河流地貌发育', hint: '讲解河流上中下游地貌并查看实测高程剖面', open: () => landformStore.setPanel('river') },
   { id: 'landform-guide', name: '典型地貌识别', hint: '按喀斯特、雅丹、冰川、海岸、黄土等类型实地飞行导览', open: () => landformStore.setPanel('landform-guide') },
   { id: 'exogenic', name: '外力作用过程', hint: '演示风化、侵蚀、搬运、堆积的外力作用链条', open: () => landformStore.setPanel('exogenic') },
@@ -505,10 +505,12 @@ aiStore.registerTool({
   },
   execute: async (args) => {
     const applied: string[] = []
+    let terrainRequested: string | undefined
     if (args.terrainId !== undefined) {
       const terrain = terrainCatalog.find((item) => item.id === args.terrainId)
       if (!terrain) return { error: `未知地形 ${String(args.terrainId)}，可用地形：${terrainCatalog.map((item) => `${item.id}（${item.name}）`).join('、')}` }
       setTerrain(terrain.id)
+      terrainRequested = terrain.id
       applied.push(`地形切换为「${terrain.name}」`)
     }
     if (args.exaggeration !== undefined) {
@@ -523,7 +525,7 @@ aiStore.registerTool({
       applied.push(`地形光照已${args.lighting ? '开启' : '关闭'}`)
     }
     if (!applied.length) return { error: '请至少提供 terrainId、exaggeration 或 lighting 之一' }
-    return { status: 'ok', terrainId: store.activeTerrainId, exaggeration: store.terrainExaggeration, lighting: store.terrainLighting, message: applied.join('，') }
+    return { status: 'ok', terrainId: terrainRequested, exaggeration: store.terrainExaggeration, lighting: store.terrainLighting, message: applied.join('，') }
   }
 })
 
