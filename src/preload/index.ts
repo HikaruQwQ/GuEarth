@@ -265,6 +265,18 @@ export interface EarthquakeFeed {
   events: EarthquakeEvent[]
 }
 
+export interface ProvinceFeature {
+  name: string
+  adcode: number
+  center: [number, number]
+  centroid: [number, number]
+  polygons: number[][][][]
+}
+
+export interface ProvinceGeoDocument {
+  features: ProvinceFeature[]
+}
+
 export type PlaceSearchProvider = 'amap' | 'baidu'
 
 export interface SceneCamera {
@@ -368,7 +380,8 @@ const api = {
     search: (keyword: string, provider?: PlaceSearchProvider): Promise<PlaceSearchResult> => ipcRenderer.invoke('places:search', keyword, provider)
   },
   datasets: {
-    getEarthquakes: (): Promise<EarthquakeFeed> => ipcRenderer.invoke('datasets:earthquakes')
+    getEarthquakes: (): Promise<EarthquakeFeed> => ipcRenderer.invoke('datasets:earthquakes'),
+    getProvinces: (): Promise<ProvinceGeoDocument> => ipcRenderer.invoke('datasets:provinces')
   },
   updater: {
     getState: (): Promise<UpdateState> => ipcRenderer.invoke('updater:get-state'),

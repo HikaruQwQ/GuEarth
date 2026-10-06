@@ -5,6 +5,7 @@ import { useSolarStore, type MotionPanel as SolarMotionPanel } from '@renderer/s
 import { useAtmosphereStore, type AtmospherePanel } from '@renderer/stores/atmosphere'
 import { useHydrologyStore, type HydrologyPanel } from '@renderer/stores/hydrology'
 import { useLandformStore, type LandformPanel } from '@renderer/stores/landform'
+import { usePopulationStore } from '@renderer/stores/population'
 import { useDrawingStore } from '@renderer/stores/drawing'
 
 interface LabEntry {
@@ -30,6 +31,7 @@ const solarStore = useSolarStore()
 const atmosphereStore = useAtmosphereStore()
 const hydrologyStore = useHydrologyStore()
 const landformStore = useLandformStore()
+const populationStore = usePopulationStore()
 const drawingStore = useDrawingStore()
 
 function closeAllPanels(): void {
@@ -37,6 +39,7 @@ function closeAllPanels(): void {
   atmosphereStore.setPanel(null)
   hydrologyStore.setPanel(null)
   landformStore.setPanel(null)
+  populationStore.setPanel(null)
 }
 
 function layerEntry(id: ThematicLayerId): LabEntry {
@@ -102,6 +105,20 @@ function landformPanelEntry(panel: LandformPanel, name: string, description: str
       const next = landformStore.panel !== panel
       closeAllPanels()
       if (next) landformStore.setPanel(panel)
+    }
+  }
+}
+
+function populationPanelEntry(name: string, description: string): LabEntry {
+  return {
+    key: 'population',
+    name,
+    description,
+    active: () => populationStore.panel === 'population',
+    toggle: () => {
+      const next = populationStore.panel !== 'population'
+      closeAllPanels()
+      if (next) populationStore.setPanel('population')
     }
   }
 }
@@ -199,6 +216,16 @@ const chapters: LabChapter[] = [
       landformPanelEntry('exogenic', '外力作用过程', '风化→侵蚀→搬运→堆积→固结成岩链条'),
       landformPanelEntry('earth-layers', '地球的圈层结构', '地壳/地幔/地核切球剖面与地震波界线'),
       layerEntry('plate-tectonics')
+    ]
+  },
+  {
+    id: 'population',
+    title: '必修二 · 人口与城镇',
+    entries: [
+      populationPanelEntry('人口数据面板', '人口金字塔、城镇化曲线与胡焕庸线对比'),
+      layerEntry('province-population'),
+      layerEntry('hu-line'),
+      layerEntry('migration-flows')
     ]
   }
 ]

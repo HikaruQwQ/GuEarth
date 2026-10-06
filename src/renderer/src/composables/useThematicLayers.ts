@@ -1,6 +1,6 @@
 import { onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import * as Cesium from 'cesium'
-import type { EarthquakeEvent, EarthquakeFeed } from '../../../preload'
+import type { EarthquakeEvent, EarthquakeFeed, ProvinceGeoDocument } from '../../../preload'
 import { thematicLayerCatalog, useClimateStore, type ThematicLayerId } from '@renderer/stores/climate'
 import { useSolarStore } from '@renderer/stores/solar'
 import { useFailureStore } from '@renderer/stores/failure'
@@ -17,6 +17,7 @@ import { temperatureZoneBands, temperatureZoneLines } from '@renderer/thematic/t
 import { typhoonIntensityStyles, typhoonTracks } from '@renderer/thematic/typhoonTracks'
 import { ensoAnomalyColor, ensoPhaseMeta } from '@renderer/thematic/ensoPhases'
 import { subsolarPointDeg } from '@renderer/thematic/solarMath'
+import { densityColor, densityOf, huLineEndpoints, huLineFacts, huLinePath, migrationFacts, migrationFlows, provincePopulation, provinceSummary } from '@renderer/thematic/populationCensus'
 
 const WARM_COLOR = '#f5222d'
 const COLD_COLOR = '#1677ff'
@@ -41,6 +42,11 @@ const FRONTAL_CYCLONE_LAT = 34
 const BELT_LABEL_LON = 150
 const WIND_ARROW_LONS = [-150, -90, -30, 30, 90, 150]
 const LABEL_FONT_FAMILY = '"Microsoft YaHei", "PingFang SC", sans-serif'
+const HU_LINE_COLOR = '#531dab'
+const MIGRATION_FLOW_COLOR = '#fa8c16'
+const PROVINCE_BORDER_COLOR = 'rgba(0, 0, 0, 0.35)'
+const HU_LINE_MID_LON = 112.5
+const HU_LINE_MID_LAT = 36.5
 
 interface LayerView {
   longitude: number
@@ -820,6 +826,148 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     })
   }
 
+  function buildHuLine(dataSource: Cesium.CustomDataSource): void {
+    const lineColor = Cesium.Color.fromCssColorString(HU_LINE_COLOR)
+    const properties = new Cesium.PropertyBag({
+      name: '胡焕庸线（黑河—腾冲线）',
+      layerId: 'hu-line',
+      summary: `${huLineFacts[1]}${huLineFacts[2]}${huLineFacts[3]}`
+    })
+    dataSource.entities.add({
+      properties,
+      polyline: {
+        positions: toCartesians(huLinePath),
+        clampToGround: true,
+        width: 2.5,
+        material: new Cesium.PolylineDashMaterialProperty({ color: lineColor })
+      }
+    })
+    for (const endpoint of huLineEndpoints) {
+      dataSource.entities.add({
+        properties,
+        position: Cesium.Cartesian3.fromDegrees(endpoint.longitude, endpoint.latitude),
+        label: {
+          text: endpoint.name,
+          font: labelFont(13, 600),
+          fillColor: lineColor,
+          showBackground: true,
+          backgroundColor: Cesium.Color.WHITE.withAlpha(0.78),
+          backgroundPadding: new Cesium.Cartesian2(7, 4),
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
+        }
+      })
+    }
+    dataSource.entities.add({
+      properties,
+      position: Cesium.Cartesian3.fromDegrees(HU_LINE_MID_LON, HU_LINE_MID_LAT),
+      label: {
+        text: '胡焕庸线',
+        font: labelFont(14, 600),
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: lineColor,
+        outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset: new Cesium.Cartesian2(0, -12),
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
+      }
+    })
+  }
+
+  function buildMigrationFlows(dataSource: Cesium.CustomDataSource): void {
+    const color = Cesium.Color.fromCssColorString(MIGRATION_FLOW_COLOR)
+    const overview = migrationFacts[0] + migrationFacts[3]
+    for (const flow of migrationFlows) {
+      const label = `${flow.fromName}→${flow.toName}`
+      const properties = new Cesium.PropertyBag({
+        name: `人口迁移流向：${label}`,
+        layerId: 'migration-flows',
+        summary: `人口由${flow.fromName}流向${flow.toName}${flow.note ? `（${flow.note}）` : ''}。${overview}`
+      })
+      dataSource.entities.add({
+        properties,
+        polyline: {
+          positions: toCartesians([flow.from, flow.to]),
+          clampToGround: true,
+          width: flow.weight === 'major' ? 4.5 : 3,
+          material: color.withAlpha(0.82)
+        }
+      })
+      dataSource.entities.add({
+        properties,
+        polygon: {
+          hierarchy: new Cesium.PolygonHierarchy(arrowHeadPositions(flow.from, flow.to, 2.2)),
+          material: color.withAlpha(0.95)
+        }
+      })
+      const [lon, lat] = arrowLabelAt({ from: flow.from, to: flow.to, label })
+      dataSource.entities.add({
+        properties,
+        position: Cesium.Cartesian3.fromDegrees(lon, lat),
+        label: {
+          text: label,
+          font: labelFont(12, 600),
+          fillColor: color,
+          outlineColor: Cesium.Color.WHITE,
+          outlineWidth: 2,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
+        }
+      })
+    }
+  }
+
+  function provinceRingsToHierarchy(rings: number[][][]): Cesium.PolygonHierarchy | null {
+    const [outer, ...holes] = rings.map((ring) => toRingCartesians(ring.map(([lon, lat]) => [lon, lat] as [number, number])))
+    if (!outer || outer.length < 3) return null
+    return new Cesium.PolygonHierarchy(
+      outer,
+      holes.filter((hole) => hole.length >= 3).map((hole) => new Cesium.PolygonHierarchy(hole))
+    )
+  }
+
+  async function addProvinceEntities(dataSource: Cesium.CustomDataSource): Promise<void> {
+    let document: ProvinceGeoDocument
+    try {
+      document = await window.guEarth.datasets.getProvinces()
+    } catch {
+      if (sources.get('province-population') === dataSource) {
+        failureStore.reportFailure({ scope: 'dataset', message: '省级行政区划数据加载失败，人口密度图层不完整', detail: '重启应用可重新加载内置数据', retryable: true })
+      }
+      return
+    }
+    if (sources.get('province-population') !== dataSource) return
+    failureStore.clearFailure('dataset')
+    for (const feature of document.features) {
+      const population = provincePopulation.find((item) => item.name === feature.name)
+      if (!population) continue
+      const fillColor = Cesium.Color.fromCssColorString(densityColor(densityOf(population)))
+      const borderColor = Cesium.Color.fromCssColorString(PROVINCE_BORDER_COLOR)
+      const properties = new Cesium.PropertyBag({
+        name: feature.name,
+        layerId: 'province-population',
+        summary: provinceSummary(feature.name) ?? ''
+      })
+      for (const rings of feature.polygons) {
+        const hierarchy = provinceRingsToHierarchy(rings)
+        if (!hierarchy) continue
+        dataSource.entities.add({
+          properties,
+          polygon: { hierarchy, material: new Cesium.ColorMaterialProperty(fillColor.withAlpha(0.65)) }
+        })
+        dataSource.entities.add({
+          polyline: { positions: hierarchy.positions, clampToGround: true, width: 1.2, material: borderColor }
+        })
+      }
+    }
+  }
+
+  function buildProvincePopulation(dataSource: Cesium.CustomDataSource): void {
+    void addProvinceEntities(dataSource)
+  }
+
   const builders: Record<ThematicLayerId, (dataSource: Cesium.CustomDataSource) => void> = {
     'wind-particles': () => undefined,
     'pressure-belts': buildPressureBelts,
@@ -834,7 +982,10 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     'plate-tectonics': buildPlateTectonics,
     'temperature-zones': buildTemperatureZones,
     'typhoon': buildTyphoon,
-    'enso': buildEnso
+    'enso': buildEnso,
+    'province-population': buildProvincePopulation,
+    'hu-line': buildHuLine,
+    'migration-flows': buildMigrationFlows
   }
 
   const enableViews: Partial<Record<ThematicLayerId, LayerView>> = {
@@ -849,7 +1000,10 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     'plate-tectonics': { longitude: 180, latitude: 5, height: 17000000 },
     'temperature-zones': { longitude: 20, latitude: 0, height: 17000000 },
     'typhoon': { longitude: 132, latitude: 18, height: 10500000 },
-    'enso': { longitude: -155, latitude: 0, height: 9500000 }
+    'enso': { longitude: -155, latitude: 0, height: 9500000 },
+    'province-population': { longitude: 104, latitude: 35, height: 11000000 },
+    'hu-line': { longitude: 112, latitude: 36, height: 9000000 },
+    'migration-flows': { longitude: 110, latitude: 30, height: 10000000 }
   }
 
   function syncOverlays(): void {
