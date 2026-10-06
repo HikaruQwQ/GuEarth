@@ -29,6 +29,12 @@ export function usePerfProbe(viewer: ShallowRef<Cesium.Viewer | undefined>): voi
     if (current && !current.isDestroyed()) {
       mark('viewer-created')
       if (current.scene.globe.show) mark('globe-shown')
+      const centerHeight = current.scene.globe.getHeight(current.camera.positionCartographic)
+      if (!marks.has('surface-visible') && centerHeight !== undefined) mark('surface-visible')
+      if (current.terrainProvider.constructor.name !== 'EllipsoidTerrainProvider') {
+        if (!marks.has('terrain-provider-active')) mark('terrain-provider-active')
+        if (!marks.has('terrain-elevation-available') && centerHeight !== undefined && Math.abs(centerHeight) > 1) mark('terrain-elevation-available')
+      }
       if (current.imageryLayers.length > 0) mark('imagery-attached')
     }
     if (!document.querySelector('.globe-loading')) mark('loading-dismissed')
@@ -66,6 +72,7 @@ export function usePerfProbe(viewer: ShallowRef<Cesium.Viewer | undefined>): voi
         console.log(`[perf] ${label} datasource=${source.name || index} entities=${source.entities.values.length}`)
       }
       console.log(`[perf] ${label} viewer-entities=${current.entities.values.length} imagery=${current.imageryLayers.length} tilesLoaded=${current.scene.globe.tilesLoaded}`)
+      console.log(`[perf] ${label} terrainProvider=${current.terrainProvider.constructor.name} centerHeight=${current.scene.globe.getHeight(current.camera.positionCartographic) ?? 'unavailable'}`)
       const memory = (performance as unknown as { memory?: { usedJSHeapSize: number; totalJSHeapSize: number } }).memory
       if (memory) console.log(`[perf] ${label} jsHeap=${(memory.usedJSHeapSize / 1048576).toFixed(1)}MB total=${(memory.totalJSHeapSize / 1048576).toFixed(1)}MB`)
     }, SAMPLE_SECONDS * 1000)

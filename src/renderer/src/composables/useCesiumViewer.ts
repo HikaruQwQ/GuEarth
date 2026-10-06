@@ -71,6 +71,11 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
   let renderErrorReported = false
   let loadTimeoutReported = false
   let loadTimeoutTimer: number | undefined
+  let initialSurfaceCheckTimer: number | undefined
+  let initialSurfaceReady = false
+  let initialTerrainReady = false
+  let initialSurfaceReadyCallback: (() => void) | undefined
+  let initialSurfaceRenderListener: (() => void) | undefined
   let tileProgressListener: ((pending: number) => void) | undefined
   let selectedPlaceMarker: Cesium.Entity | undefined
   let polarCaps: Cesium.Primitive | undefined
@@ -205,6 +210,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     if (!currentViewer || currentViewer.isDestroyed()) return
     flightRequestSequence += 1
     currentViewer.terrainProvider = terrain
+    currentViewer.scene.requestRender()
     if (polarCaps) currentViewer.scene.primitives.remove(polarCaps)
     polarCaps = createPolarCaps(terrain)
     if (polarCaps) {
@@ -378,11 +384,57 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     store.setGlobeLoadTimedOut(false)
   }
 
+  function detachInitialSurfaceTracking(currentViewer?: Cesium.Viewer): void {
+    if (initialSurfaceCheckTimer !== undefined) {
+      window.clearTimeout(initialSurfaceCheckTimer)
+      initialSurfaceCheckTimer = undefined
+    }
+    if (initialSurfaceRenderListener && currentViewer && !currentViewer.isDestroyed()) {
+      currentViewer.scene.postRender.removeEventListener(initialSurfaceRenderListener)
+    }
+    initialSurfaceRenderListener = undefined
+  }
+
+  function attachInitialSurfaceTracking(currentViewer: Cesium.Viewer): void {
+    initialSurfaceReady = false
+    const listener = (): void => {
+      if (currentViewer.isDestroyed()) {
+        detachInitialSurfaceTracking()
+        return
+      }
+      const height = currentViewer.scene.globe.getHeight(currentViewer.camera.positionCartographic)
+      if (!initialSurfaceReady && height !== undefined) {
+        initialSurfaceReady = true
+        const callback = initialSurfaceReadyCallback
+        initialSurfaceReadyCallback = undefined
+        callback?.()
+        return
+      }
+      const providerIsEllipsoid = currentViewer.terrainProvider.constructor.name === 'EllipsoidTerrainProvider'
+      if (providerIsEllipsoid) return
+      if (height === undefined) {
+        if (initialSurfaceCheckTimer === undefined) {
+          initialSurfaceCheckTimer = window.setTimeout(() => {
+            initialSurfaceCheckTimer = undefined
+            if (!currentViewer.isDestroyed()) currentViewer.scene.requestRender()
+          }, 250)
+        }
+        return
+      }
+      initialTerrainReady = true
+      detachInitialSurfaceTracking(currentViewer)
+      evaluateGlobeReady()
+    }
+    initialSurfaceRenderListener = listener
+    currentViewer.scene.postRender.addEventListener(listener)
+    currentViewer.scene.requestRender()
+  }
+
   function evaluateGlobeReady(): void {
     const currentViewer = viewer.value
     if (!currentViewer || currentViewer.isDestroyed()) return
     if (store.isGlobeReady) return
-    if (!currentViewer.scene.globe.show) return
+    if (!initialTerrainReady || !currentViewer.scene.globe.show) return
     if (imageryLayers.size === 0) return
     clearLoadTimeout()
     store.setGlobeReady(true)
@@ -611,35 +663,49 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
         store.setGlobeLoadStage('正在初始化地球…')
         const terrainPromise = resolveInitialTerrain(store.terrainProviderId)
         viewer.value = new Cesium.Viewer(container.value, { baseLayer: false, baseLayerPicker: false, terrainProvider: new Cesium.EllipsoidTerrainProvider(), geocoder: false, animation: false, timeline: false, sceneModePicker: false, navigationHelpButton: false, fullscreenButton: false, homeButton: false, infoBox: false, selectionIndicator: false, requestRenderMode: true, maximumRenderTimeChange: Infinity, useBrowserRecommendedResolution: true, contextOptions: { webgl: { preserveDrawingBuffer: true } } })
-        viewer.value.scene.globe.show = false
-        viewer.value.scene.globe.tileCacheSize = 1000
-        store.setGlobeLoadStage('正在准备地形数据…')
-        viewer.value.camera.setView({ destination: Cesium.Cartesian3.fromDegrees(105, 35, 15000000) })
+        const currentViewer = viewer.value
+        currentViewer.scene.globe.show = true
+        currentViewer.scene.globe.tileCacheSize = 1000
+        store.setGlobeLoadStage('正在显示地球表面…')
+        currentViewer.camera.setView({ destination: Cesium.Cartesian3.fromDegrees(105, 35, 15000000) })
         const initialMode = store.sceneMode === '2D' ? Cesium.SceneMode.SCENE2D : Cesium.SceneMode.SCENE3D
-        viewer.value.scene.mode = initialMode
+        currentViewer.scene.mode = initialMode
         applyTerrainRendering()
-        viewer.value.scene.preUpdate.addEventListener(updatePolarCapsVisibility)
-        viewer.value.scene.preUpdate.addEventListener(updateDepthTestDistance)
-        viewer.value.scene.preUpdate.addEventListener(updateCollectionDepthTestDistances)
-        viewer.value.scene.preUpdate.addEventListener(updateHorizonCamera)
-        attachHorizonTracking(viewer.value)
-        viewer.value.scene.renderError.addEventListener(handleSceneRenderError)
-        viewer.value.camera.moveEnd.addEventListener(updateCameraState)
+        currentViewer.scene.preUpdate.addEventListener(updatePolarCapsVisibility)
+        currentViewer.scene.preUpdate.addEventListener(updateDepthTestDistance)
+        currentViewer.scene.preUpdate.addEventListener(updateCollectionDepthTestDistances)
+        currentViewer.scene.preUpdate.addEventListener(updateHorizonCamera)
+        attachHorizonTracking(currentViewer)
+        currentViewer.scene.renderError.addEventListener(handleSceneRenderError)
+        currentViewer.camera.moveEnd.addEventListener(updateCameraState)
         updateCameraState()
+        let terrainSetup: { provider: Cesium.TerrainProvider; id: string } | undefined
+        let terrainApplied = false
+        const applyInitialTerrain = (): void => {
+          if (!initialSurfaceReady || !terrainSetup || terrainApplied) return
+          const activeViewer = viewer.value
+          if (!activeViewer || activeViewer.isDestroyed()) return
+          terrainApplied = true
+          applyTerrain(terrainSetup.provider)
+          store.setActiveTerrainId(terrainSetup.id)
+          if (terrainSetup.id === 'ellipsoid') {
+            initialTerrainReady = true
+            detachInitialSurfaceTracking(activeViewer)
+            evaluateGlobeReady()
+          }
+          currentViewer.scene.requestRender()
+          store.setGlobeLoadStage(terrainSetup.id === 'ellipsoid' ? '正在加载地图瓦片…' : '正在加载首屏地形…')
+        }
+        initialSurfaceReadyCallback = applyInitialTerrain
+        attachInitialSurfaceTracking(currentViewer)
         attachTileProgress()
         startLoadTimeout()
         failureStore.registerRetry('basemap', retryBasemap)
         failureStore.registerRetry('terrain', retryTerrain)
-        void (async () => {
-          const terrainSetup = await terrainPromise
-          const current = viewer.value
-          if (!current || current.isDestroyed()) return
-          applyTerrain(terrainSetup.provider)
-          store.setActiveTerrainId(terrainSetup.id)
-          current.scene.globe.show = true
-          evaluateGlobeReady()
-          store.setGlobeLoadStage('正在加载地图瓦片…')
-        })()
+        void terrainPromise.then((resolvedTerrain) => {
+          terrainSetup = resolvedTerrain
+          applyInitialTerrain()
+        })
         const initialLayerId = store.selectedLayerId
         void (async () => {
           const result = await addLayer(initialLayerId, generation)
@@ -669,6 +735,10 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
   onBeforeUnmount(() => {
     generation += 1
     clearLoadTimeout()
+    detachInitialSurfaceTracking(viewer.value)
+    initialSurfaceReady = false
+    initialTerrainReady = false
+    initialSurfaceReadyCallback = undefined
     detachTileProgress()
     const currentViewer = viewer.value
     if (!currentViewer || currentViewer.isDestroyed()) return
