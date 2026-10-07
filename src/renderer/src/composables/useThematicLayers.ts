@@ -101,11 +101,46 @@ function arrowLabelAt(arrow: MonsoonArrow, offset = 3.4): [number, number] {
   ]
 }
 
-function migrationHeadSize(from: [number, number], to: [number, number]): number {
-  const latMidRad = (((from[1] + to[1]) / 2) * Math.PI) / 180
-  const cosLat = Math.max(0.25, Math.cos(latMidRad))
-  const length = Math.hypot((to[0] - from[0]) * cosLat, to[1] - from[1])
-  return Math.min(0.95, Math.max(0.45, length * 0.14))
+function migrationPathLength(path: Array<[number, number]>): number {
+  let length = 0
+  for (let index = 1; index < path.length; index += 1) {
+    const [fromLon, fromLat] = path[index - 1]
+    const [toLon, toLat] = path[index]
+    const cosLat = Math.max(0.25, Math.cos(((fromLat + toLat) * 0.5 * Math.PI) / 180))
+    length += Math.hypot((toLon - fromLon) * cosLat, toLat - fromLat)
+  }
+  return length
+}
+
+function migrationArrowHeadPositions(path: Array<[number, number]>, size: number): Cesium.Cartesian3[] {
+  const tip = pathPointAt(path, 1)
+  const cosLat = Math.max(0.25, Math.cos((tip.position[1] * Math.PI) / 180))
+  const [dirX, dirY] = tip.direction
+  const baseDistance = size * 1.35
+  const halfWidth = size * 0.62
+  const baseLon = tip.position[0] - (dirX * baseDistance) / cosLat
+  const baseLat = tip.position[1] - dirY * baseDistance
+  const perpX = -dirY
+  const perpY = dirX
+  return Cesium.Cartesian3.fromDegreesArray([
+    tip.position[0], tip.position[1],
+    baseLon + (perpX * halfWidth) / cosLat, baseLat + perpY * halfWidth,
+    baseLon - (perpX * halfWidth) / cosLat, baseLat - perpY * halfWidth
+  ])
+}
+
+function migrationHeadSize(path: Array<[number, number]>): number {
+  return Math.min(0.58, Math.max(0.22, migrationPathLength(path) * 0.035))
+}
+
+function migrationLabelAt(path: Array<[number, number]>, offset: number): [number, number] {
+  const point = pathPointAt(path, 0.52)
+  const cosLat = Math.max(0.25, Math.cos((point.position[1] * Math.PI) / 180))
+  const [dirX, dirY] = point.direction
+  return [
+    point.position[0] + (dirY * offset) / cosLat,
+    point.position[1] - dirX * offset
+  ]
 }
 
 export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void {
@@ -884,32 +919,56 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
 
   function buildMigrationFlows(dataSource: Cesium.CustomDataSource): void {
     const color = Cesium.Color.fromCssColorString(MIGRATION_FLOW_COLOR)
+    const casing = Cesium.Color.WHITE.withAlpha(0.9)
     const overview = migrationFacts[0] + migrationFacts[3]
     for (const flow of migrationFlows) {
+      const path = flow.path ?? [flow.from, flow.to]
       const label = `${flow.fromName}→${flow.toName}`
       const properties = new Cesium.PropertyBag({
         name: `人口迁移流向：${label}`,
         layerId: 'migration-flows',
         summary: `人口由${flow.fromName}流向${flow.toName}${flow.note ? `（${flow.note}）` : ''}。${overview}`
       })
+      const width = flow.weight === 'major' ? 3.5 : 2.5
       dataSource.entities.add({
         properties,
         polyline: {
-          positions: toCartesians([flow.from, flow.to]),
+          positions: toCartesians(path),
           clampToGround: true,
-          width: flow.weight === 'major' ? 3.5 : 2.5,
-          material: color.withAlpha(0.82)
+          width: width + 3,
+          material: casing
         }
       })
-      const headSize = migrationHeadSize(flow.from, flow.to)
+      dataSource.entities.add({
+        properties,
+        polyline: {
+          positions: toCartesians(path),
+          clampToGround: true,
+          width,
+          material: color.withAlpha(flow.weight === 'major' ? 0.9 : 0.72)
+        }
+      })
+      const headSize = migrationHeadSize(path)
       dataSource.entities.add({
         properties,
         polygon: {
-          hierarchy: new Cesium.PolygonHierarchy(arrowHeadPositions(flow.from, flow.to, headSize)),
-          material: color.withAlpha(0.95)
+          hierarchy: new Cesium.PolygonHierarchy(migrationArrowHeadPositions(path, headSize * 1.28)),
+          height: 0,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          material: casing
         }
       })
-      const [lon, lat] = arrowLabelAt({ from: flow.from, to: flow.to, label }, headSize + 0.55)
+      dataSource.entities.add({
+        properties,
+        polygon: {
+          hierarchy: new Cesium.PolygonHierarchy(migrationArrowHeadPositions(path, headSize)),
+          height: 0,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          material: color.withAlpha(0.96)
+        }
+      })
+      const primaryLabel = flow.weight === 'major' || flow.fromName === '甘肃' || flow.fromName === '黑龙江'
+      const [lon, lat] = migrationLabelAt(path, primaryLabel ? 0.9 : 0.75)
       dataSource.entities.add({
         properties,
         position: Cesium.Cartesian3.fromDegrees(lon, lat),
@@ -917,11 +976,12 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
           text: label,
           font: labelFont(12, 600),
           fillColor: color,
-          outlineColor: Cesium.Color.WHITE,
-          outlineWidth: 2,
-          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          showBackground: true,
+          backgroundColor: Cesium.Color.WHITE.withAlpha(0.78),
+          backgroundPadding: new Cesium.Cartesian2(6, 3),
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, primaryLabel ? 15000000 : 4200000)
         }
       })
     }

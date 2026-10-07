@@ -109,10 +109,13 @@ test('hu line comparison and endpoints are coherent', () => {
   assert.ok(tengchong.longitude < 100 && tengchong.latitude > 23 && tengchong.latitude < 27)
 })
 
-test('migration flows stay within China bounds', () => {
+test('migration flows stay within China bounds and expose complete paths', () => {
   assert.ok(migrationFlows.length >= 10)
   for (const flow of migrationFlows) {
-    for (const [longitude, latitude] of [flow.from, flow.to]) {
+    assert.ok(Array.isArray(flow.path) && flow.path.length >= 2)
+    assert.deepEqual(flow.path[0], flow.from)
+    assert.deepEqual(flow.path.at(-1), flow.to)
+    for (const [longitude, latitude] of flow.path) {
       assert.ok(longitude > 73 && longitude < 136 && latitude > 17 && latitude < 54)
     }
     assert.ok(['major', 'minor'].includes(flow.weight))

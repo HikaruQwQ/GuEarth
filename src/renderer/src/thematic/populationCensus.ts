@@ -185,25 +185,26 @@ export interface MigrationFlow {
   from: [number, number]
   toName: string
   to: [number, number]
+  path: Array<[number, number]>
   weight: 'major' | 'minor'
   note?: string
 }
 
 export const migrationFlows: MigrationFlow[] = [
-  { fromName: '湖南', from: [112.94, 28.23], toName: '广东', to: [113.26, 23.13], weight: 'major' },
-  { fromName: '广西', from: [108.37, 22.82], toName: '广东', to: [113.26, 23.13], weight: 'major' },
-  { fromName: '湖北', from: [114.31, 30.6], toName: '广东', to: [113.26, 23.13], weight: 'major' },
-  { fromName: '河南', from: [113.63, 34.75], toName: '广东', to: [113.26, 23.13], weight: 'minor' },
-  { fromName: '江西', from: [115.86, 28.68], toName: '广东', to: [113.26, 23.13], weight: 'minor' },
-  { fromName: '四川', from: [104.07, 30.57], toName: '广东', to: [113.26, 23.13], weight: 'minor' },
-  { fromName: '安徽', from: [117.28, 31.86], toName: '江苏', to: [118.8, 32.06], weight: 'major' },
-  { fromName: '安徽', from: [117.28, 31.86], toName: '上海', to: [121.47, 31.23], weight: 'major' },
-  { fromName: '河南', from: [113.63, 34.75], toName: '江苏', to: [118.8, 32.06], weight: 'minor' },
-  { fromName: '贵州', from: [106.63, 26.65], toName: '浙江', to: [120.15, 30.27], weight: 'minor' },
-  { fromName: '江西', from: [115.86, 28.68], toName: '浙江', to: [120.15, 30.27], weight: 'minor' },
-  { fromName: '四川', from: [104.07, 30.57], toName: '浙江', to: [120.15, 30.27], weight: 'minor' },
-  { fromName: '甘肃', from: [103.83, 36.06], toName: '新疆', to: [87.62, 43.79], weight: 'minor', note: '劳务与建设兵团流动' },
-  { fromName: '黑龙江', from: [126.53, 45.8], toName: '海南', to: [110.2, 20.04], weight: 'minor', note: '候鸟式养老流动' }
+  { fromName: '湖南', from: [112.94, 28.23], toName: '广东', to: [113.26, 23.13], path: [[112.94, 28.23], [113.55, 26.55], [113.92, 24.85], [113.26, 23.13]], weight: 'major' },
+  { fromName: '广西', from: [108.37, 22.82], toName: '广东', to: [113.26, 23.13], path: [[108.37, 22.82], [109.72, 24.55], [111.42, 24.42], [113.26, 23.13]], weight: 'major' },
+  { fromName: '湖北', from: [114.31, 30.6], toName: '广东', to: [113.26, 23.13], path: [[114.31, 30.6], [114.02, 28.25], [114.38, 25.72], [113.26, 23.13]], weight: 'major' },
+  { fromName: '河南', from: [113.63, 34.75], toName: '广东', to: [113.26, 23.13], path: [[113.63, 34.75], [114.72, 31.95], [115.78, 28.82], [114.72, 25.2], [113.26, 23.13]], weight: 'minor' },
+  { fromName: '江西', from: [115.86, 28.68], toName: '广东', to: [113.26, 23.13], path: [[115.86, 28.68], [115.42, 27.05], [114.88, 25.18], [113.26, 23.13]], weight: 'minor' },
+  { fromName: '四川', from: [104.07, 30.57], toName: '广东', to: [113.26, 23.13], path: [[104.07, 30.57], [106.62, 29.1], [109.2, 26.82], [111.28, 24.58], [113.26, 23.13]], weight: 'minor' },
+  { fromName: '安徽', from: [117.28, 31.86], toName: '江苏', to: [118.8, 32.06], path: [[117.28, 31.86], [117.82, 31.72], [118.8, 32.06]], weight: 'major' },
+  { fromName: '安徽', from: [117.28, 31.86], toName: '上海', to: [121.47, 31.23], path: [[117.28, 31.86], [118.62, 31.5], [120.02, 31.48], [121.47, 31.23]], weight: 'major' },
+  { fromName: '河南', from: [113.63, 34.75], toName: '江苏', to: [118.8, 32.06], path: [[113.63, 34.75], [115.08, 34.18], [116.72, 32.8], [118.8, 32.06]], weight: 'minor' },
+  { fromName: '贵州', from: [106.63, 26.65], toName: '浙江', to: [120.15, 30.27], path: [[106.63, 26.65], [108.62, 27.18], [112.88, 27.62], [116.35, 29.22], [120.15, 30.27]], weight: 'minor' },
+  { fromName: '江西', from: [115.86, 28.68], toName: '浙江', to: [120.15, 30.27], path: [[115.86, 28.68], [116.58, 28.92], [118.05, 29.18], [120.15, 30.27]], weight: 'minor' },
+  { fromName: '四川', from: [104.07, 30.57], toName: '浙江', to: [120.15, 30.27], path: [[104.07, 30.57], [106.42, 31.18], [110.52, 29.68], [115.02, 30.02], [120.15, 30.27]], weight: 'minor' },
+  { fromName: '甘肃', from: [103.83, 36.06], toName: '新疆', to: [87.62, 43.79], path: [[103.83, 36.06], [99.52, 38.72], [94.48, 41.02], [90.52, 42.76], [87.62, 43.79]], weight: 'minor', note: '劳务与建设兵团流动' },
+  { fromName: '黑龙江', from: [126.53, 45.8], toName: '海南', to: [110.2, 20.04], path: [[126.53, 45.8], [124.12, 39.52], [120.48, 33.5], [114.82, 27.02], [111.18, 23.02], [110.2, 20.04]], weight: 'minor', note: '候鸟式养老流动' }
 ]
 
 export const migrationFacts = [

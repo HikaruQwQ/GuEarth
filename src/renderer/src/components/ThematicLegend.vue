@@ -99,7 +99,9 @@ const densityEntries = densityBins.map((bin) => ({ label: bin.label, color: bin.
       <div class="legend-item"><span class="swatch swatch-dashed"></span><span>胡焕庸线（黑河—腾冲）</span></div>
     </div>
     <div v-if="store.overlays['migration-flows']" class="legend-group">
-      <div class="legend-item"><span class="swatch" style="background: #fa8c16"></span><span>省际迁移流向（宽=规模大）</span></div>
+      <div class="legend-item"><span class="swatch" style="height: 5px; background: #fa8c16"></span><span>主要迁移流向</span></div>
+      <div class="legend-item"><span class="swatch" style="height: 3px; background: rgba(250, 140, 22, 0.72)"></span><span>次要迁移流向</span></div>
+      <div class="legend-item legend-hint"><span>线宽表示规模，放大后显示次要路线标签</span></div>
     </div>
   </div>
 </template>
@@ -149,6 +151,12 @@ const densityEntries = densityBins.map((bin) => ({ label: bin.label, color: bin.
   color: rgba(0, 0, 0, 0.65);
   font-size: 12px;
   line-height: 20px;
+}
+
+.legend-hint {
+  align-items: flex-start;
+  color: rgba(0, 0, 0, 0.45);
+  line-height: 16px;
 }
 
 .swatch {
