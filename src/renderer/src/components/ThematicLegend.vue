@@ -4,12 +4,14 @@ import { useClimateStore } from '@renderer/stores/climate'
 import { climateZones } from '@renderer/thematic/climateZones'
 import { koppenZones } from '@renderer/thematic/koppenZones'
 import { windRampStops } from '@renderer/thematic/windField'
+import { densityBins } from '@renderer/thematic/populationCensus'
 
 const store = useClimateStore()
 
 const windGradient = computed(() => `linear-gradient(90deg, ${windRampStops.join(', ')})`)
 const zoneEntries = climateZones.map((zone) => ({ name: zone.name, color: zone.color }))
 const koppenEntries = koppenZones.map((zone) => ({ name: zone.name, color: zone.borderColor ?? zone.color }))
+const densityEntries = densityBins.map((bin) => ({ label: bin.label, color: bin.color }))
 </script>
 
 <template>
@@ -87,6 +89,20 @@ const koppenEntries = koppenZones.map((zone) => ({ name: zone.name, color: zone.
       <div class="legend-item"><span class="swatch" style="background: #fa8c16"></span><span>地震 M5.5+</span></div>
       <div class="legend-item"><span class="swatch" style="background: #f5222d"></span><span>地震 M7+</span></div>
     </div>
+    <div v-if="store.overlays['province-population']" class="legend-group">
+      <div class="legend-heading">人口密度（人/km²）</div>
+      <div v-for="bin in densityEntries" :key="bin.label" class="legend-item">
+        <span class="swatch" :style="{ background: bin.color }"></span><span>{{ bin.label }}</span>
+      </div>
+    </div>
+    <div v-if="store.overlays['hu-line']" class="legend-group">
+      <div class="legend-item"><span class="swatch swatch-dashed"></span><span>胡焕庸线（黑河—腾冲）</span></div>
+    </div>
+    <div v-if="store.overlays['migration-flows']" class="legend-group">
+      <div class="legend-item"><span class="swatch" style="height: 5px; background: #fa8c16"></span><span>主要迁移流向</span></div>
+      <div class="legend-item"><span class="swatch" style="height: 3px; background: rgba(250, 140, 22, 0.72)"></span><span>次要迁移流向</span></div>
+      <div class="legend-item legend-hint"><span>线宽表示规模，放大后显示次要路线标签</span></div>
+    </div>
   </div>
 </template>
 
@@ -121,6 +137,13 @@ const koppenEntries = koppenZones.map((zone) => ({ name: zone.name, color: zone.
   gap: 4px;
 }
 
+.legend-heading {
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 12px;
+  line-height: 20px;
+  font-weight: 600;
+}
+
 .legend-item {
   display: flex;
   align-items: center;
@@ -128,6 +151,12 @@ const koppenEntries = koppenZones.map((zone) => ({ name: zone.name, color: zone.
   color: rgba(0, 0, 0, 0.65);
   font-size: 12px;
   line-height: 20px;
+}
+
+.legend-hint {
+  align-items: flex-start;
+  color: rgba(0, 0, 0, 0.45);
+  line-height: 16px;
 }
 
 .swatch {

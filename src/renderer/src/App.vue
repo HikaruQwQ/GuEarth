@@ -17,6 +17,8 @@ import { useSolarStore } from '@renderer/stores/solar'
 import { useAtmosphereStore } from '@renderer/stores/atmosphere'
 import { useHydrologyStore } from '@renderer/stores/hydrology'
 import { useLandformStore } from '@renderer/stores/landform'
+import { usePopulationStore } from '@renderer/stores/population'
+import { registerPopulationTools } from '@renderer/ai/populationTools'
 import { useCesiumViewer } from '@renderer/composables/useCesiumViewer'
 import { useDrawing } from '@renderer/composables/useDrawing'
 import { collectStrings, parsePositions, registerAnnotationTools } from '@renderer/ai/annotationTools'
@@ -54,6 +56,8 @@ import LandformGuidePanel from '@renderer/components/LandformGuidePanel.vue'
 import ExogenicPanel from '@renderer/components/ExogenicPanel.vue'
 import EarthLayersPanel from '@renderer/components/EarthLayersPanel.vue'
 import TimezonePanel from '@renderer/components/TimezonePanel.vue'
+import PopulationPanel from '@renderer/components/PopulationPanel.vue'
+import HuLineOverlay from '@renderer/components/HuLineOverlay.vue'
 import ThematicLegend from '@renderer/components/ThematicLegend.vue'
 import FrontalCyclone from '@renderer/components/FrontalCyclone.vue'
 import ThematicInfoCard from '@renderer/components/ThematicInfoCard.vue'
@@ -98,8 +102,10 @@ const solarStore = useSolarStore()
 const atmosphereStore = useAtmosphereStore()
 const hydrologyStore = useHydrologyStore()
 const landformStore = useLandformStore()
+const populationStore = usePopulationStore()
 const { overlays: thematicOverlays } = storeToRefs(climateStore)
 useThematicLayers(viewer)
+registerPopulationTools()
 
 const drawingStore = useDrawingStore()
 const { activeTool, shapes, entries, selectedShapeId, saveError } = storeToRefs(drawingStore)
@@ -120,7 +126,7 @@ const selectedShape = computed(() => shapes.value.find((shape) => shape.id === s
 const levelSwitcherVisible = computed(() => isGlobeReady.value && camera.value.height < 5000000)
 const showGlobeLoading = computed(() => !isGlobeReady.value && !globeError.value)
 const isLabOpen = ref(false)
-const labActive = computed(() => climateStore.hasActiveOverlay || solarStore.active || solarStore.motionPanel !== null || atmosphereStore.panel !== null || hydrologyStore.panel !== null || landformStore.panel !== null || activeTool.value === 'timezone')
+const labActive = computed(() => climateStore.hasActiveOverlay || solarStore.active || solarStore.motionPanel !== null || atmosphereStore.panel !== null || hydrologyStore.panel !== null || landformStore.panel !== null || populationStore.panel !== null || activeTool.value === 'timezone')
 const drawHint = computed(() => {
   if (!activeTool.value) return ''
   if (activeTool.value === 'timezone') return '单击选取两个地点对比地方时 · Esc 退出'
@@ -444,6 +450,7 @@ aiStore.registerTool({
       atmosphereStore.setPanel(null)
       hydrologyStore.setPanel(null)
       landformStore.setPanel(null)
+      populationStore.setPanel(null)
       if (activeTool.value === 'timezone') drawingStore.setActiveTool(null)
       clearTimezone()
       return { status: 'ok', closed: true, message: '已关闭全部教学演示面板' }
@@ -1045,6 +1052,7 @@ function deleteSelectedShape(): void {
       <FrontalCyclone v-if="thematicOverlays['frontal-cyclone']" :viewer="viewer" />
       <TyphoonOverlay v-if="thematicOverlays['typhoon']" :viewer="viewer" />
       <WalkerCirculationOverlay v-if="thematicOverlays['enso']" :viewer="viewer" :phase="climateStore.ensoPhase" />
+      <HuLineOverlay v-if="thematicOverlays['hu-line']" :viewer="viewer" />
       <template v-if="!scenesStore.isPresenting">
       <GlobeToolbar
         :active-tool="activeTool"
@@ -1094,6 +1102,7 @@ function deleteSelectedShape(): void {
       <LandformGuidePanel v-if="landformStore.panel === 'landform-guide'" :viewer="viewer" @close="landformStore.setPanel(null)" />
       <ExogenicPanel v-if="landformStore.panel === 'exogenic'" :viewer="viewer" @close="landformStore.setPanel(null)" />
       <EarthLayersPanel v-if="landformStore.panel === 'earth-layers'" @close="landformStore.setPanel(null)" />
+      <PopulationPanel v-if="populationStore.panel === 'population'" @close="populationStore.setPanel(null)" />
       <TimezonePanel v-if="timezoneComparison" :comparison="timezoneComparison" @clear="clearTimezone" />
       <ThematicLegend />
       <ThematicInfoCard />

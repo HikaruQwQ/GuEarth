@@ -59,7 +59,7 @@ Core platform:
 | 4 | EOQ agent: provider-agnostic AI settings, streaming chat, tool-calling bridge | Done |
 | 5 | Packaging, auto-update stub, offline groundwork, performance | Pending |
 
-Teaching modules (人教版选择性必修一 mapping; thematic layers live in `src/renderer/src/thematic/`, registered in `useThematicLayers.ts`):
+Teaching modules (人教版高中地理 mapping; thematic layers live in `src/renderer/src/thematic/`, registered in `useThematicLayers.ts`):
 
 | Module | Scope | Status |
 | --- | --- | --- |
@@ -68,6 +68,9 @@ Teaching modules (人教版选择性必修一 mapping; thematic layers live in `
 | M3 | Landforms: plate boundaries + USGS earthquakes/volcanoes (dataset fetch + cache in main process), `explain_landform` tool, teaching tools unified into bottom-toolbar Lab card, fold-fault cross-section panel with real-site flyovers, river-landform panel (upper/middle/lower reaches + real terrain elevation profiles via `sampleTerrainMostDetailed`), landform guide panel (karst/yardang/glacial/coastal/loess site flyovers), exogenic-process chain panel, earth-interior layers cross-section panel | Done |
 | M4 | Ocean: ENSO phase layer (El Niño / La Niña SST anomaly + Walker circulation overlay + Niño3.4 box + phase panel), water-cycle animated panel with camera linkage, ocean temperature/salinity latitude profiles, tide & wave panel, river recharge & discharge panel, ocean-current + wind-belt linkage entry | Done |
 | M5 | Integrality/zonation: `find_peaks`, mountain vertical zonation profile, guided transect flights (`fly_transect`) | Planned |
+| M6 | Population (choropleth foundation, issue #39 Phase A): province GeoJSON served from `resources/geo/china-provinces.geojson` (vendored DataV GeoAtlas, GCJ-02, read via `datasets:provinces` IPC), province-level choropleth layer with census-binned coloring + click info cards, Hu line layer with east/west anchored overlay cards, migration-flow arrow layer, PopulationPanel (pyramid / urbanization / Hu-line tabs) + `BarChart` wrapper, `query_population` AI tool, `entries-human.json` knowledge file | Done |
+| M7 | Cities & towns: amap POI types/count/around expansion + `poi_statistics` tool, central-place verification panel, functional-zone anchored overlays, optional VIIRS night-lights WMTS imagery layer | Planned |
+| M8-M10 + far-term | Industry location, transport networks, environment & development (sea-level inundation), decision sandbox & Socratic agent (issue #39 Phase B/C) | Planned |
 
 ## Commands
 
