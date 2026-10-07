@@ -450,6 +450,7 @@ aiStore.registerTool({
       atmosphereStore.setPanel(null)
       hydrologyStore.setPanel(null)
       landformStore.setPanel(null)
+      populationStore.setPanel(null)
       if (activeTool.value === 'timezone') drawingStore.setActiveTool(null)
       clearTimezone()
       return { status: 'ok', closed: true, message: '已关闭全部教学演示面板' }

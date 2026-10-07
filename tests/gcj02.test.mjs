@@ -27,6 +27,18 @@ test('gcj02 to wgs84 shifts points by a few hundred meters inside China', () => 
   }
 })
 
+test('gcj02 offset matches the published algorithm at reference points', () => {
+  const referencePoints = [
+    { name: '北京', lon: 116.404, lat: 39.915, gcjLon: 116.41024, gcjLat: 39.9164 },
+    { name: '上海', lon: 121.4737, lat: 31.2304, gcjLon: 121.47822, gcjLat: 31.22846 }
+  ]
+  for (const point of referencePoints) {
+    const [gcjLon, gcjLat] = wgs84ToGcj02(point.lon, point.lat)
+    assert.ok(Math.abs(gcjLon - point.gcjLon) < 1e-4, `${point.name} gcj lon ${gcjLon.toFixed(5)} off ${point.gcjLon}`)
+    assert.ok(Math.abs(gcjLat - point.gcjLat) < 1e-4, `${point.name} gcj lat ${gcjLat.toFixed(5)} off ${point.gcjLat}`)
+  }
+})
+
 test('gcj02 to wgs84 recovers the original point through the forward transform', () => {
   for (const city of citiesGcj02) {
     const [gcjLon, gcjLat] = wgs84ToGcj02(city.lon, city.lat)

@@ -1,7 +1,7 @@
 const GCJ_ELLIPSE_A = 6378245
 const GCJ_ELLIPSE_EE = 0.00669342162296594323
-const GCJ_MAGIC_LAT = 105
-const GCJ_MAGIC_LON = 35
+const GCJ_MAGIC_LAT = 35
+const GCJ_MAGIC_LON = 105
 
 function offsetLat(lon: number, lat: number): number {
   let result = -100 + 2 * lon + 3 * lat + 0.2 * lat * lat + 0.1 * lon * lat + 0.2 * Math.sqrt(Math.abs(lon))

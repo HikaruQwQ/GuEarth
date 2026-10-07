@@ -984,10 +984,11 @@ function summarizeToolResult(content: string): string {
   if (typeof parsed.name === 'string' && parsed.name) return parsed.kind === 'point' ? `已添加标记「${parsed.name}」` : `已绘制「${parsed.name}」`
   if (typeof parsed.measurement === 'string' && parsed.measurement) return parsed.measurement
   if (typeof parsed.height === 'number') return `海拔 ${Math.round(parsed.height)} m`
+  if (parsed.province === '全国' && typeof parsed.populationWan === 'number' && typeof parsed.urbanizationPct === 'number') {
+    return `${parsed.province}：人口 ${parsed.populationWan} 万、城镇化 ${parsed.urbanizationPct}%`
+  }
   if (typeof parsed.densityPerKm2 === 'number' && typeof parsed.province === 'string') {
-    return parsed.province === '全国'
-      ? `${parsed.province}：人口 ${parsed.populationWan} 万、城镇化 ${parsed.urbanizationPct}%`
-      : `${parsed.province}：人口 ${parsed.populationWan} 万、密度约 ${parsed.densityPerKm2} 人/km²`
+    return `${parsed.province}：人口 ${parsed.populationWan} 万、密度约 ${parsed.densityPerKm2} 人/km²`
   }
   if (typeof parsed.longitude === 'number') return '已定位'
   return '完成'

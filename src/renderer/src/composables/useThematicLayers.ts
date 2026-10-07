@@ -934,7 +934,7 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
       })
       const lengthDeg = migrationPathLength(path)
       const arcHeight = Math.min(380000, Math.max(40000, lengthDeg * 22000))
-      const baseHeight = 8000
+      const baseHeight = 0
       const heights = path.map((_, index) => {
         const t = index / (path.length - 1)
         return baseHeight + arcHeight * Math.sin(Math.PI * t)
