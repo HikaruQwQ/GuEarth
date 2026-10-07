@@ -530,21 +530,48 @@ export const useAiStore = defineStore('ai', () => {
     }
   }
 
-  async function retryLast(): Promise<void> {
+  async function resendFrom(messageId: string, content?: string): Promise<void> {
     if (isStreaming.value) return
-    let errorIndex = -1
-    for (let index = messages.value.length - 1; index >= 0; index -= 1) {
-      const message = messages.value[index]
-      if (message.role === 'assistant' && message.status === 'error') {
-        errorIndex = index
+    const index = messages.value.findIndex((message) => message.id === messageId)
+    if (index < 0) return
+    const anchor = messages.value[index]
+    if (anchor.role !== 'user') return
+    const text = (content ?? anchor.content).trim()
+    if (!text) return
+    messages.value = messages.value.slice(0, index)
+    await send(text)
+  }
+
+  async function regenerate(messageId: string): Promise<void> {
+    if (isStreaming.value) return
+    const index = messages.value.findIndex((message) => message.id === messageId)
+    if (index < 0 || messages.value[index].role !== 'assistant') return
+    let userIndex = -1
+    for (let cursor = index; cursor >= 0; cursor -= 1) {
+      if (messages.value[cursor].role === 'user') {
+        userIndex = cursor
         break
       }
     }
-    if (errorIndex < 1) return
-    const question = messages.value[errorIndex - 1]
-    if (question.role !== 'user') return
-    messages.value = messages.value.slice(0, errorIndex - 1)
-    await send(question.content)
+    if (userIndex < 0) return
+    const question = messages.value[userIndex]
+    const text = question.content.trim()
+    if (!text) return
+    messages.value = messages.value.slice(0, userIndex)
+    await send(text)
+  }
+
+  async function retryLast(): Promise<void> {
+    if (isStreaming.value) return
+    for (let index = messages.value.length - 1; index >= 0; index -= 1) {
+      const message = messages.value[index]
+      if (message.role === 'assistant' && message.status === 'error') {
+        const question = messages.value[index - 1]
+        if (!question || question.role !== 'user') return
+        await regenerate(message.id)
+        return
+      }
+    }
   }
 
   async function compressContext(): Promise<void> {
@@ -622,7 +649,7 @@ export const useAiStore = defineStore('ai', () => {
 
   return {
     settings, messages, conversations, currentConversationId, isStreaming, isPanelOpen, isSettingsOpen, hydrated, contextStats, contextCompressionStatus, contextCompressionNotice, modelRetryNotice,
-    hydrate, registerTool, saveSettings, setSkipDeleteConversationConfirm, setMemoryEnabled, setActiveModel, send, stop, retryLast, compressContext, newConversation, openConversation, deleteConversation, persistConversation, setPanelOpen, setSettingsOpen,
+    hydrate, registerTool, saveSettings, setSkipDeleteConversationConfirm, setMemoryEnabled, setActiveModel, send, stop, resendFrom, regenerate, retryLast, compressContext, newConversation, openConversation, deleteConversation, persistConversation, setPanelOpen, setSettingsOpen,
     activeModelVisionEnabled
   }
 })

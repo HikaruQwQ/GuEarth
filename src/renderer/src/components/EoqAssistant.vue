@@ -3,8 +3,9 @@ import { computed, h, nextTick, onMounted, onUnmounted, reactive, ref, watch } f
 import { storeToRefs } from 'pinia'
 import MarkdownIt from 'markdown-it'
 import { Bubble, Sender, Suggestion } from 'ant-design-x-vue'
+import { Modal } from 'ant-design-vue'
 import type { VNode } from 'vue'
-import { CloseCircleOutlined, CloseOutlined, CompassOutlined, CompressOutlined, DeleteOutlined, HistoryOutlined, LeftOutlined, PlusOutlined, ReloadOutlined, RightOutlined, SettingOutlined, UpOutlined } from '@ant-design/icons-vue'
+import { CloseCircleOutlined, CloseOutlined, CompassOutlined, CompressOutlined, DeleteOutlined, EditOutlined, HistoryOutlined, LeftOutlined, PlusOutlined, ReloadOutlined, RightOutlined, SettingOutlined, UpOutlined } from '@ant-design/icons-vue'
 import { useAiStore, toolLabel, type ChatMessage, type ReasoningPart, type ToolStep } from '@renderer/stores/ai'
 import type { AiModelConfig, AiProviderConfig, StoredAiConversation } from '../../../preload'
 import ContextMeter from './ContextMeter.vue'
@@ -381,6 +382,73 @@ function handleCancel(): void {
   void store.stop()
 }
 
+const editingId = ref('')
+const editingDraft = ref('')
+
+function discardsFollowing(messageId: string): boolean {
+  const index = messages.value.findIndex((message) => message.id === messageId)
+  return index >= 0 && index < messages.value.length - 1
+}
+
+async function startEdit(message: ChatMessage): Promise<void> {
+  editingId.value = message.id
+  editingDraft.value = message.content
+  await nextTick()
+  document.querySelector<HTMLTextAreaElement>('.eoq-drawer .edit-box textarea')?.focus()
+}
+
+function cancelEdit(): void {
+  editingId.value = ''
+  editingDraft.value = ''
+}
+
+function confirmEdit(message: ChatMessage): void {
+  const text = editingDraft.value.trim()
+  if (!text) return
+  if (!discardsFollowing(message.id)) {
+    cancelEdit()
+    void store.resendFrom(message.id, text)
+    return
+  }
+  Modal.confirm({
+    title: '重新发送编辑后的提问？',
+    content: '此提问之后的对话内容将被丢弃。',
+    okText: '发送',
+    cancelText: '取消',
+    onOk: () => {
+      cancelEdit()
+      void store.resendFrom(message.id, text)
+    }
+  })
+}
+
+function handleEditKeydown(event: KeyboardEvent, message: ChatMessage): void {
+  if (event.isComposing || event.keyCode === 229) return
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
+    confirmEdit(message)
+    return
+  }
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    cancelEdit()
+  }
+}
+
+function handleRegenerate(message: ChatMessage): void {
+  if (!discardsFollowing(message.id)) {
+    void store.regenerate(message.id)
+    return
+  }
+  Modal.confirm({
+    title: '重新生成此回复？',
+    content: '此回复之后的对话内容将被丢弃。',
+    okText: '重新生成',
+    cancelText: '取消',
+    onOk: () => void store.regenerate(message.id)
+  })
+}
+
 watch(
   () => messages.value.map((message) => `${message.status}:${message.content.length}:${message.parts.map((part) => part.kind === 'reasoning' ? `r${part.text.length}` : part.kind === 'text' ? `t${part.text.length}` : `o${part.step.status}:${part.step.result.length}`).join('.')}`).join(','),
   async () => {
@@ -482,7 +550,26 @@ watch(currentConversationId, () => {
 
     <div v-else ref="listRef" class="chat-list">
       <template v-for="message in messages" :key="message.id">
-        <Bubble v-if="message.role === 'user'" placement="end" :content="message.content" />
+        <div v-if="message.role === 'user'" class="user-row">
+          <div v-if="editingId === message.id" class="edit-box">
+            <a-textarea
+              v-model:value="editingDraft"
+              :auto-size="{ minRows: 2, maxRows: 8 }"
+              aria-label="编辑提问"
+              @keydown="handleEditKeydown($event, message)"
+            />
+            <div class="edit-actions">
+              <a-button size="small" @click="cancelEdit">取消</a-button>
+              <a-button type="primary" size="small" :disabled="!editingDraft.trim()" @click="confirmEdit(message)">发送</a-button>
+            </div>
+          </div>
+          <template v-else>
+            <Bubble placement="end" :content="message.content" />
+            <div v-if="!isStreaming" class="message-actions">
+              <a-button type="text" size="small" class="action-btn" aria-label="编辑提问" @click="startEdit(message)"><EditOutlined />编辑</a-button>
+            </div>
+          </template>
+        </div>
         <div v-else class="assistant-block">
           <template v-for="(part, index) in message.parts" :key="`${message.id}-${index}`">
             <a-collapse
@@ -545,6 +632,9 @@ watch(currentConversationId, () => {
               <a-button type="text" size="small" :disabled="isStreaming" @click="void store.retryLast()"><ReloadOutlined />重试</a-button>
             </template>
           </a-alert>
+          <div v-if="!isStreaming && message.status === 'done'" class="message-actions">
+            <a-button type="text" size="small" class="action-btn" aria-label="重新生成" @click="handleRegenerate(message)"><ReloadOutlined />重新生成</a-button>
+          </div>
         </div>
       </template>
     </div>
@@ -643,6 +733,13 @@ h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28p
 .empty-hint{margin:0 0 8px;color:rgba(0,0,0,.45);font-size:12px;line-height:20px;text-align:center}
 .chat-list{flex:1;display:flex;flex-direction:column;gap:12px;overflow-y:auto;padding-right:4px}
 .assistant-block{display:flex;flex-direction:column;gap:8px;min-width:0}
+.user-row{display:flex;flex-direction:column;align-items:flex-end;gap:2px;min-width:0}
+.edit-box{display:flex;flex-direction:column;gap:8px;width:100%}
+.edit-actions{display:flex;justify-content:flex-end;gap:8px}
+.message-actions{display:flex;opacity:0;transition:opacity .2s ease}
+.user-row:hover .message-actions,.user-row:focus-within .message-actions,.assistant-block:hover .message-actions,.assistant-block:focus-within .message-actions{opacity:1}
+.action-btn{color:rgba(0,0,0,.45);font-size:12px;padding-inline:4px}
+.action-btn:hover{color:#1677ff}
 .reasoning-collapse,.tool-collapse{margin:-4px 0}
 .reasoning-collapse :deep(.ant-collapse-header),.tool-collapse :deep(.ant-collapse-header){padding:4px 0;color:rgba(0,0,0,.45);font-size:12px;line-height:20px}
 .reasoning-collapse :deep(.ant-collapse-content-box),.tool-collapse :deep(.ant-collapse-content-box){padding:4px 0 8px}
@@ -709,6 +806,7 @@ h2{margin:0;color:rgba(0,0,0,.88);font-size:20px;font-weight:600;line-height:28p
 @media (prefers-reduced-motion:reduce){
   .shimmer-text{animation:none;background:none;-webkit-background-clip:border-box;background-clip:border-box;color:rgba(0,0,0,.45)}
   .suggestion-fade-enter-active,.suggestion-fade-leave-active{transition:none}
+  .message-actions{transition:none}
 }
 </style>
 

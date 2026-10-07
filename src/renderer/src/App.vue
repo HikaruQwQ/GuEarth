@@ -6,7 +6,7 @@ import zhCN from 'ant-design-vue/es/locale/zh_CN'
 import { ReloadOutlined } from '@ant-design/icons-vue'
 import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
-import { useGlobeStore } from '@renderer/stores/globe'
+import { basemapCategories, providerCatalog, terrainCatalog, useGlobeStore } from '@renderer/stores/globe'
 import { useFailureStore } from '@renderer/stores/failure'
 import { useDrawingStore, type DrawnShape, type DrawTool } from '@renderer/stores/drawing'
 import { useAiStore } from '@renderer/stores/ai'
@@ -400,6 +400,147 @@ aiStore.registerTool({
         ? `已开启「${layer.name}」图层${args.month !== undefined ? `并设置月份为 ${climateStore.month} 月` : ''}；可在地球上点击图层要素查看成因`
         : `已关闭「${layer.name}」图层`
     }
+  }
+})
+
+const teachingPanelCatalog: { id: string; name: string; hint: string; open: () => void }[] = [
+  { id: 'solar-path', name: '太阳视运动轨迹', hint: '展示某地当日太阳视运动路径与高度角变化', open: () => solarStore.setMotionPanel('solar-path') },
+  { id: 'obliquity', name: '黄赤交角可调探究', hint: '调节黄赤交角观察直射点回归运动与五带划分的变化', open: () => solarStore.setMotionPanel('obliquity') },
+  { id: 'rotation-speed', name: '自转速度与周期', hint: '演示自转线速度随纬度的变化与恒星日、太阳日的差异', open: () => solarStore.setMotionPanel('rotation-speed') },
+  { id: 'circulation', name: '热力环流', hint: '播放海陆风、山谷风、城市热岛环流的动画', open: () => atmosphereStore.setPanel('circulation') },
+  { id: 'heating', name: '大气受热过程', hint: '演示大气削弱作用与温室保温效应（可切换昼夜与云量状态）', open: () => atmosphereStore.setPanel('heating') },
+  { id: 'layers', name: '大气垂直分层', hint: '展示气温随高度的垂直分布与各分层特征', open: () => atmosphereStore.setPanel('layers') },
+  { id: 'water-cycle', name: '水循环', hint: '播放海陆间水循环各环节的动画并联动地球视角', open: () => hydrologyStore.setPanel('water-cycle') },
+  { id: 'ocean-property', name: '海水温度与盐度', hint: '展示海水温度、盐度随纬度和深度的分布', open: () => hydrologyStore.setPanel('ocean-property') },
+  { id: 'tide', name: '潮汐与波浪', hint: '演示潮汐周期、大潮小潮与潮差', open: () => hydrologyStore.setPanel('tide') },
+  { id: 'water-bodies', name: '陆地水体与河流补给', hint: '演示河流补给类型与径流变化过程', open: () => hydrologyStore.setPanel('water-bodies') },
+  { id: 'fold-fault', name: '褶皱与断层', hint: '展示褶皱与断层岩层剖面，可实地飞往典型地点', open: () => landformStore.setPanel('fold-fault') },
+  { id: 'river', name: '河流地貌发育', hint: '讲解河流上中下游地貌并查看实测高程剖面', open: () => landformStore.setPanel('river') },
+  { id: 'landform-guide', name: '典型地貌识别', hint: '按喀斯特、雅丹、冰川、海岸、黄土等类型实地飞行导览', open: () => landformStore.setPanel('landform-guide') },
+  { id: 'exogenic', name: '外力作用过程', hint: '演示风化、侵蚀、搬运、堆积的外力作用链条', open: () => landformStore.setPanel('exogenic') },
+  { id: 'earth-layers', name: '地球的圈层结构', hint: '展示地球内部圈层划分剖面', open: () => landformStore.setPanel('earth-layers') },
+  {
+    id: 'timezone-compare',
+    name: '地方时对比',
+    hint: '已进入地方时点选模式，请提示用户在地球上依次单击两个地点，出现「地方时对比」面板后即可讲解两地时差；按 Esc 退出点选模式',
+    open: () => drawingStore.setActiveTool('timezone')
+  }
+]
+
+aiStore.registerTool({
+  label: '打开教学面板',
+  definition: {
+    name: 'open_panel',
+    description: '打开教学演示面板配合讲解：热力环流、大气受热过程、大气垂直分层、水循环、海水温度与盐度、潮汐与波浪、陆地水体与河流补给、褶皱与断层、河流地貌发育、典型地貌识别、外力作用过程、地球的圈层结构、太阳视运动轨迹、黄赤交角可调探究、自转速度与周期、地方时对比。close 为 true 时关闭全部教学面板。',
+    parameters: {
+      type: 'object',
+      properties: {
+        panelId: {
+          type: 'string',
+          enum: teachingPanelCatalog.map((panel) => panel.id),
+          description: '面板 id：' + teachingPanelCatalog.map((panel) => `${panel.id}（${panel.name}）`).join('、')
+        },
+        close: { type: 'boolean', description: 'true 时关闭全部教学面板并退出地方时点选模式，忽略 panelId' }
+      }
+    }
+  },
+  execute: async (args) => {
+    if (args.close === true) {
+      solarStore.setMotionPanel(null)
+      atmosphereStore.setPanel(null)
+      hydrologyStore.setPanel(null)
+      landformStore.setPanel(null)
+      if (activeTool.value === 'timezone') drawingStore.setActiveTool(null)
+      clearTimezone()
+      return { status: 'ok', closed: true, message: '已关闭全部教学演示面板' }
+    }
+    const panel = teachingPanelCatalog.find((item) => item.id === args.panelId)
+    if (!panel) return { error: `未知面板 ${String(args.panelId)}，可用面板：${teachingPanelCatalog.map((item) => `${item.id}（${item.name}）`).join('、')}` }
+    panel.open()
+    return { status: 'ok', panelId: panel.id, name: panel.name, message: `已打开「${panel.name}」面板：${panel.hint}` }
+  }
+})
+
+const basemapChoices = basemapCategories
+  .map((category) => providerCatalog.find((provider) => provider.id === category.providerIds[0]))
+  .filter((provider): provider is (typeof providerCatalog)[number] => Boolean(provider))
+
+aiStore.registerTool({
+  label: '切换底图',
+  definition: {
+    name: 'set_basemap',
+    description: '切换地球底图样式：道路底图看城镇与区位、卫星影像看真实地貌与土地利用、地形晕渲看地势起伏与山脉走向，用于配合讲解更换地图样式。',
+    parameters: {
+      type: 'object',
+      properties: {
+        basemapId: {
+          type: 'string',
+          enum: basemapChoices.map((provider) => provider.id),
+          description: '底图 id：' + basemapChoices.map((provider) => `${provider.id}（${provider.name}，${provider.description}）`).join('、')
+        }
+      },
+      required: ['basemapId']
+    }
+  },
+  execute: async (args) => {
+    const basemap = basemapChoices.find((provider) => provider.id === args.basemapId)
+    if (!basemap) return { error: `未知底图 ${String(args.basemapId)}，可用底图：${basemapChoices.map((provider) => `${provider.id}（${provider.name}）`).join('、')}` }
+    if (store.selectedLayerId === basemap.id) return { status: 'ok', basemapId: basemap.id, name: basemap.name, message: `当前已是「${basemap.name}」底图` }
+    switchBasemap(basemap.id)
+    return { status: 'ok', basemapId: basemap.id, name: basemap.name, message: `已切换到「${basemap.name}」底图（${basemap.description}）` }
+  }
+})
+
+aiStore.registerTool({
+  label: '地形设置',
+  definition: {
+    name: 'set_terrain',
+    description: '设置地球地形渲染：切换地形数据源、调整垂直夸张倍数、开关地形太阳光照。讲山地、褶皱、河谷等起伏地貌时夸大垂直比例观察更直观，讲完建议恢复正常比例。',
+    parameters: {
+      type: 'object',
+      properties: {
+        terrainId: {
+          type: 'string',
+          enum: terrainCatalog.map((terrain) => terrain.id),
+          description: '地形数据源：' + terrainCatalog.map((terrain) => `${terrain.id}（${terrain.name}，${terrain.description}）`).join('、')
+        },
+        exaggeration: { type: 'number', description: '垂直夸张倍数（1-5）：1 为真实比例，讲山系褶皱、峡谷下切可用 3-5' },
+        lighting: { type: 'boolean', description: '地形太阳光照开关，开启后山脉有明暗立体感' }
+      }
+    }
+  },
+  execute: async (args) => {
+    let terrain: (typeof terrainCatalog)[number] | undefined
+    if (args.terrainId !== undefined) {
+      terrain = terrainCatalog.find((item) => item.id === args.terrainId)
+      if (!terrain) return { error: `未知地形 ${String(args.terrainId)}，可用地形：${terrainCatalog.map((item) => `${item.id}（${item.name}）`).join('、')}` }
+    }
+    let exaggeration: number | undefined
+    if (args.exaggeration !== undefined) {
+      const value = Number(args.exaggeration)
+      if (!Number.isFinite(value) || value < 1 || value > 5) return { error: 'exaggeration 需为 1-5 的数字' }
+      exaggeration = Math.round(value * 10) / 10
+    }
+    let lighting: boolean | undefined
+    if (args.lighting !== undefined) {
+      if (typeof args.lighting !== 'boolean') return { error: 'lighting 需为布尔值' }
+      lighting = args.lighting
+    }
+    if (!terrain && exaggeration === undefined && lighting === undefined) return { error: '请至少提供 terrainId、exaggeration 或 lighting 之一' }
+    const applied: string[] = []
+    if (terrain) {
+      setTerrain(terrain.id)
+      applied.push(`地形切换为「${terrain.name}」`)
+    }
+    if (exaggeration !== undefined) {
+      setTerrainExaggeration(exaggeration)
+      applied.push(`垂直夸张 ${store.terrainExaggeration}×`)
+    }
+    if (lighting !== undefined) {
+      setTerrainLighting(lighting)
+      applied.push(`地形光照已${lighting ? '开启' : '关闭'}`)
+    }
+    return { status: 'ok', terrainId: terrain?.id, exaggeration: store.terrainExaggeration, lighting: store.terrainLighting, message: applied.join('，') }
   }
 })
 
