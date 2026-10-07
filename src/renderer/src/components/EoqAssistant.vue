@@ -311,6 +311,7 @@ onMounted(() => {
 onUnmounted(() => {
   stopRotate()
   stopDrawerResize()
+  if (scrollFrame !== undefined) cancelAnimationFrame(scrollFrame)
   window.removeEventListener('resize', handleViewportResize)
 })
 
@@ -455,18 +456,39 @@ function handleRegenerate(message: ChatMessage): void {
   })
 }
 
+let scrollFrame: number | undefined
+let scrollQueued = false
+
+function scheduleAssistantScroll(): void {
+  if (scrollQueued) return
+  scrollQueued = true
+  void nextTick(() => {
+    scrollQueued = false
+    if (scrollFrame !== undefined) cancelAnimationFrame(scrollFrame)
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = undefined
+      listRef.value?.scrollTo({ top: listRef.value.scrollHeight })
+      if (!listRef.value) return
+      for (const element of listRef.value.querySelectorAll<HTMLElement>('.reasoning-text')) element.scrollTop = element.scrollHeight
+    })
+  })
+}
+
 watch(
   () => {
     const message = messages.value[messages.value.length - 1]
     if (!message) return ''
-    return `${message.id}:${message.status}:${message.content.length}:${message.parts.map((part) => part.kind === 'reasoning' ? `r${part.text.length}` : part.kind === 'text' ? `t${part.text.length}` : `o${part.step.status}:${part.step.result.length}`).join('.')}`
+    const part = message.parts[message.parts.length - 1]
+    const partKey = !part
+      ? ''
+      : part.kind === 'reasoning'
+        ? `r${part.text.length}`
+        : part.kind === 'text'
+          ? `t${part.text.length}`
+          : `o${part.step.status}:${part.step.result.length}`
+    return `${message.id}:${message.status}:${message.content.length}:${partKey}`
   },
-  async () => {
-    await nextTick()
-    listRef.value?.scrollTo({ top: listRef.value.scrollHeight })
-    if (!listRef.value) return
-    for (const element of listRef.value.querySelectorAll<HTMLElement>('.reasoning-text')) element.scrollTop = element.scrollHeight
-  }
+  scheduleAssistantScroll
 )
 
 watch(
