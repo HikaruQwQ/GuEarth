@@ -46,10 +46,3 @@ export function gcj02ToWgs84(lon: number, lat: number): [number, number] {
   }
   return [wgsLon, wgsLat]
 }
-
-export function gcj02RingToWgs84(ring: number[][]): number[][] {
-  return ring.map((point) => {
-    const [lon, lat] = gcj02ToWgs84(point[0], point[1])
-    return [lon, lat]
-  })
-}
