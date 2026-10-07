@@ -219,3 +219,55 @@ export const migrationFacts = [
   '河南、安徽、四川、贵州、广西等为主要人口流出省',
   '迁移主线:由中西部内陆流向东部与南部沿海,由乡村流向城镇,由欠发达地区流向发达地区'
 ]
+
+export function smoothMigrationPath(points: Array<[number, number]>, samplesPerSegment = 12): Array<[number, number]> {
+  if (points.length < 3) return [...points]
+  const padded = [points[0], ...points, points[points.length - 1]]
+  const result: Array<[number, number]> = []
+  for (let i = 0; i < padded.length - 3; i += 1) {
+    const p0 = padded[i]
+    const p1 = padded[i + 1]
+    const p2 = padded[i + 2]
+    const p3 = padded[i + 3]
+    for (let j = 0; j < samplesPerSegment; j += 1) {
+      const t = j / samplesPerSegment
+      const t2 = t * t
+      const t3 = t2 * t
+      result.push([
+        0.5 * (2 * p1[0] + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3),
+        0.5 * (2 * p1[1] + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3)
+      ])
+    }
+  }
+  result.push(points[points.length - 1])
+  return result
+}
+
+export function fanMigrationEndpoints(flows: MigrationFlow[], stepDeg = 0.9): Map<MigrationFlow, [number, number]> {
+  const groups = new Map<string, MigrationFlow[]>()
+  for (const flow of flows) {
+    const group = groups.get(flow.toName) ?? []
+    group.push(flow)
+    groups.set(flow.toName, group)
+  }
+  const endpoints = new Map<MigrationFlow, [number, number]>()
+  for (const group of groups.values()) {
+    const sorted = [...group].sort((a, b) => a.fromName.localeCompare(b.fromName))
+    sorted.forEach((flow, index) => {
+      if (sorted.length === 1) {
+        endpoints.set(flow, flow.to)
+        return
+      }
+      const path = flow.path ?? [flow.from, flow.to]
+      const [prevLon, prevLat] = path[path.length - 2]
+      const [tipLon, tipLat] = flow.to
+      const cosLat = Math.max(0.25, Math.cos((tipLat * Math.PI) / 180))
+      const dx = (tipLon - prevLon) * cosLat
+      const dy = tipLat - prevLat
+      const norm = Math.hypot(dx, dy) || 1
+      const offset = (index - (sorted.length - 1) / 2) * stepDeg
+      endpoints.set(flow, [tipLon + ((-dy / norm) * offset) / cosLat, tipLat + (dx / norm) * offset])
+    })
+  }
+  return endpoints
+}
