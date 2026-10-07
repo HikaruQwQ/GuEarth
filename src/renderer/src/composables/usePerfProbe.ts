@@ -1,3 +1,4 @@
+import { Cartesian2 } from 'cesium'
 import type { ShallowRef } from 'vue'
 import type * as Cesium from 'cesium'
 
@@ -8,6 +9,18 @@ export function usePerfProbe(viewer: ShallowRef<Cesium.Viewer | undefined>): voi
   const marks = new Map<string, number>()
   let lastStage = ''
   let sawPendingTiles = false
+
+  function hasVisibleSurface(current: Cesium.Viewer): boolean {
+    const canvas = current.scene.canvas
+    if (canvas.clientWidth < 2 || canvas.clientHeight < 2) return false
+    const ray = current.camera.getPickRay(new Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2))
+    if (!ray) return false
+    try {
+      return current.scene.globe.pick(ray, current.scene) !== undefined
+    } catch {
+      return false
+    }
+  }
 
   function mark(name: string): void {
     if (marks.has(name)) return
@@ -30,7 +43,7 @@ export function usePerfProbe(viewer: ShallowRef<Cesium.Viewer | undefined>): voi
       mark('viewer-created')
       if (current.scene.globe.show) mark('globe-shown')
       const centerHeight = current.scene.globe.getHeight(current.camera.positionCartographic)
-      if (!marks.has('surface-visible') && centerHeight !== undefined) mark('surface-visible')
+      if (!marks.has('surface-visible') && hasVisibleSurface(current)) mark('surface-visible')
       if (current.terrainProvider.constructor.name !== 'EllipsoidTerrainProvider') {
         if (!marks.has('terrain-provider-active')) mark('terrain-provider-active')
         if (!marks.has('terrain-elevation-available') && centerHeight !== undefined && Math.abs(centerHeight) > 1) mark('terrain-elevation-available')

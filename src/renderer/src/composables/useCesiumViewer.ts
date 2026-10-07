@@ -74,6 +74,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
   let initialSurfaceCheckTimer: number | undefined
   let initialSurfaceReady = false
   let initialTerrainReady = false
+  let initialImageryReady = false
   let initialSurfaceReadyCallback: (() => void) | undefined
   let initialSurfaceRenderListener: (() => void) | undefined
   let tileProgressListener: ((pending: number) => void) | undefined
@@ -384,6 +385,38 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     store.setGlobeLoadTimedOut(false)
   }
 
+  const TERRAIN_READY_STATE = 6
+
+  function hasVisibleGlobeSurface(currentViewer: Cesium.Viewer): boolean {
+    const canvas = currentViewer.scene.canvas
+    if (canvas.clientWidth < 2 || canvas.clientHeight < 2) return false
+    const center = new Cesium.Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2)
+    const ray = currentViewer.camera.getPickRay(center)
+    if (!ray) return false
+    try {
+      return currentViewer.scene.globe.pick(ray, currentViewer.scene) !== undefined
+    } catch {
+      return false
+    }
+  }
+
+  function hasRenderedInitialSurface(currentViewer: Cesium.Viewer): { terrain: boolean; imagery: boolean } {
+    if (!hasVisibleGlobeSurface(currentViewer)) return { terrain: false, imagery: false }
+    const surface = (currentViewer.scene.globe as unknown as { _surface?: { _tilesToRender?: Array<{ data?: { renderedMesh?: unknown; terrainState?: number; imagery?: Array<{ readyImagery?: { imageryLayer?: Cesium.ImageryLayer; texture?: unknown } }> } }> } })._surface
+    const tiles = surface?._tilesToRender ?? []
+    const activeLayer = imageryLayers.get(store.selectedLayerId)
+    let terrain = false
+    let imagery = false
+    for (const tile of tiles) {
+      const data = tile.data
+      if (!data?.renderedMesh || data.terrainState !== TERRAIN_READY_STATE) continue
+      terrain = true
+      if (activeLayer?.show && data.imagery?.some((item) => item.readyImagery?.imageryLayer === activeLayer && Boolean(item.readyImagery.texture))) imagery = true
+      if (terrain && imagery) break
+    }
+    return { terrain, imagery }
+  }
+
   function detachInitialSurfaceTracking(currentViewer?: Cesium.Viewer): void {
     if (initialSurfaceCheckTimer !== undefined) {
       window.clearTimeout(initialSurfaceCheckTimer)
@@ -397,33 +430,44 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
 
   function attachInitialSurfaceTracking(currentViewer: Cesium.Viewer): void {
     initialSurfaceReady = false
+    initialTerrainReady = false
+    initialImageryReady = false
     const listener = (): void => {
       if (currentViewer.isDestroyed()) {
         detachInitialSurfaceTracking()
         return
       }
-      const height = currentViewer.scene.globe.getHeight(currentViewer.camera.positionCartographic)
-      if (!initialSurfaceReady && height !== undefined) {
+      const rendered = hasRenderedInitialSurface(currentViewer)
+      if (!initialSurfaceReady && rendered.terrain) {
         initialSurfaceReady = true
         const callback = initialSurfaceReadyCallback
         initialSurfaceReadyCallback = undefined
         callback?.()
         return
       }
-      const providerIsEllipsoid = currentViewer.terrainProvider.constructor.name === 'EllipsoidTerrainProvider'
-      if (providerIsEllipsoid) return
-      if (height === undefined) {
-        if (initialSurfaceCheckTimer === undefined) {
-          initialSurfaceCheckTimer = window.setTimeout(() => {
-            initialSurfaceCheckTimer = undefined
-            if (!currentViewer.isDestroyed()) currentViewer.scene.requestRender()
-          }, 250)
+      if (currentViewer.terrainProvider.constructor.name === 'EllipsoidTerrainProvider') {
+        if (!initialTerrainReady) return
+        if (rendered.imagery) initialImageryReady = true
+        if (initialImageryReady) {
+          detachInitialSurfaceTracking(currentViewer)
+          evaluateGlobeReady()
+          return
         }
-        return
+      } else {
+        if (rendered.terrain) initialTerrainReady = true
+        if (rendered.imagery) initialImageryReady = true
+        if (initialTerrainReady && initialImageryReady) {
+          detachInitialSurfaceTracking(currentViewer)
+          evaluateGlobeReady()
+          return
+        }
       }
-      initialTerrainReady = true
-      detachInitialSurfaceTracking(currentViewer)
-      evaluateGlobeReady()
+      if (initialSurfaceCheckTimer === undefined) {
+        initialSurfaceCheckTimer = window.setTimeout(() => {
+          initialSurfaceCheckTimer = undefined
+          if (!currentViewer.isDestroyed()) currentViewer.scene.requestRender()
+        }, 250)
+      }
     }
     initialSurfaceRenderListener = listener
     currentViewer.scene.postRender.addEventListener(listener)
@@ -434,7 +478,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
     const currentViewer = viewer.value
     if (!currentViewer || currentViewer.isDestroyed()) return
     if (store.isGlobeReady) return
-    if (!initialTerrainReady || !currentViewer.scene.globe.show) return
+    if (!initialTerrainReady || !initialImageryReady || !currentViewer.scene.globe.show) return
     if (imageryLayers.size === 0) return
     clearLoadTimeout()
     store.setGlobeReady(true)
@@ -690,7 +734,6 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
           store.setActiveTerrainId(terrainSetup.id)
           if (terrainSetup.id === 'ellipsoid') {
             initialTerrainReady = true
-            detachInitialSurfaceTracking(activeViewer)
             evaluateGlobeReady()
           }
           currentViewer.scene.requestRender()
