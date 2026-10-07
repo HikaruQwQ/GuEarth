@@ -988,7 +988,8 @@ function summarizeToolResult(content: string): string {
     return `${parsed.province}：人口 ${parsed.populationWan} 万、城镇化 ${parsed.urbanizationPct}%`
   }
   if (typeof parsed.densityPerKm2 === 'number' && typeof parsed.province === 'string') {
-    return `${parsed.province}：人口 ${parsed.populationWan} 万、密度约 ${parsed.densityPerKm2} 人/km²`
+    const population = typeof parsed.populationWan === 'number' ? `人口 ${parsed.populationWan} 万、` : ''
+    return `${parsed.province}：${population}密度约 ${parsed.densityPerKm2} 人/km²`
   }
   if (typeof parsed.longitude === 'number') return '已定位'
   return '完成'
