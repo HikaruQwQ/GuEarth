@@ -77,6 +77,7 @@ export function usePerfProbe(viewer: ShallowRef<Cesium.Viewer | undefined>): voi
     })
     window.setTimeout(() => {
       off()
+      if (current.isDestroyed()) return
       const timeline = [...marks.entries()].map(([name, at]) => `${name}@${at.toFixed(0)}`).join(' ')
       console.log(`[perf] ${label} fps=${(frames / SAMPLE_SECONDS).toFixed(1)} timeline: ${timeline}`)
       const sources = current.dataSources

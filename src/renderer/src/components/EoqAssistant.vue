@@ -16,6 +16,8 @@ const { messages, conversations, currentConversationId, isStreaming, isPanelOpen
 
 const draft = ref('')
 const listRef = ref<HTMLDivElement>()
+let scrollFrame: number | undefined
+let scrollQueued = false
 const historyOpen = ref(false)
 const deleteConfirmOpen = ref(false)
 const deleteTarget = ref<StoredAiConversation | null>(null)
@@ -311,7 +313,10 @@ onMounted(() => {
 onUnmounted(() => {
   stopRotate()
   stopDrawerResize()
-  if (scrollFrame !== undefined) cancelAnimationFrame(scrollFrame)
+  if (scrollFrame !== undefined) {
+    cancelAnimationFrame(scrollFrame)
+    scrollFrame = undefined
+  }
   window.removeEventListener('resize', handleViewportResize)
 })
 
@@ -455,9 +460,6 @@ function handleRegenerate(message: ChatMessage): void {
     onOk: () => void store.regenerate(message.id)
   })
 }
-
-let scrollFrame: number | undefined
-let scrollQueued = false
 
 function scheduleAssistantScroll(): void {
   if (scrollQueued) return
