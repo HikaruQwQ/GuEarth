@@ -35,6 +35,7 @@ export function registerPopulationTools(): void {
           populationWan: national.populationWan,
           mainland31Wan: 140978,
           urbanizationPct: latestUrbanization[1],
+          urbanizationYear: latestUrbanization[0],
           note: `全国人口 ${national.populationWan} 万为大陆口径（含现役军人）；大陆31个省区市合计约140978万。城镇化率 ${latestUrbanization[1]}% 为常住人口口径（${latestUrbanization[0]} 年）。`
         }
       }
