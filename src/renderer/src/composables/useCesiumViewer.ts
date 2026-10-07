@@ -726,7 +726,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
         let terrainSetup: { provider: Cesium.TerrainProvider; id: string } | undefined
         let terrainApplied = false
         const applyInitialTerrain = (): void => {
-          if (!initialSurfaceReady || !terrainSetup || terrainApplied) return
+          if (!terrainSetup || terrainApplied) return
           const activeViewer = viewer.value
           if (!activeViewer || activeViewer.isDestroyed()) return
           terrainApplied = true
@@ -739,7 +739,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
           currentViewer.scene.requestRender()
           store.setGlobeLoadStage(terrainSetup.id === 'ellipsoid' ? '正在加载地图瓦片…' : '正在加载首屏地形…')
         }
-        initialSurfaceReadyCallback = applyInitialTerrain
+        initialSurfaceReadyCallback = undefined
         attachInitialSurfaceTracking(currentViewer)
         attachTileProgress()
         startLoadTimeout()
