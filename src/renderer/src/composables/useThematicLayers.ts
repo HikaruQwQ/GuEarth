@@ -939,36 +939,16 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
         const t = index / (path.length - 1)
         return baseHeight + arcHeight * Math.sin(Math.PI * t)
       })
-      const positions = Cesium.Cartesian3.fromDegreesArrayHeights(path.flatMap((point, index) => [point[0], point[1], heights[index]]))
-      const width = flow.weight === 'major' ? 3.5 : 2.2
       dataSource.entities.add({
         properties,
         polyline: {
-          positions,
+          positions: Cesium.Cartesian3.fromDegreesArrayHeights(path.flatMap((point, index) => [point[0], point[1], heights[index]])),
           arcType: Cesium.ArcType.NONE,
-          width: width + 2,
-          material: Cesium.Color.WHITE
-        }
-      })
-      dataSource.entities.add({
-        properties,
-        polyline: {
-          positions,
-          arcType: Cesium.ArcType.NONE,
-          width,
+          width: flow.weight === 'major' ? 3.5 : 2.2,
           material: color.withAlpha(flow.weight === 'major' ? 0.9 : 0.72)
         }
       })
       const headSize = migrationHeadSize(path)
-      dataSource.entities.add({
-        properties,
-        polygon: {
-          hierarchy: new Cesium.PolygonHierarchy(migrationArrowHeadPositions(path, headSize * 1.3)),
-          height: 0,
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-          material: Cesium.Color.WHITE
-        }
-      })
       dataSource.entities.add({
         properties,
         polygon: {
