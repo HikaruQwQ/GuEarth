@@ -1,6 +1,6 @@
 import { useAiStore } from '@renderer/stores/ai'
 import {
-  POPULATION_CENSUS_YEAR, densityOf, densityRank, nationalPopulation, populationRank,
+  POPULATION_CENSUS_YEAR, densityOf, densityRank, huSideLabelOf, nationalPopulation, populationRank,
   provincePopulation, provinceSummary, urbanizationSeries
 } from '@renderer/thematic/populationCensus'
 
@@ -51,7 +51,7 @@ export function registerPopulationTools(): void {
         densityRank: densityRank(province.name),
         urbanizationPct: province.urbanizationPct,
         huSide: province.huSide,
-        huSideLabel: province.huSide === 'east' ? '胡焕庸线以东' : '胡焕庸线以西',
+        huSideLabel: huSideLabelOf(province.huSide),
         summary: provinceSummary(province.name)
       }
     }

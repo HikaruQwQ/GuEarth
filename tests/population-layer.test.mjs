@@ -45,11 +45,13 @@ test('province census table is complete and internally consistent', () => {
     assert.ok(province.populationWan > 0)
     assert.ok(province.areaWanKm2 > 0)
     assert.ok(province.urbanizationPct === null || (province.urbanizationPct > 0 && province.urbanizationPct <= 100))
-    assert.ok(['east', 'west'].includes(province.huSide))
+    assert.ok(['east', 'west', 'cross'].includes(province.huSide))
   }
   const westNames = ['内蒙古自治区', '宁夏回族自治区', '甘肃省', '青海省', '新疆维吾尔自治区', '西藏自治区']
+  const crossNames = ['四川省', '云南省', '陕西省']
   for (const province of provincePopulation) {
     assert.equal(westNames.includes(province.name), province.huSide === 'west')
+    assert.equal(crossNames.includes(province.name), province.huSide === 'cross')
   }
 })
 

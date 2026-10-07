@@ -1002,7 +1002,7 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
       document = await window.guEarth.datasets.getProvinces()
     } catch {
       if (sources.get('province-population') === dataSource) {
-        failureStore.reportFailure({ scope: 'dataset', message: '省级行政区划数据加载失败，人口密度图层不完整', detail: '重启应用可重新加载内置数据', retryable: true })
+        failureStore.reportFailure({ scope: 'dataset', message: '省级行政区划数据加载失败，人口密度图层不完整', detail: '重启应用可重新加载内置数据', retryable: false })
       }
       return
     }

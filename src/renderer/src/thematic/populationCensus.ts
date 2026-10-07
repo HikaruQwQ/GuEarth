@@ -3,7 +3,7 @@ export interface ProvincePopulation {
   populationWan: number
   areaWanKm2: number
   urbanizationPct: number | null
-  huSide: 'east' | 'west'
+  huSide: 'east' | 'west' | 'cross'
   note: string
 }
 
@@ -14,18 +14,18 @@ export const provincePopulation: ProvincePopulation[] = [
   { name: '山东省', populationWan: 10152.75, areaWanKm2: 15.79, urbanizationPct: 63.94, huSide: 'east', note: '平原广阔、农业开发历史悠久,人口大省' },
   { name: '河南省', populationWan: 9936.55, areaWanKm2: 16.7, urbanizationPct: 55.43, huSide: 'east', note: '黄淮平原农业发达,人口大省,劳务输出多' },
   { name: '江苏省', populationWan: 8474.8, areaWanKm2: 10.72, urbanizationPct: 73.44, huSide: 'east', note: '地势平坦、水网密布,工农业俱发达' },
-  { name: '四川省', populationWan: 8367.49, areaWanKm2: 48.6, urbanizationPct: 56.73, huSide: 'east', note: '人口集中于成都平原,西部山地高原稀疏' },
+  { name: '四川省', populationWan: 8367.49, areaWanKm2: 48.6, urbanizationPct: 56.73, huSide: 'cross', note: '人口集中于成都平原,西部山地高原稀疏' },
   { name: '河北省', populationWan: 7461.02, areaWanKm2: 18.88, urbanizationPct: 60.07, huSide: 'east', note: '华北平原面积广,环绕京津' },
   { name: '湖南省', populationWan: 6644.49, areaWanKm2: 21.18, urbanizationPct: 58.76, huSide: 'east', note: '洞庭湖流域农业发达' },
   { name: '浙江省', populationWan: 6456.76, areaWanKm2: 10.55, urbanizationPct: 72.17, huSide: 'east', note: '沿海经济发达,城镇密集,外来流入多' },
   { name: '安徽省', populationWan: 6102.72, areaWanKm2: 14.01, urbanizationPct: 58.33, huSide: 'east', note: '淮河与长江沿岸平原稠密,劳务输出大省' },
   { name: '湖北省', populationWan: 5775.26, areaWanKm2: 18.59, urbanizationPct: 62.89, huSide: 'east', note: '江汉平原富庶,武汉集聚效应强' },
   { name: '广西壮族自治区', populationWan: 5012.68, areaWanKm2: 23.76, urbanizationPct: 54.2, huSide: 'east', note: '盆地与河谷平原聚集,喀斯特山地限制承载' },
-  { name: '云南省', populationWan: 4720.93, areaWanKm2: 39.41, urbanizationPct: 50.05, huSide: 'east', note: '山区广布,人口集中于山间坝子' },
+  { name: '云南省', populationWan: 4720.93, areaWanKm2: 39.41, urbanizationPct: 50.05, huSide: 'cross', note: '山区广布,人口集中于山间坝子' },
   { name: '江西省', populationWan: 4518.86, areaWanKm2: 16.69, urbanizationPct: 60.44, huSide: 'east', note: '鄱阳湖平原集中' },
   { name: '辽宁省', populationWan: 4259.14, areaWanKm2: 14.86, urbanizationPct: 72.14, huSide: 'east', note: '老工业基地,辽河平原与沿海集中' },
   { name: '福建省', populationWan: 4154.01, areaWanKm2: 12.4, urbanizationPct: 68.75, huSide: 'east', note: '八山一水一分田,沿海平原承载大部分人口' },
-  { name: '陕西省', populationWan: 3952.9, areaWanKm2: 20.56, urbanizationPct: 62.66, huSide: 'east', note: '关中平原集中,陕北高原与秦岭山地稀疏' },
+  { name: '陕西省', populationWan: 3952.9, areaWanKm2: 20.56, urbanizationPct: 62.66, huSide: 'cross', note: '关中平原集中,陕北高原与秦岭山地稀疏' },
   { name: '贵州省', populationWan: 3856.21, areaWanKm2: 17.62, urbanizationPct: 53.15, huSide: 'east', note: '喀斯特高原山地,人口集中于坝区' },
   { name: '山西省', populationWan: 3491.56, areaWanKm2: 15.67, urbanizationPct: 62.53, huSide: 'east', note: '黄土高原,汾河谷地集中' },
   { name: '重庆市', populationWan: 3205.42, areaWanKm2: 8.24, urbanizationPct: 69.46, huSide: 'east', note: '丘陵山地,沿长江与槽谷分布' },
@@ -87,12 +87,18 @@ export function densityRank(name: string): number {
   return rankBy(name, densityOf)
 }
 
+export function huSideLabelOf(huSide: ProvincePopulation['huSide']): string {
+  if (huSide === 'east') return '胡焕庸线以东'
+  if (huSide === 'west') return '胡焕庸线以西'
+  return '胡焕庸线穿过'
+}
+
 export function provinceSummary(name: string): string | null {
   const province = provincePopulation.find((item) => item.name === name)
   if (!province) return null
   const density = Math.round(densityOf(province))
   const urbanization = province.urbanizationPct === null ? '—' : `${province.urbanizationPct.toFixed(1)}%`
-  const side = province.huSide === 'east' ? '胡焕庸线以东' : '胡焕庸线以西'
+  const side = huSideLabelOf(province.huSide)
   return `人口 ${formatWan(province.populationWan)} · 陆域面积 ${province.areaWanKm2} 万km² · 人口密度约 ${density} 人/km²(全国第 ${densityRank(province.name)}) · 城镇化率 ${urbanization} · ${side} · ${province.note}`
 }
 
@@ -109,7 +115,7 @@ export const pyramid2020 = {
 
 export const pyramidFacts = [
   '金字塔底部(0-14岁)收窄、顶部(60岁及以上)变宽,人口年龄结构由扩张型转向收缩趋势',
-  '60岁及以上人口占 18.7%,65岁及以上占 13.5%,已进入深度老龄化社会',
+  '60岁及以上人口占 18.7%,65岁及以上占 13.5%,已接近深度老龄化(14%)',
   '30-34岁与 50-54岁两个凸出年龄组分别对应 1986-1990 与 1966-1970 生育高峰',
   '劳动年龄人口(15-59岁)占 63.35%,人口红利仍在但趋于消退'
 ]

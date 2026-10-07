@@ -135,9 +135,11 @@ export function loadProvinceGeometry(): ProvinceGeoDocument {
   if (provinceGeometry) return provinceGeometry
   try {
     const parsed: unknown = JSON.parse(readFileSync(provincesAssetPath, 'utf8'))
-    provinceGeometry = { features: normalizeProvinceFeatures(parsed) }
-  } catch {
-    provinceGeometry = { features: [] }
+    const features = normalizeProvinceFeatures(parsed)
+    if (features.length === 0) throw new Error('省级行政区划数据为空')
+    provinceGeometry = { features }
+  } catch (error) {
+    throw error instanceof Error ? error : new Error(String(error))
   }
   return provinceGeometry
 }
