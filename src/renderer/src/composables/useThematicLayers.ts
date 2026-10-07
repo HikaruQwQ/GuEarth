@@ -87,7 +87,7 @@ function arrowHeadPositions(from: [number, number], to: [number, number], size: 
   ])
 }
 
-function arrowLabelAt(arrow: MonsoonArrow): [number, number] {
+function arrowLabelAt(arrow: MonsoonArrow, offset = 3.4): [number, number] {
   const latMidRad = (((arrow.from[1] + arrow.to[1]) / 2) * Math.PI) / 180
   const cosLat = Math.max(0.25, Math.cos(latMidRad))
   const dx = (arrow.to[0] - arrow.from[0]) * cosLat
@@ -96,9 +96,16 @@ function arrowLabelAt(arrow: MonsoonArrow): [number, number] {
   const perpX = dy / norm
   const perpY = -dx / norm
   return [
-    (arrow.from[0] + arrow.to[0]) / 2 + (perpX * 3.4) / cosLat,
-    (arrow.from[1] + arrow.to[1]) / 2 + perpY * 3.4
+    (arrow.from[0] + arrow.to[0]) / 2 + (perpX * offset) / cosLat,
+    (arrow.from[1] + arrow.to[1]) / 2 + perpY * offset
   ]
+}
+
+function migrationHeadSize(from: [number, number], to: [number, number]): number {
+  const latMidRad = (((from[1] + to[1]) / 2) * Math.PI) / 180
+  const cosLat = Math.max(0.25, Math.cos(latMidRad))
+  const length = Math.hypot((to[0] - from[0]) * cosLat, to[1] - from[1])
+  return Math.min(0.95, Math.max(0.45, length * 0.14))
 }
 
 export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void {
@@ -890,18 +897,19 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
         polyline: {
           positions: toCartesians([flow.from, flow.to]),
           clampToGround: true,
-          width: flow.weight === 'major' ? 4.5 : 3,
+          width: flow.weight === 'major' ? 3.5 : 2.5,
           material: color.withAlpha(0.82)
         }
       })
+      const headSize = migrationHeadSize(flow.from, flow.to)
       dataSource.entities.add({
         properties,
         polygon: {
-          hierarchy: new Cesium.PolygonHierarchy(arrowHeadPositions(flow.from, flow.to, 2.2)),
+          hierarchy: new Cesium.PolygonHierarchy(arrowHeadPositions(flow.from, flow.to, headSize)),
           material: color.withAlpha(0.95)
         }
       })
-      const [lon, lat] = arrowLabelAt({ from: flow.from, to: flow.to, label })
+      const [lon, lat] = arrowLabelAt({ from: flow.from, to: flow.to, label }, headSize + 0.55)
       dataSource.entities.add({
         properties,
         position: Cesium.Cartesian3.fromDegrees(lon, lat),

@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { net } from 'electron'
 import type { EarthquakeFeed, ProvinceFeature, ProvinceGeoDocument } from '../preload'
+import { gcj02ToWgs84 } from './geo/gcj02'
 import provincesAssetPath from '../../resources/geo/china-provinces.geojson?asset'
 
 const EARTHQUAKE_FEED_URL = 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_month.geojson'
@@ -99,7 +100,9 @@ function normalizePolygons(geometry: unknown): number[][][][] {
   const polygons: number[][][][] = []
   for (const set of sets) {
     if (!Array.isArray(set)) continue
-    const rings = set.filter((ring): ring is number[][] => Array.isArray(ring) && ring.length >= 3)
+    const rings = set
+      .filter((ring): ring is number[][] => Array.isArray(ring) && ring.length >= 3)
+      .map((ring) => ring.map((point) => gcj02ToWgs84(point[0], point[1])))
     if (rings.length > 0) polygons.push(rings)
   }
   return polygons
@@ -117,7 +120,13 @@ function normalizeProvinceFeatures(json: unknown): ProvinceFeature[] {
     const centroid = toLatLngPair(feature.properties.centroid) ?? center
     const polygons = normalizePolygons(feature.geometry)
     if (polygons.length === 0) continue
-    features.push({ name, adcode, center, centroid, polygons })
+    features.push({
+      name,
+      adcode,
+      center: gcj02ToWgs84(center[0], center[1]),
+      centroid: gcj02ToWgs84(centroid[0], centroid[1]),
+      polygons
+    })
   }
   return features
 }
