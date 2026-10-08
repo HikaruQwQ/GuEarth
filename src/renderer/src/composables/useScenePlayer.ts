@@ -53,6 +53,7 @@ const PLAY_TILE_TIMEOUT_MS = 10_000
 const RECORD_TILE_TIMEOUT_MS = 18_000
 const RECORD_PREWARM_TOTAL_TIMEOUT_MS = 24_000
 const RECORD_PREWARM_VIEW_TIMEOUT_MS = 4_000
+const RECORD_PREWARM_SCREEN_SPACE_ERROR = 1
 const MORPH_TIMEOUT_MS = 5_000
 const BASEMAP_SETTLE_MS = 500
 const STATE_SETTLE_MS = 250
@@ -263,6 +264,27 @@ export function useScenePlayer(viewer: Ref<Cesium.Viewer | undefined>, switchBas
     })
   }
 
+  function requestSceneRender(): void {
+    const current = viewer.value
+    if (!current || current.isDestroyed()) return
+    current.scene.requestRender()
+  }
+
+  function withRecordingDetailBias<T>(enabled: boolean, task: () => Promise<T>): Promise<T> {
+    const current = viewer.value
+    if (!enabled || !current || current.isDestroyed()) return task()
+    const globe = current.scene.globe
+    const originalMaximumScreenSpaceError = globe.maximumScreenSpaceError
+    globe.maximumScreenSpaceError = Math.min(originalMaximumScreenSpaceError, RECORD_PREWARM_SCREEN_SPACE_ERROR)
+    current.scene.requestRender()
+    return task().finally(() => {
+      if (!current.isDestroyed()) {
+        globe.maximumScreenSpaceError = originalMaximumScreenSpaceError
+        current.scene.requestRender()
+      }
+    })
+  }
+
   function visibleSurfaceReady(): boolean {
     const current = viewer.value
     if (!current || current.isDestroyed()) return false
@@ -281,6 +303,7 @@ export function useScenePlayer(viewer: Ref<Cesium.Viewer | undefined>, switchBas
     let stableSince = 0
     while (Date.now() - start < timeoutMs) {
       if (isCancelled?.()) return false
+      requestSceneRender()
       await delay(120)
       if (visibleSurfaceReady()) {
         if (!stableSince) stableSince = Date.now()
@@ -311,31 +334,37 @@ export function useScenePlayer(viewer: Ref<Cesium.Viewer | undefined>, switchBas
 
   async function prewarm(scenes: TeachingScene[], id: number, centerTarget: boolean, recording: boolean): Promise<void> {
     playerState.prewarming = true
-    const views = recording ? recordingPrewarmViews(scenes) : scenes.map((scene, sceneIndex) => ({ camera: sanitizeCamera(scene.snapshot.camera), sceneIndex }))
-    const totalStartedAt = Date.now()
-    playerState.prewarmTotal = views.length
-    scenesStore.setRecording({ prewarmStep: 0, prewarmTotal: recording ? views.length : 0, prewarmMessage: recording ? '正在预加载录制画面…' : '', prewarmTimedOut: false, skipPrewarm: false })
-    for (let index = 0; index < views.length; index += 1) {
-      if (aborted || runId !== id || scenesStore.recording.skipPrewarm) break
-      const timedOut = recording && Date.now() - totalStartedAt >= RECORD_PREWARM_TOTAL_TIMEOUT_MS
-      if (timedOut) {
-        scenesStore.setRecording({ prewarmTimedOut: true, prewarmMessage: '预加载等待超时，正在继续录制准备…' })
-        break
-      }
-      playerState.prewarmIndex = index + 1
-      const view = views[index]
-      const snapshot = scenes[view.sceneIndex].snapshot
-      const previousBasemapId = globeStore.selectedLayerId
-      applySnapshot(snapshot)
-      await delay(snapshot.basemapId && snapshot.basemapId !== previousBasemapId ? BASEMAP_SETTLE_MS : STATE_SETTLE_MS)
-      setCameraView(view.camera, centerTarget)
-      if (recording) scenesStore.setRecording({ prewarmStep: index + 1, prewarmMessage: `正在预加载录制画面 ${index + 1}/${views.length}` })
-      const remaining = recording ? Math.max(600, RECORD_PREWARM_TOTAL_TIMEOUT_MS - (Date.now() - totalStartedAt)) : PREWARM_TILE_TIMEOUT_MS
-      const loaded = await waitTilesLoaded(recording ? Math.min(RECORD_PREWARM_VIEW_TIMEOUT_MS, remaining) : PREWARM_TILE_TIMEOUT_MS, () => aborted || runId !== id || scenesStore.recording.skipPrewarm)
-      if (recording && !loaded) scenesStore.setRecording({ prewarmTimedOut: true, prewarmMessage: '网络较慢，部分地图细节可能在录制中继续加载…' })
-      await delay(PREWARM_HOLD_MS)
+    try {
+      await withRecordingDetailBias(recording, async () => {
+        const views = recording ? recordingPrewarmViews(scenes) : scenes.map((scene, sceneIndex) => ({ camera: sanitizeCamera(scene.snapshot.camera), sceneIndex }))
+        const totalStartedAt = Date.now()
+        playerState.prewarmTotal = views.length
+        scenesStore.setRecording({ prewarmStep: 0, prewarmTotal: recording ? views.length : 0, prewarmMessage: recording ? '正在预加载高清录制画面…' : '', prewarmTimedOut: false, skipPrewarm: false })
+        for (let index = 0; index < views.length; index += 1) {
+          if (aborted || runId !== id || scenesStore.recording.skipPrewarm) break
+          const timedOut = recording && Date.now() - totalStartedAt >= RECORD_PREWARM_TOTAL_TIMEOUT_MS
+          if (timedOut) {
+            scenesStore.setRecording({ prewarmTimedOut: true, prewarmMessage: '高清预加载等待超时，正在继续录制准备…' })
+            break
+          }
+          playerState.prewarmIndex = index + 1
+          const view = views[index]
+          const snapshot = scenes[view.sceneIndex].snapshot
+          const previousBasemapId = globeStore.selectedLayerId
+          applySnapshot(snapshot)
+          await delay(snapshot.basemapId && snapshot.basemapId !== previousBasemapId ? BASEMAP_SETTLE_MS : STATE_SETTLE_MS)
+          setCameraView(view.camera, centerTarget)
+          requestSceneRender()
+          if (recording) scenesStore.setRecording({ prewarmStep: index + 1, prewarmMessage: `正在预加载高清录制画面 ${index + 1}/${views.length}` })
+          const remaining = recording ? Math.max(600, RECORD_PREWARM_TOTAL_TIMEOUT_MS - (Date.now() - totalStartedAt)) : PREWARM_TILE_TIMEOUT_MS
+          const loaded = await waitTilesLoaded(recording ? Math.min(RECORD_PREWARM_VIEW_TIMEOUT_MS, remaining) : PREWARM_TILE_TIMEOUT_MS, () => aborted || runId !== id || scenesStore.recording.skipPrewarm)
+          if (recording && !loaded) scenesStore.setRecording({ prewarmTimedOut: true, prewarmMessage: '网络较慢，部分高清地图细节可能在录制中继续加载…' })
+          await delay(PREWARM_HOLD_MS)
+        }
+      })
+    } finally {
+      playerState.prewarming = false
     }
-    playerState.prewarming = false
   }
 
   function recorderOverlay(): RecorderOverlay {
