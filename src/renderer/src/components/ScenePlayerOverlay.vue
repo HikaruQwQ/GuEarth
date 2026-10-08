@@ -23,11 +23,6 @@ const prewarmQualityOptions = [
   { label: '高清', value: 'high' },
   { label: '极清', value: 'ultra' }
 ]
-const prewarmQualityHint = computed(() => {
-  if (scenesStore.recording.prewarmQuality === 'ultra') return '尽量向 13–18 级靠近，等待时间更长'
-  if (scenesStore.recording.prewarmQuality === 'high') return '优先细节，适合大多数录制'
-  return '更快开始，细节加载压力较低'
-})
 const recordNotice = computed(() => {
   const state = scenesStore.recording.state
   if (state === 'preparing') return '正在准备录制…'
@@ -71,7 +66,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
       <div v-if="isRecordingPreparing" class="prewarm-quality">
         <div class="prewarm-quality-label">底图精细度</div>
         <a-segmented :value="scenesStore.recording.prewarmQuality" :options="prewarmQualityOptions" size="small" @change="setPrewarmQuality" />
-        <div class="prewarm-quality-hint">{{ prewarmQualityHint }}</div>
       </div>
       <div v-if="isRecordingPreparing && scenesStore.recording.prewarmTimedOut" class="prewarm-warning">网络较慢，部分地图细节可能在录制中继续补齐。</div>
       <Button v-if="isRecordingPreparing" size="small" @click.stop="skipPrewarm">跳过预加载</Button>
@@ -145,12 +139,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
 
 .prewarm-quality-label {
   color: rgba(0, 0, 0, 0.65);
-  font-size: 12px;
-  line-height: 20px;
-}
-
-.prewarm-quality-hint {
-  color: rgba(0, 0, 0, 0.45);
   font-size: 12px;
   line-height: 20px;
 }
