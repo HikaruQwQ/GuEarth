@@ -51,6 +51,8 @@ export interface PlayerState {
 const PREWARM_TILE_TIMEOUT_MS = 10_000
 const PLAY_TILE_TIMEOUT_MS = 10_000
 const RECORD_TILE_TIMEOUT_MS = 18_000
+const RECORD_PREWARM_TOTAL_TIMEOUT_MS = 24_000
+const RECORD_PREWARM_VIEW_TIMEOUT_MS = 4_000
 const MORPH_TIMEOUT_MS = 5_000
 const BASEMAP_SETTLE_MS = 500
 const STATE_SETTLE_MS = 250
@@ -95,6 +97,33 @@ function cameraOrientation(camera: SceneCamera): { heading: number; pitch: numbe
     pitch: Cesium.Math.toRadians(camera.pitch),
     roll: 0
   }
+}
+
+function interpolateCamera(start: SceneCamera, end: SceneCamera, amount: number): SceneCamera {
+  const normalizedAmount = Math.min(1, Math.max(0, amount))
+  const lerp = (a: number, b: number): number => a + (b - a) * normalizedAmount
+  return sanitizeCamera({
+    longitude: lerp(start.longitude, end.longitude),
+    latitude: lerp(start.latitude, end.latitude),
+    height: Math.exp(lerp(Math.log(Math.max(1000, start.height)), Math.log(Math.max(1000, end.height)))),
+    heading: lerp(start.heading, end.heading),
+    pitch: lerp(start.pitch, end.pitch)
+  })
+}
+
+interface RecordingPrewarmView {
+  camera: SceneCamera
+  sceneIndex: number
+}
+
+function recordingPrewarmViews(scenes: TeachingScene[]): RecordingPrewarmView[] {
+  const views: RecordingPrewarmView[] = []
+  for (let index = 0; index < scenes.length; index += 1) {
+    const camera = sanitizeCamera(scenes[index].snapshot.camera)
+    if (index > 0) views.push({ camera: interpolateCamera(sanitizeCamera(scenes[index - 1].snapshot.camera), camera, 0.5), sceneIndex: index })
+    views.push({ camera, sceneIndex: index })
+  }
+  return views
 }
 
 let runId = 0
@@ -234,6 +263,17 @@ export function useScenePlayer(viewer: Ref<Cesium.Viewer | undefined>, switchBas
     })
   }
 
+  function visibleSurfaceReady(): boolean {
+    const current = viewer.value
+    if (!current || current.isDestroyed()) return false
+    const scene = current.scene
+    if (scene.mode !== Cesium.SceneMode.SCENE3D) return scene.globe.tilesLoaded
+    const canvas = scene.canvas
+    const ray = current.camera.getPickRay(new Cesium.Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2))
+    const surface = ray ? scene.globe.pick(ray, scene) : undefined
+    return Boolean(surface) && scene.globe.tilesLoaded
+  }
+
   async function waitTilesLoaded(timeoutMs: number, isCancelled?: () => boolean): Promise<boolean> {
     const current = viewer.value
     if (!current || current.isDestroyed()) return false
@@ -242,14 +282,14 @@ export function useScenePlayer(viewer: Ref<Cesium.Viewer | undefined>, switchBas
     while (Date.now() - start < timeoutMs) {
       if (isCancelled?.()) return false
       await delay(120)
-      if (current.scene.globe.tilesLoaded) {
+      if (visibleSurfaceReady()) {
         if (!stableSince) stableSince = Date.now()
         if (Date.now() - stableSince >= 500) return true
       } else {
         stableSince = 0
       }
     }
-    return current.scene.globe.tilesLoaded
+    return visibleSurfaceReady()
   }
 
   function ensureScene3D(): Promise<void> {
@@ -269,18 +309,30 @@ export function useScenePlayer(viewer: Ref<Cesium.Viewer | undefined>, switchBas
     })
   }
 
-  async function prewarm(scenes: TeachingScene[], id: number, centerTarget: boolean): Promise<void> {
+  async function prewarm(scenes: TeachingScene[], id: number, centerTarget: boolean, recording: boolean): Promise<void> {
     playerState.prewarming = true
-    playerState.prewarmTotal = scenes.length
-    for (let index = 0; index < scenes.length; index += 1) {
-      if (aborted || runId !== id) break
+    const views = recording ? recordingPrewarmViews(scenes) : scenes.map((scene, sceneIndex) => ({ camera: sanitizeCamera(scene.snapshot.camera), sceneIndex }))
+    const totalStartedAt = Date.now()
+    playerState.prewarmTotal = views.length
+    scenesStore.setRecording({ prewarmStep: 0, prewarmTotal: recording ? views.length : 0, prewarmMessage: recording ? '正在预加载录制画面…' : '', prewarmTimedOut: false, skipPrewarm: false })
+    for (let index = 0; index < views.length; index += 1) {
+      if (aborted || runId !== id || scenesStore.recording.skipPrewarm) break
+      const timedOut = recording && Date.now() - totalStartedAt >= RECORD_PREWARM_TOTAL_TIMEOUT_MS
+      if (timedOut) {
+        scenesStore.setRecording({ prewarmTimedOut: true, prewarmMessage: '预加载等待超时，正在继续录制准备…' })
+        break
+      }
       playerState.prewarmIndex = index + 1
-      const snapshot = scenes[index].snapshot
+      const view = views[index]
+      const snapshot = scenes[view.sceneIndex].snapshot
       const previousBasemapId = globeStore.selectedLayerId
       applySnapshot(snapshot)
       await delay(snapshot.basemapId && snapshot.basemapId !== previousBasemapId ? BASEMAP_SETTLE_MS : STATE_SETTLE_MS)
-      setCameraView(snapshot.camera, centerTarget)
-      await waitTilesLoaded(PREWARM_TILE_TIMEOUT_MS, () => aborted || runId !== id)
+      setCameraView(view.camera, centerTarget)
+      if (recording) scenesStore.setRecording({ prewarmStep: index + 1, prewarmMessage: `正在预加载录制画面 ${index + 1}/${views.length}` })
+      const remaining = recording ? Math.max(600, RECORD_PREWARM_TOTAL_TIMEOUT_MS - (Date.now() - totalStartedAt)) : PREWARM_TILE_TIMEOUT_MS
+      const loaded = await waitTilesLoaded(recording ? Math.min(RECORD_PREWARM_VIEW_TIMEOUT_MS, remaining) : PREWARM_TILE_TIMEOUT_MS, () => aborted || runId !== id || scenesStore.recording.skipPrewarm)
+      if (recording && !loaded) scenesStore.setRecording({ prewarmTimedOut: true, prewarmMessage: '网络较慢，部分地图细节可能在录制中继续加载…' })
       await delay(PREWARM_HOLD_MS)
     }
     playerState.prewarming = false
@@ -329,8 +381,8 @@ export function useScenePlayer(viewer: Ref<Cesium.Viewer | undefined>, switchBas
     try {
       await ensureScene3D()
       if (aborted || runId !== id) return
-      if (options.recording) scenesStore.setRecording({ state: 'preparing', currentStep: 0, totalSteps: options.scenes.length, videoPath: '', error: '', cancelled: false })
-      await prewarm(options.scenes, id, centerTarget)
+      if (options.recording) scenesStore.setRecording({ state: 'preparing', currentStep: 0, totalSteps: options.scenes.length, prewarmStep: 0, prewarmTotal: 0, prewarmMessage: '正在预加载录制画面…', prewarmTimedOut: false, skipPrewarm: false, videoPath: '', error: '', cancelled: false })
+      await prewarm(options.scenes, id, centerTarget, Boolean(options.recording))
       if (options.recording && !aborted && runId === id) {
         const canvas = viewer.value?.scene.canvas
         if (!canvas) {

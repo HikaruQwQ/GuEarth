@@ -11,6 +11,13 @@ const emit = defineEmits<{ next: []; stop: [] }>()
 const scenesStore = useScenesStore()
 
 const recordingActive = computed(() => scenesStore.recording.state === 'recording' || scenesStore.recording.state === 'preparing')
+const isRecordingPreparing = computed(() => scenesStore.recording.state === 'preparing')
+const prewarmNotice = computed(() => scenesStore.recording.prewarmMessage || '正在预加载录制画面…')
+const prewarmProgress = computed(() => {
+  const total = scenesStore.recording.prewarmTotal || props.player.prewarmTotal
+  const step = scenesStore.recording.prewarmStep || props.player.prewarmIndex
+  return total > 0 ? `${Math.min(step, total)} / ${total}` : ''
+})
 const recordNotice = computed(() => {
   const state = scenesStore.recording.state
   if (state === 'preparing') return '正在准备录制…'
@@ -19,6 +26,10 @@ const recordNotice = computed(() => {
   if (state === 'error') return `录制失败：${scenesStore.recording.error}`
   return ''
 })
+
+function skipPrewarm(): void {
+  scenesStore.skipRecordingPrewarm()
+}
 
 function handleKeydown(event: KeyboardEvent): void {
   if (!props.player.active) return
@@ -41,8 +52,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
   <div v-if="player.active" class="scene-overlay">
     <div v-if="player.prewarming" class="prewarm-mask">
       <a-spin />
-      <div class="prewarm-text">正在准备课程资源…</div>
-      <div class="prewarm-progress">{{ player.prewarmIndex }} / {{ player.prewarmTotal }}</div>
+      <div class="prewarm-text">{{ isRecordingPreparing ? prewarmNotice : '正在准备课程资源…' }}</div>
+      <div class="prewarm-progress">{{ isRecordingPreparing ? prewarmProgress : `${player.prewarmIndex} / ${player.prewarmTotal}` }}</div>
+      <div v-if="isRecordingPreparing && scenesStore.recording.prewarmTimedOut" class="prewarm-warning">网络较慢，部分地图细节可能在录制中继续补齐。</div>
+      <Button v-if="isRecordingPreparing" size="small" @click.stop="skipPrewarm">跳过预加载</Button>
     </div>
     <template v-else>
       <div class="stage-hit" aria-label="下一幕" @click="emit('next')"></div>
@@ -102,6 +115,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
   font-size: 12px;
   line-height: 20px;
   font-variant-numeric: tabular-nums;
+}
+
+.prewarm-warning {
+  max-width: min(360px, 78vw);
+  color: #d46b08;
+  font-size: 12px;
+  line-height: 20px;
+  text-align: center;
 }
 
 .stage-hit {
