@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import type { RecordingSaveResult, TeachingScene } from '../../../preload'
 
 export type RecordingStateValue = 'idle' | 'preparing' | 'recording' | 'saving' | 'done' | 'error'
+export type RecordingPrewarmQuality = 'standard' | 'high' | 'ultra'
 
 export interface RecordingSessionState {
   state: RecordingStateValue
@@ -14,13 +15,14 @@ export interface RecordingSessionState {
   prewarmMessage: string
   prewarmTimedOut: boolean
   skipPrewarm: boolean
+  prewarmQuality: RecordingPrewarmQuality
   videoPath: string
   bytes: number
   error: string
   cancelled: boolean
 }
 
-const idleRecording: RecordingSessionState = { state: 'idle', title: '', currentStep: 0, totalSteps: 0, prewarmStep: 0, prewarmTotal: 0, prewarmMessage: '', prewarmTimedOut: false, skipPrewarm: false, videoPath: '', bytes: 0, error: '', cancelled: false }
+const idleRecording: RecordingSessionState = { state: 'idle', title: '', currentStep: 0, totalSteps: 0, prewarmStep: 0, prewarmTotal: 0, prewarmMessage: '', prewarmTimedOut: false, skipPrewarm: false, prewarmQuality: 'high', videoPath: '', bytes: 0, error: '', cancelled: false }
 
 export const useScenesStore = defineStore('scenes', () => {
   const scenes = ref<TeachingScene[]>([])
