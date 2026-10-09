@@ -48,7 +48,7 @@ function renderTokens(tokens: MarkdownToken[]): VNodeChild[] {
     }
     if (token.nesting === 1) {
       const nested: VNodeChild[] = []
-      if (allowedTags.has(token.tag)) children.push(h(token.tag, tokenAttributes(token), nested))
+      if (!token.hidden && allowedTags.has(token.tag)) children.push(h(token.tag, tokenAttributes(token), nested))
       else children.push(nested)
       stack.push(nested)
       continue
