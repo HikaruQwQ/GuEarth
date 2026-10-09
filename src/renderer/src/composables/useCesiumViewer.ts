@@ -144,15 +144,15 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
   const horizonOccluder = new createEllipsoidalOccluder.EllipsoidalOccluder(Cesium.Ellipsoid.WGS84, Cesium.Cartesian3.ZERO)
   const horizonScratchPosition = new Cesium.Cartesian3()
 
-  function wrapGraphicsShowForHorizon(graphics: { show?: Cesium.Property }, position: Cesium.PositionProperty | undefined): void {
-    if (!position || horizonWrappedGraphics.has(graphics)) return
+  function wrapGraphicsShowForHorizon(graphics: { show?: Cesium.Property }, entity: Cesium.Entity): void {
+    if (!entity.position || horizonWrappedGraphics.has(graphics)) return
     horizonWrappedGraphics.add(graphics)
     const original = graphics.show
     graphics.show = new Cesium.CallbackProperty((time?: Cesium.JulianDate) => {
       if (original && !original.getValue(time)) return false
       const currentViewer = viewer.value
       if (!currentViewer || currentViewer.isDestroyed() || currentViewer.scene.mode !== Cesium.SceneMode.SCENE3D) return true
-      const point = position.getValue(time, horizonScratchPosition)
+      const point = entity.position?.getValue(time, horizonScratchPosition)
       if (!point) return true
       return horizonOccluder.isPointVisible(point)
     }, false)
@@ -165,8 +165,8 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
   }
 
   function wrapEntityGraphics(entity: Cesium.Entity): void {
-    if (entity.label) wrapGraphicsShowForHorizon(entity.label, entity.position)
-    if (entity.point) wrapGraphicsShowForHorizon(entity.point, entity.position)
+    if (entity.label) wrapGraphicsShowForHorizon(entity.label, entity)
+    if (entity.point) wrapGraphicsShowForHorizon(entity.point, entity)
   }
 
   function trackEntityCollection(entities: Cesium.EntityCollection): () => void {
@@ -709,7 +709,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
         viewer.value = new Cesium.Viewer(container.value, { baseLayer: false, baseLayerPicker: false, terrainProvider: new Cesium.EllipsoidTerrainProvider(), geocoder: false, animation: false, timeline: false, sceneModePicker: false, navigationHelpButton: false, fullscreenButton: false, homeButton: false, infoBox: false, selectionIndicator: false, requestRenderMode: true, maximumRenderTimeChange: Infinity, useBrowserRecommendedResolution: true, contextOptions: { webgl: { preserveDrawingBuffer: true } } })
         const currentViewer = viewer.value
         currentViewer.scene.globe.show = true
-        currentViewer.scene.globe.tileCacheSize = 1000
+        currentViewer.scene.globe.tileCacheSize = 256
         store.setGlobeLoadStage('正在显示地球表面…')
         currentViewer.camera.setView({ destination: Cesium.Cartesian3.fromDegrees(105, 35, 15000000) })
         const initialMode = store.sceneMode === '2D' ? Cesium.SceneMode.SCENE2D : Cesium.SceneMode.SCENE3D

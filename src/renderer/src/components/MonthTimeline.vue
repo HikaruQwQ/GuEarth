@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, watch } from 'vue'
+import { computed, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { CaretRightOutlined, PauseOutlined } from '@ant-design/icons-vue'
 import type * as Cesium from 'cesium'
+import { useVisibleAnimation } from '@renderer/composables/useVisibleAnimation'
 import { useClimateStore } from '@renderer/stores/climate'
 
 const store = useClimateStore()
@@ -18,45 +19,17 @@ const seasonText = computed(() => {
   return store.summerStrength >= store.winterStrength ? '夏季风增强' : '冬季风增强'
 })
 
-let rafId = 0
-let lastTime = 0
-
-function stop(): void {
-  if (!rafId) return
-  cancelAnimationFrame(rafId)
-  rafId = 0
-  lastTime = 0
-}
-
-function tick(now: number): void {
-  if (!isPlaying.value) {
-    stop()
-    return
-  }
-  rafId = requestAnimationFrame(tick)
-  const dt = lastTime > 0 ? Math.min(0.05, (now - lastTime) / 1000) : 0
-  lastTime = now
+useVisibleAnimation(() => isPlaying.value && store.hasSeasonalOverlay, (dt) => {
   if (dt > 0) store.advance(dt)
   const viewer = props.viewer
   if (viewer && !viewer.isDestroyed()) viewer.scene.requestRender()
-}
-
-function start(): void {
-  if (rafId || !isPlaying.value) return
-  lastTime = 0
-  rafId = requestAnimationFrame(tick)
-}
-
-watch(isPlaying, (playing) => {
-  if (playing) start()
-  else stop()
 })
+
 watch(month, () => {
   const viewer = props.viewer
   if (viewer && !viewer.isDestroyed()) viewer.scene.requestRender()
 })
 
-onBeforeUnmount(stop)
 </script>
 
 <template>

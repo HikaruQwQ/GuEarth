@@ -14,8 +14,8 @@ Sentry.init({
 })
 import { execFileSync } from 'child_process'
 import { join } from 'path'
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs'
-import { access, constants, mkdir, open, readdir, readFile, rename as renameFile, stat, stat as statFile, unlink, writeFile } from 'fs/promises'
+import { flushJsonWrites, readJson, serialQueue, writeJson } from './jsonStore'
+import { access, constants, mkdir, open, readdir, readFile, rename as renameFile, stat, stat as statFile, rm, unlink, writeFile } from 'fs/promises'
 import type { FileHandle } from 'fs/promises'
 import { createHash, randomUUID } from 'crypto'
 import icon from '../../resources/icon.png?asset'
@@ -90,10 +90,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 const safeId = assertSafeId
 
-function readSettings(): PersistedSettings {
-  if (!existsSync(settingsPath)) return { ...defaultSettings, providerCredentials: {} }
+async function readSettings(): Promise<PersistedSettings> {
   try {
-    const parsed: unknown = JSON.parse(readFileSync(settingsPath, 'utf8'))
+    const parsed: unknown = await readJson(settingsPath)
     if (!isRecord(parsed)) return { ...defaultSettings, providerCredentials: {} }
     const credentials = isRecord(parsed.providerCredentials) ? parsed.providerCredentials : {}
     const providerCredentials: Record<string, ProviderCredentialStatus> = {}
@@ -132,8 +131,11 @@ function readSettings(): PersistedSettings {
   }
 }
 
-function saveSettings(): void {
-  writeFileSync(settingsPath, JSON.stringify(settings), 'utf8')
+const enqueueSettings = serialQueue()
+
+function saveSettings(): Promise<void> {
+  const snapshot = structuredClone(settings)
+  return enqueueSettings(() => writeJson(settingsPath, snapshot))
 }
 
 function proxyConfig(proxy: string): Parameters<Electron.Session['setProxy']>[0] {
@@ -278,19 +280,25 @@ async function enforceTileCacheLimit(): Promise<void> {
   return tilePrunePromise
 }
 
-async function writeTile(entry: TileCacheEntry): Promise<void> {
-  const key: TileKey = { providerId: entry.providerId, styleId: entry.styleId, level: entry.level, x: entry.x, y: entry.y }
-  const basePath = tileBasePath(key)
-  try {
-    await mkdir(join(tileCachePath, safeId(key.providerId), safeId(key.styleId), pathPart(key.level), pathPart(key.x)), { recursive: true })
-    await Promise.all([
-      writeFile(`${basePath}.bin`, Buffer.from(entry.data)),
-      writeFile(`${basePath}.json`, JSON.stringify({ contentType: entry.contentType, expiresAt: entry.expiresAt }), 'utf8')
-    ])
-    void enforceTileCacheLimit()
-  } catch {
-    void 0
-  }
+const enqueueTileMutation = serialQueue()
+let quitting = false
+
+function writeTile(entry: TileCacheEntry): Promise<void> {
+  if (quitting) return Promise.resolve()
+  return enqueueTileMutation(async () => {
+    const key: TileKey = { providerId: entry.providerId, styleId: entry.styleId, level: entry.level, x: entry.x, y: entry.y }
+    const basePath = tileBasePath(key)
+    try {
+      await mkdir(join(tileCachePath, safeId(key.providerId), safeId(key.styleId), pathPart(key.level), pathPart(key.x)), { recursive: true })
+      await Promise.all([
+        writeFile(`${basePath}.bin`, Buffer.from(entry.data)),
+        writeFile(`${basePath}.json`, JSON.stringify({ contentType: entry.contentType, expiresAt: entry.expiresAt }), 'utf8')
+      ])
+      void enforceTileCacheLimit()
+    } catch {
+      void 0
+    }
+  })
 }
 
 async function cacheStats(): Promise<TileCacheStats> {
@@ -450,10 +458,9 @@ function normalizeAnnotations(value: unknown): AnnotationDocument {
   return { shapes, entries }
 }
 
-function readAnnotations(): AnnotationDocument {
-  if (!existsSync(annotationsPath)) return { shapes: [], entries: [] }
+async function readAnnotations(): Promise<AnnotationDocument> {
   try {
-    const parsed: unknown = JSON.parse(readFileSync(annotationsPath, 'utf8'))
+    const parsed: unknown = await readJson(annotationsPath)
     if (!Array.isArray(parsed)) return normalizeAnnotations(parsed)
     const shapes = parsed.flatMap((item) => {
       try {
@@ -469,10 +476,11 @@ function readAnnotations(): AnnotationDocument {
   }
 }
 
-function saveAnnotations(): void {
-  const tempPath = `${annotationsPath}.tmp`
-  writeFileSync(tempPath, JSON.stringify(annotations), 'utf8')
-  renameSync(tempPath, annotationsPath)
+const enqueueAnnotations = serialQueue()
+
+function saveAnnotations(): Promise<void> {
+  const snapshot = annotations
+  return enqueueAnnotations(() => writeJson(annotationsPath, snapshot))
 }
 
 const MOTION_PANEL_IDS = new Set(['solar-path', 'obliquity', 'rotation-speed'])
@@ -542,20 +550,20 @@ function normalizeSceneDocument(value: unknown): SceneDocument {
   return { scenes }
 }
 
-function readScenes(): SceneDocument {
-  if (!existsSync(scenesPath)) return { scenes: [] }
+async function readScenes(): Promise<SceneDocument> {
   try {
-    return normalizeSceneDocument(JSON.parse(readFileSync(scenesPath, 'utf8')))
+    return normalizeSceneDocument(await readJson(scenesPath))
   } catch (error) {
     logger.warn('scenes', '读取教学场景失败，已按空目录处理', error)
     return { scenes: [] }
   }
 }
 
-function saveScenes(): void {
-  const tempPath = `${scenesPath}.tmp`
-  writeFileSync(tempPath, JSON.stringify(scenes), 'utf8')
-  renameSync(tempPath, scenesPath)
+const enqueueScenes = serialQueue()
+
+function saveScenes(): Promise<void> {
+  const snapshot = scenes
+  return enqueueScenes(() => writeJson(scenesPath, snapshot))
 }
 
 const RECORDING_EXTENSIONS: Record<string, string> = {
@@ -636,7 +644,7 @@ function registerIpcHandlers(): void {
     return [...families].sort((first, second) => first.localeCompare(second))
   })
   ipcMain.handle('settings:get', () => settingsSnapshot())
-  ipcMain.handle('settings:update', (_event, patch: GuEarthSettingsPatch): GuEarthSettings => {
+  ipcMain.handle('settings:update', async (_event, patch: GuEarthSettingsPatch): Promise<GuEarthSettings> => {
     if (!isRecord(patch)) throw new Error('无效的设置')
     const nextSettings: PersistedSettings = {
       ...settings,
@@ -675,24 +683,24 @@ function registerIpcHandlers(): void {
       nextSettings.setupGuideDismissed = patch.setupGuideDismissed
     }
     settings = nextSettings
-    saveSettings()
+    await saveSettings()
     if (patch.networkProxy !== undefined) void applyNetworkProxy()
     return settingsSnapshot()
   })
-  ipcMain.handle('settings:set-provider-api-key', (_event, providerId: string, apiKey: string): ProviderCredentialStatus => {
+  ipcMain.handle('settings:set-provider-api-key', async (_event, providerId: string, apiKey: string): Promise<ProviderCredentialStatus> => {
     const id = safeId(providerId)
     writeProviderKey(id, apiKey)
     const status = { configured: true, updatedAt: Date.now() }
     settings.providerCredentials[id] = status
-    saveSettings()
+    await saveSettings()
     return status
   })
-  ipcMain.handle('settings:clear-provider-api-key', (_event, providerId: string): ProviderCredentialStatus => {
+  ipcMain.handle('settings:clear-provider-api-key', async (_event, providerId: string): Promise<ProviderCredentialStatus> => {
     const id = safeId(providerId)
     clearProviderKey(id)
     const status = { configured: false, updatedAt: null }
     settings.providerCredentials[id] = status
-    saveSettings()
+    await saveSettings()
     return status
   })
   ipcMain.handle('settings:has-provider-api-key', (_event, providerId: string): ProviderCredentialStatus => credentialStatus(safeId(providerId)))
@@ -730,24 +738,25 @@ function registerIpcHandlers(): void {
   ipcMain.handle('tiles:get', (_event, key: TileKey) => readTile(key))
   ipcMain.handle('tiles:put', (_event, entry: TileCacheEntry) => writeTile(entry))
   ipcMain.handle('tiles:clear', (_event, providerId?: string) => {
-    if (providerId === undefined) {
-      rmSync(tileCachePath, { recursive: true, force: true })
-      mkdirSync(tileCachePath, { recursive: true })
-      return
-    }
-    rmSync(join(tileCachePath, safeId(providerId)), { recursive: true, force: true })
+    const target = providerId === undefined ? tileCachePath : join(tileCachePath, safeId(providerId))
+    return enqueueTileMutation(async () => {
+      if (tilePrunePromise) await tilePrunePromise
+      await rm(target, { recursive: true, force: true })
+      await mkdir(tileCachePath, { recursive: true })
+      tilePruneAt = 0
+    })
   })
   ipcMain.handle('tiles:stats', () => cacheStats())
   ipcMain.handle('annotations:load', (): AnnotationDocument => annotations)
-  ipcMain.handle('annotations:save', (_event, document: unknown): void => {
+  ipcMain.handle('annotations:save', async (_event, document: unknown): Promise<void> => {
     annotations = normalizeAnnotations(document)
-    saveAnnotations()
+    await saveAnnotations()
   })
   ipcMain.handle('scenes:load', (): SceneDocument => scenes)
-  ipcMain.handle('scenes:save', (_event, document: unknown): void => {
+  ipcMain.handle('scenes:save', async (_event, document: unknown): Promise<void> => {
     try {
       scenes = normalizeSceneDocument(document)
-      saveScenes()
+      await saveScenes()
     } catch (error) {
       console.error('[scenes] save failed:', error)
       throw error instanceof Error ? error : new Error(String(error))
@@ -771,7 +780,7 @@ function registerIpcHandlers(): void {
       throw new Error('所选文件夹不可写，请选择其他文件夹')
     }
     settings.recordingDirectory = directory
-    saveSettings()
+    await saveSettings()
     return directory
   })
   ipcMain.handle('recordings:start', async (event, mimeType: unknown): Promise<string> => {
@@ -906,14 +915,17 @@ app.whenReady().then(async () => {
   scenesPath = join(userDataPath, 'scenes.json')
   initKeyVault(join(userDataPath, 'credentials'))
   initDatasets(userDataPath)
-  mkdirSync(tileCachePath, { recursive: true })
-  settings = readSettings()
+  await mkdir(tileCachePath, { recursive: true })
+  settings = await readSettings()
   await applyNetworkProxy()
-  annotations = readAnnotations()
-  scenes = readScenes()
-  aiSettings.init(join(userDataPath, 'ai-settings.json'))
-  aiChatHistory.init(join(userDataPath, 'ai-chat-history.json'))
-  aiMemories.init(join(userDataPath, 'ai-memories.json'))
+  const loaded = await Promise.all([
+    readAnnotations(),
+    readScenes(),
+    aiSettings.init(join(userDataPath, 'ai-settings.json')),
+    aiChatHistory.init(join(userDataPath, 'ai-chat-history.json')),
+    aiMemories.init(join(userDataPath, 'ai-memories.json'))
+  ])
+  ;[annotations, scenes] = loaded
   registerIpcHandlers()
   registerAiIpcHandlers(aiSettings, aiChatHistory, aiMemories)
   initUpdater(join(userDataPath, 'updates'))
@@ -928,6 +940,13 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+app.on('before-quit', (event) => {
+  if (quitting) return
+  event.preventDefault()
+  quitting = true
+  void flushJsonWrites().finally(() => app.quit())
 })
 
 app.on('window-all-closed', () => {

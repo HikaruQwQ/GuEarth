@@ -25,7 +25,6 @@ import { collectStrings, parsePositions, registerAnnotationTools } from '@render
 import { useThematicLayers } from '@renderer/composables/useThematicLayers'
 import { useTimezoneCompare } from '@renderer/composables/useTimezoneCompare'
 import { useScenePlayer, type RecordingStep } from '@renderer/composables/useScenePlayer'
-import { usePerfProbe } from '@renderer/composables/usePerfProbe'
 import { datePartsOf, dayLength, declinationForDate, formatClock, isValidDate, noonAltitudeDeg, sunTimes } from '@renderer/thematic/solarMath'
 import { nearestBoundary, plateBoundaryKindName } from '@renderer/thematic/plateBoundaries'
 import GlobeToolbar from '@renderer/components/GlobeToolbar.vue'
@@ -96,7 +95,6 @@ const {
 
 const globeContainer = ref<HTMLDivElement>()
 const { viewer, switchBasemap, setLayerOpacity, flyTo, flyToPlace, toggleLevelView, setTerrain, setTerrainExaggeration, setTerrainLighting } = useCesiumViewer(globeContainer)
-usePerfProbe(viewer)
 const { flyToShape } = useDrawing(viewer)
 const { comparison: timezoneComparison, clearComparison: clearTimezone } = useTimezoneCompare(viewer)
 const climateStore = useClimateStore()

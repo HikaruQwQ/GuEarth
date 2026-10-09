@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import dayjs, { type Dayjs } from 'dayjs'
 import { CaretRightOutlined, CloseOutlined, PauseOutlined } from '@ant-design/icons-vue'
+import { useVisibleAnimation } from '@renderer/composables/useVisibleAnimation'
 import { useSolarStore } from '@renderer/stores/solar'
 import { dayLength, declinationForDate, formatClock, horizonCrossingsDeg, noonAltitudeDeg, solarHorizontalPositionDeg, type DayState } from '@renderer/thematic/solarMath'
 
@@ -91,40 +92,10 @@ const stateText = computed(() => {
 })
 
 const LOCAL_HOURS_PER_SECOND = 1.5
-let rafId = 0
-let lastTime = 0
-
-function tick(now: number): void {
-  if (!isPlaying.value) {
-    rafId = 0
-    lastTime = 0
-    return
-  }
-  rafId = requestAnimationFrame(tick)
-  const dt = lastTime > 0 ? Math.min(0.05, (now - lastTime) / 1000) : 0
-  lastTime = now
+useVisibleAnimation(() => isPlaying.value, (dt) => {
   if (dt > 0) localHour.value = (localHour.value + dt * LOCAL_HOURS_PER_SECOND) % 24
-}
-
-function start(): void {
-  if (rafId || !isPlaying.value) return
-  lastTime = 0
-  rafId = requestAnimationFrame(tick)
-}
-
-watch(isPlaying, (playing) => {
-  if (playing) start()
-  else {
-    if (rafId) cancelAnimationFrame(rafId)
-    rafId = 0
-    lastTime = 0
-  }
 })
 
-onBeforeUnmount(() => {
-  if (rafId) cancelAnimationFrame(rafId)
-  rafId = 0
-})
 </script>
 
 <template>

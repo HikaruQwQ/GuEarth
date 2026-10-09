@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import dayjs, { type Dayjs } from 'dayjs'
 import { CaretRightOutlined, LineChartOutlined, PauseOutlined, RetweetOutlined } from '@ant-design/icons-vue'
 import type * as Cesium from 'cesium'
+import { useVisibleAnimation } from '@renderer/composables/useVisibleAnimation'
 import { useSolarStore } from '@renderer/stores/solar'
 import { useClimateStore } from '@renderer/stores/climate'
 import SolarChartPanel from '@renderer/components/SolarChartPanel.vue'
@@ -25,45 +26,17 @@ const presets = [
 
 const marks = { 0: '0时', 6: '6时', 12: '12时', 18: '18时', 24: '24时' }
 
-let rafId = 0
-let lastTime = 0
-
-function stop(): void {
-  if (!rafId) return
-  cancelAnimationFrame(rafId)
-  rafId = 0
-  lastTime = 0
-}
-
-function tick(now: number): void {
-  if (!store.isPlaying && !store.isAnnualPlaying) {
-    stop()
-    return
-  }
-  rafId = requestAnimationFrame(tick)
-  const dt = lastTime > 0 ? Math.min(0.05, (now - lastTime) / 1000) : 0
-  lastTime = now
+useVisibleAnimation(() => store.active && (isPlaying.value || isAnnualPlaying.value), (dt) => {
   if (dt > 0) store.advance(dt)
   const viewer = props.viewer
   if (viewer && !viewer.isDestroyed()) viewer.scene.requestRender()
-}
-
-function start(): void {
-  if (rafId || (!store.isPlaying && !store.isAnnualPlaying)) return
-  lastTime = 0
-  rafId = requestAnimationFrame(tick)
-}
-
-watch([isPlaying, isAnnualPlaying], () => {
-  if (isPlaying.value || isAnnualPlaying.value) start()
-  else stop()
 })
+
 watch([() => store.date, hour, () => store.active], () => {
   const viewer = props.viewer
   if (viewer && !viewer.isDestroyed()) viewer.scene.requestRender()
 })
 
-onBeforeUnmount(stop)
 </script>
 
 <template>
