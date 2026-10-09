@@ -1,27 +1,23 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
-import MarkdownIt from 'markdown-it'
+import { onBeforeUnmount, shallowRef, watch, type VNodeChild } from 'vue'
+import { renderMarkdown } from '@renderer/utils/markdown'
 
 const props = defineProps<{ text: string; streaming: boolean }>()
-const html = ref('')
-const md = new MarkdownIt({ breaks: true, linkify: true })
-md.validateLink = (url) => /^https?:\/\//i.test(url)
-md.renderer.rules.link_open = (tokens, index, options, _env, self) => {
-  tokens[index].attrSet('target', '_blank')
-  tokens[index].attrSet('rel', 'noopener noreferrer')
-  return self.renderToken(tokens, index, options)
-}
+const emit = defineEmits<{ rendered: [] }>()
+const nodes = shallowRef<VNodeChild[]>([])
+const MarkdownContent = () => nodes.value
 
 let timer: ReturnType<typeof setTimeout> | undefined
 
 function render(): void {
   if (timer !== undefined) clearTimeout(timer)
   timer = undefined
-  html.value = md.render(props.text)
+  nodes.value = renderMarkdown(props.text)
+  emit('rendered')
 }
 
 watch(() => [props.text, props.streaming] as const, () => {
-  if (!props.streaming || !html.value) render()
+  if (!props.streaming || !nodes.value.length) render()
   else if (timer === undefined) timer = setTimeout(render, 50)
 }, { immediate: true })
 
@@ -31,5 +27,5 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="answer-text" v-html="html"></div>
+  <div class="answer-text"><MarkdownContent /></div>
 </template>

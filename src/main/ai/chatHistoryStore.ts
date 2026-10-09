@@ -1,6 +1,6 @@
 import { copyFile, mkdir, readdir, unlink } from 'fs/promises'
 import { randomUUID } from 'crypto'
-import { join } from 'path'
+import { storageChildPath } from '../storagePath'
 import { readJson, serialQueue, writeJson } from '../jsonStore'
 import type { AiSearchReference, StoredAiCompression, StoredAiConversation, StoredAiConversationSummary, StoredAiMessage, StoredAiPart, StoredAiToolStep } from '../../preload'
 
@@ -179,11 +179,11 @@ export class AiChatHistoryStore {
   }
 
   private indexPath(): string {
-    return join(this.directory, 'index.json')
+    return storageChildPath(this.directory, 'index.json')
   }
 
   private conversationPath(file: string): string {
-    return join(this.directory, file)
+    return storageChildPath(this.directory, file)
   }
 
   private async recoverEntries(): Promise<HistoryEntry[]> {

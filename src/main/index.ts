@@ -13,8 +13,9 @@ Sentry.init({
   }
 })
 import { execFileSync } from 'child_process'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import { flushJsonWrites, readJson, serialQueue, writeJson } from './jsonStore'
+import { storageChildPath } from './storagePath'
 import { access, constants, mkdir, open, readdir, readFile, rename as renameFile, stat, stat as statFile, rm, unlink, writeFile } from 'fs/promises'
 import type { FileHandle } from 'fs/promises'
 import { createHash, randomUUID } from 'crypto'
@@ -185,7 +186,7 @@ function pathPart(value: number): string {
 }
 
 function tileBasePath(key: TileKey): string {
-  return join(tileCachePath, safeId(key.providerId), safeId(key.styleId), pathPart(key.level), pathPart(key.x), pathPart(key.y))
+  return storageChildPath(tileCachePath, safeId(key.providerId), safeId(key.styleId), pathPart(key.level), pathPart(key.x), pathPart(key.y))
 }
 
 function tileDataPath(key: TileKey): string {
@@ -289,7 +290,7 @@ function writeTile(entry: TileCacheEntry): Promise<void> {
     const key: TileKey = { providerId: entry.providerId, styleId: entry.styleId, level: entry.level, x: entry.x, y: entry.y }
     const basePath = tileBasePath(key)
     try {
-      await mkdir(join(tileCachePath, safeId(key.providerId), safeId(key.styleId), pathPart(key.level), pathPart(key.x)), { recursive: true })
+      await mkdir(dirname(basePath), { recursive: true })
       await Promise.all([
         writeFile(`${basePath}.bin`, Buffer.from(entry.data)),
         writeFile(`${basePath}.json`, JSON.stringify({ contentType: entry.contentType, expiresAt: entry.expiresAt }), 'utf8')
@@ -738,7 +739,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle('tiles:get', (_event, key: TileKey) => readTile(key))
   ipcMain.handle('tiles:put', (_event, entry: TileCacheEntry) => writeTile(entry))
   ipcMain.handle('tiles:clear', (_event, providerId?: string) => {
-    const target = providerId === undefined ? tileCachePath : join(tileCachePath, safeId(providerId))
+    const target = providerId === undefined ? tileCachePath : storageChildPath(tileCachePath, safeId(providerId))
     return enqueueTileMutation(async () => {
       if (tilePrunePromise) await tilePrunePromise
       await rm(target, { recursive: true, force: true })

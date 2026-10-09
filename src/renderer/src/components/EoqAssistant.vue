@@ -608,7 +608,7 @@ watch(currentConversationId, () => {
                 <div class="reasoning-text">{{ part.text }}</div>
               </a-collapse-panel>
             </a-collapse>
-            <StreamingMarkdown v-else-if="part.kind === 'text'" :text="part.text" :streaming="message.status === 'streaming'" />
+            <StreamingMarkdown v-else-if="part.kind === 'text'" :text="part.text" :streaming="message.status === 'streaming'" @rendered="scheduleAssistantScroll" />
             <WebSearchStep
               v-else-if="part.step.name === 'web_search'"
               :step="part.step"
