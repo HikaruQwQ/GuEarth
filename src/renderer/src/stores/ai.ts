@@ -61,6 +61,7 @@ export interface RendererTool {
 
 const MAIN_PROCESS_TOOL_LABELS: Record<string, string> = {
   search_place: '地点检索',
+  poi_statistics: 'POI 统计',
   web_search: '联网搜索',
   retrieve_knowledge: '知识库检索',
   save_memory: '写入记忆',

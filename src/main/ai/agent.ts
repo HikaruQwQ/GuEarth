@@ -13,7 +13,7 @@ import type {
   AiToolDefinition
 } from '../../preload'
 import { readProviderKey } from '../keyVault'
-import { searchPlaces } from './amap'
+import { poiStatistics, searchPlaces } from './amap'
 import { searchWeb } from './search'
 import { retrieveKnowledge } from './knowledge'
 import type { AiChatHistoryStore } from './chatHistoryStore'
@@ -43,6 +43,7 @@ const SYSTEM_PROMPT = [
   '- 需要更换地图样式或强化地形表现时：用 set_basemap 切换底图（卫星影像看真实地貌与土地利用、地形晕渲看地势起伏与山脉走向、道路底图看城镇区位）；讲山地褶皱、峡谷下切等地形起伏时用 set_terrain 提高垂直夸张（3-5 倍）或开启地形光照，讲完恢复 1-2 倍。',
   '- 用户问板块构造、地震、火山、山脉海沟成因等地表形态塑造问题时：用 set_layer 开启 plate-tectonics 板块运动与地震火山图层（可点击边界、火山、地震要素查看成因）；分析具体地点地貌时，先 fly_to 飞往该处，再用 explain_landform 获取海拔与最近板块边界（名称、类型、距离），按内力作用（板块运动、岩浆活动、变质作用）与外力作用（流水、风力、冰川、海浪）框架讲解；讲解地震火山分布规律时强调其集中于板块边界，与消亡、生长边界的对应关系。',
   '- 用户问中国人口分布、省级人口数量、人口密度、城镇化率或胡焕庸线问题时：先调用 query_population 查询内置的第七次人口普查省级数据（province 传「全国」可查全国总量），依据返回数据讲规律，不要编造数字；配合 set_layer 开启 province-population 省级人口密度、hu-line 胡焕庸线、migration-flows 人口迁移流动图层展示；讲人口分布成因时按地形、气候、水源、交通、开发历史与经济发展差异归纳。',
+  '- 用户问城市等级体系、中心地理论、城镇体系、城市职能或城市内部空间结构（功能区）问题时：先用 set_layer 开启 city-tiers 中国城市等级或 functional-zones 城市功能区图层；验证不同等级城市的服务范围与职能差异时，用 poi_statistics 分别统计高等级城市中心（如省会商圈）与低等级城市中心同半径的 POI 大类构成（数量更多、类别更全、出现高级职能类别如金融保险/科教文化者等级更高），按中心地理论解释差异；讲功能区时按商业区（点状/条带状，市中心与交通干线两侧）、住宅区（占地最广）、工业区（城市外缘、盛行风下风向、沿交通线）的分布规律结合图层讲解；可配合 fly_to 飞往真实城市观察。',
   '- 用户要求录制视频、微课或自动介绍（如“帮我录一个人口分布的介绍视频”）时：先规划 3-8 幕剧本（相邻幕视角由远及近、有推进感），再一次性调用 record_video 把完整剧本经 steps 传入（每幕含视角坐标、可选图层、标注与旁白字幕），不要逐步调用 fly_to/set_layer 等工具执行录制；每幕讲解的具体地点（城市、山脉、河流、界线端点等）必须写入该幕 markers 标注命名标记，让观众看清讲到哪里，纯概念无具体地点的幕可不标；旁白精炼，每幕 1-3 句、dwellMs 4000-10000。视角高度宁远勿近（观众要看清地理格局而非街道细节：大区域 800000-3000000，城市群 200000-800000，城市 80000-200000）。涉及人口数据时先 query_population 查询内置省级统计，其余经济等数据先 web_search 获取事实，再用步骤内 shapes 画线（如胡焕庸线）、markers 标注关键城市。record_video 返回 started 后，告知用户录制在后台进行、预计时长与保存位置（系统「影片/GuEarth」）；用户追问进度或长时间未完成时调用 get_recording_status。讲解中遇到老师想保留的重要画面时，可用 save_scene 存为教学场景书签，供课堂一键回放；用户询问已保存的场景时用 list_scenes。',
   '- 用户点击了地图上的专题要素并询问其成因时：回答中直接使用该要素信息，按成因、分布规律、对地理环境影响的顺序讲解。',
   '- 工具返回 error 字段时，向用户说明原因（例如需要在图层面板配置高德密钥），不要编造坐标；search_place 返回 guidance 字段时，停止重试搜索，按 guidance 的步骤向用户说明排查方法。',
@@ -74,6 +75,24 @@ const SEARCH_PLACE_TOOL: AiToolDefinition = {
       city: { type: 'string', description: '可选，限定搜索的城市名称，用于消歧' }
     },
     required: ['query']
+  }
+}
+
+const POI_STATISTICS_TOOL: AiToolDefinition = {
+  name: 'poi_statistics',
+  description: '统计某地点周边一定半径内的兴趣点（POI）大类构成（高德 20 大类，如购物、餐饮、科教文化、商务住宅、公司企业、金融保险等），返回各大类数量。用于中心地理论验证、城市功能区判断与城市等级分析。',
+  parameters: {
+    type: 'object',
+    properties: {
+      centerName: { type: 'string', description: '中心地点名称（如「王府井」「南京路」），与经纬度二选一；可与 city 搭配消歧' },
+      longitude: { type: 'number', description: '可选，中心点经度（WGS-84）' },
+      latitude: { type: 'number', description: '可选，中心点纬度（WGS-84）' },
+      city: { type: 'string', description: '可选，限定所在城市名称，用于消歧' },
+      radiusMeters: { type: 'number', description: '可选，统计半径（米，200-50000，默认 3000）' },
+      types: { type: 'string', description: '可选，限定的大类代码（两位数字，多个用 | 分隔，如 05|06）' },
+      keywords: { type: 'string', description: '可选，附加关键词过滤（如「超市」「银行」）' }
+    },
+    additionalProperties: false
   }
 }
 
@@ -782,6 +801,17 @@ async function executeTool(sender: WebContents, sessionId: string, name: string,
         searchFailuresBySession.delete(sessionId)
       }
       outcome = { ok: !result.error, content: clampToolResult(JSON.stringify(result)) }
+    } else if (name === 'poi_statistics') {
+      const result = await poiStatistics({
+        centerName: typeof args.centerName === 'string' ? args.centerName : undefined,
+        longitude: typeof args.longitude === 'number' ? args.longitude : undefined,
+        latitude: typeof args.latitude === 'number' ? args.latitude : undefined,
+        city: typeof args.city === 'string' ? args.city : undefined,
+        radiusMeters: typeof args.radiusMeters === 'number' ? args.radiusMeters : undefined,
+        types: typeof args.types === 'string' ? args.types : undefined,
+        keywords: typeof args.keywords === 'string' ? args.keywords : undefined
+      })
+      outcome = { ok: !result.error, content: clampToolResult(JSON.stringify(result)) }
     } else if (name === 'save_memory') {
       if (!memory?.enabled) {
         outcome = { ok: false, content: JSON.stringify({ error: '记忆功能未开启，请在 AI 设置 → 记忆 中开启' }) }
@@ -893,7 +923,7 @@ async function runAgent(options: {
     if (turn.content.trim()) messages.push({ role: turn.role, content: turn.content })
   }
   const memoryTools = memory.enabled ? [MEMORY_SAVE_TOOL, MEMORY_DELETE_TOOL] : []
-  const toolset: AiToolDefinition[] = [...tools.filter((tool) => !['retrieve_knowledge', 'search_place', 'web_search', 'save_memory', 'delete_memory'].includes(tool.name)), KNOWLEDGE_TOOL, SEARCH_PLACE_TOOL, WEB_SEARCH_TOOL, ...memoryTools]
+  const toolset: AiToolDefinition[] = [...tools.filter((tool) => !['retrieve_knowledge', 'search_place', 'web_search', 'save_memory', 'delete_memory'].includes(tool.name)), KNOWLEDGE_TOOL, SEARCH_PLACE_TOOL, POI_STATISTICS_TOOL, WEB_SEARCH_TOOL, ...memoryTools]
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
     const currentStats = contextStatsForMessages(messages, model.contextWindow)

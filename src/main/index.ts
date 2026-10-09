@@ -26,7 +26,7 @@ import { AiSettingsStore } from './ai/settingsStore'
 import { AiChatHistoryStore } from './ai/chatHistoryStore'
 import { AiMemoryStore } from './ai/memoryStore'
 import { registerAiIpcHandlers } from './ai/agent'
-import { searchPlaces } from './ai/amap'
+import { poiStatistics, searchPlaces } from './ai/amap'
 import { searchBaiduPlaces } from './ai/baidu'
 import { beginPlacesRequest } from './ai/searchThrottle'
 import { initDatasets, loadEarthquakeFeed, loadProvinceGeometry } from './datasets'
@@ -675,6 +675,20 @@ function registerIpcHandlers(): void {
     const fallback = alternative === 'baidu' ? await searchBaiduPlaces(keyword) : await searchPlaces(keyword)
     if (fallback.error || fallback.superseded) return { ...primary, source: preferred }
     return { ...fallback, source: alternative, fellBackFrom: preferred }
+  })
+  ipcMain.handle('places:poi-statistics', async (_event, request: unknown) => {
+    if (!isRecord(request)) throw new Error('无效的 POI 统计请求')
+    const numberArg = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) ? value : undefined
+    const stringArg = (value: unknown): string | undefined => typeof value === 'string' && value.trim() ? value : undefined
+    return poiStatistics({
+      centerName: stringArg(request.centerName),
+      longitude: numberArg(request.longitude),
+      latitude: numberArg(request.latitude),
+      city: stringArg(request.city),
+      radiusMeters: numberArg(request.radiusMeters),
+      types: stringArg(request.types),
+      keywords: stringArg(request.keywords)
+    })
   })
   ipcMain.handle('datasets:earthquakes', () => loadEarthquakeFeed())
   ipcMain.handle('datasets:provinces', () => loadProvinceGeometry())

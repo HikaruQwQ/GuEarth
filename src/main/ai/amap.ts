@@ -59,24 +59,49 @@ function toPlaces(pois: AmapPoi[]): AmapPlace[] {
   })
 }
 
+export const POI_CATEGORY_LABELS: Record<string, string> = {
+  '01': '汽车服务',
+  '02': '汽车销售',
+  '03': '汽车维修',
+  '04': '机动车公共停车场',
+  '05': '餐饮服务',
+  '06': '购物服务',
+  '07': '生活服务',
+  '08': '体育休闲服务',
+  '09': '医疗保健服务',
+  '10': '住宿服务',
+  '11': '风景名胜',
+  '12': '商务住宅',
+  '13': '政府机构及社会团体',
+  '14': '科教文化服务',
+  '15': '交通设施服务',
+  '16': '金融保险服务',
+  '17': '公司企业',
+  '18': '道路附属设施',
+  '19': '地名地址信息',
+  '20': '公共设施'
+}
+
 interface AmapPoisResponse {
   pois: AmapPoi[]
+  total: number
   error?: string
   retryable?: boolean
 }
 
 function parsePois(body: unknown): AmapPoisResponse {
-  if (typeof body !== 'object' || body === null) return { pois: [], error: '高德返回了无效响应' }
-  const result = body as { status?: unknown; info?: unknown; infocode?: unknown; pois?: unknown }
+  if (typeof body !== 'object' || body === null) return { pois: [], total: 0, error: '高德返回了无效响应' }
+  const result = body as { status?: unknown; info?: unknown; infocode?: unknown; count?: unknown; pois?: unknown }
   if (result.status !== '1') {
-    if (result.infocode === '10009') return { pois: [], error: '高德 Key 的平台类型不匹配，请在高德控制台配置「Web 服务」类型的 Key (10009)' }
+    if (result.infocode === '10009') return { pois: [], total: 0, error: '高德 Key 的平台类型不匹配，请在高德控制台配置「Web 服务」类型的 Key (10009)' }
     const info = typeof result.info === 'string' ? result.info : '未知错误'
     const code = typeof result.infocode === 'string' ? ` (${result.infocode})` : ''
     const retryable = !/DAILY/i.test(info) && /QPS|FREQUENT/i.test(info)
-    return { pois: [], error: `高德地点搜索失败：${info}${code}`, retryable }
+    return { pois: [], total: 0, error: `高德地点搜索失败：${info}${code}`, retryable }
   }
-  if (!Array.isArray(result.pois)) return { pois: [], error: '高德返回了无效地点数据' }
-  return { pois: result.pois.filter((poi): poi is AmapPoi => typeof poi === 'object' && poi !== null) }
+  if (!Array.isArray(result.pois)) return { pois: [], total: 0, error: '高德返回了无效地点数据' }
+  const total = typeof result.count === 'string' || typeof result.count === 'number' ? Number(result.count) : 0
+  return { pois: result.pois.filter((poi): poi is AmapPoi => typeof poi === 'object' && poi !== null), total: Number.isFinite(total) ? total : 0 }
 }
 
 async function requestPois(url: string): Promise<AmapPoisResponse> {
@@ -85,13 +110,14 @@ async function requestPois(url: string): Promise<AmapPoisResponse> {
     if (!response.ok) {
       return {
         pois: [],
+        total: 0,
         error: `高德地点搜索请求失败 (HTTP ${response.status})`,
         retryable: response.status === 429 || response.status >= 500
       }
     }
     return parsePois(await response.json())
   } catch {
-    return { pois: [], error: '高德地点搜索请求超时或网络异常，请稍后重试', retryable: true }
+    return { pois: [], total: 0, error: '高德地点搜索请求超时或网络异常，请稍后重试', retryable: true }
   }
 }
 
@@ -113,6 +139,176 @@ const SEARCH_MAX_RETRIES = 2
 const SEARCH_RETRY_DELAY_MS = 2_000
 const SEARCH_REQUEST_TIMEOUT_MS = 10_000
 const amapThrottle = createSearchThrottle(SEARCH_MIN_INTERVAL_MS)
+
+function parsePoiType(poi: AmapPoi): string {
+  return typeof poi.type === 'string' ? poi.type : ''
+}
+
+export interface PoiCategoryCount {
+  code: string
+  label: string
+  count: number
+}
+
+export interface PoiStatisticsResult {
+  center: { name: string; longitude: number; latitude: number }
+  radiusMeters?: number
+  city?: string
+  types: string
+  sampled: number
+  total: number
+  truncated: boolean
+  categories: PoiCategoryCount[]
+  note?: string
+  error?: string
+}
+
+export interface PoiStatisticsRequest {
+  centerName?: string
+  longitude?: number
+  latitude?: number
+  city?: string
+  radiusMeters?: number
+  types?: string
+  keywords?: string
+}
+
+const POI_STATS_MAX_SAMPLES = 900
+const POI_STATS_PAGE_SIZE = 25
+const POI_STATS_MAX_PAGES = 36
+
+function bigCategoryCode(type: string): string | undefined {
+  return POI_CATEGORY_LABELS[type.slice(0, 2)] !== undefined ? type.slice(0, 2) : undefined
+}
+
+export async function poiStatistics(request: PoiStatisticsRequest): Promise<PoiStatisticsResult> {
+  const key = readProviderKey('amap')
+  const securityKey = readProviderKey('amap-sk')
+  if (!key) {
+    return {
+      center: { name: request.centerName ?? '', longitude: request.longitude ?? 0, latitude: request.latitude ?? 0 },
+      types: request.types ?? '',
+      sampled: 0,
+      total: 0,
+      truncated: false,
+      categories: [],
+      error: '未配置高德地图 Web 服务密钥：请在「图层管理 → 供应商密钥」中保存 Web 服务 API Key'
+    }
+  }
+  const centerName = request.centerName?.trim().slice(0, 40) ?? ''
+  let longitude = request.longitude
+  let latitude = request.latitude
+  let resolvedName = centerName
+  if ((longitude === undefined || latitude === undefined) && centerName) {
+    const located = await searchPlaces(centerName, request.city)
+    if (located.error || located.places.length === 0) {
+      return {
+        center: { name: centerName, longitude: longitude ?? 0, latitude: latitude ?? 0 },
+        types: request.types ?? '',
+        sampled: 0,
+        total: 0,
+        truncated: false,
+        categories: [],
+        error: located.error ?? `未找到地点「${centerName}」`
+      }
+    }
+    longitude = located.places[0].longitude
+    latitude = located.places[0].latitude
+    resolvedName = located.places[0].name
+  }
+  if (longitude === undefined || latitude === undefined) {
+    return {
+      center: { name: resolvedName, longitude: longitude ?? 0, latitude: latitude ?? 0 },
+      types: request.types ?? '',
+      sampled: 0,
+      total: 0,
+      truncated: false,
+      categories: [],
+      error: '需要提供 centerName 或经纬度（longitude/latitude）'
+    }
+  }
+  const radius = Math.round(Math.min(50_000, Math.max(200, request.radiusMeters ?? 3_000)))
+  const types = request.types?.split('|').map((item) => item.trim()).filter(Boolean).join('|') ?? ''
+  const aroundParams: Record<string, string> = {
+    key,
+    location: `${roundCoordinate(longitude)},${roundCoordinate(latitude)}`,
+    radius: String(radius),
+    offset: String(POI_STATS_PAGE_SIZE),
+    page: '1',
+    extensions: 'base',
+    sortrule: 'distance'
+  }
+  if (types) aroundParams.types = types
+  if (request.keywords?.trim()) aroundParams.keywords = request.keywords.trim().slice(0, 40)
+  const url = requestUrl('https://restapi.amap.com/v3/place/around', aroundParams, securityKey)
+  const first = await amapThrottle.run(() => requestPois(url))
+  if (!first) {
+    return {
+      center: { name: resolvedName, longitude, latitude },
+      radiusMeters: radius,
+      types,
+      sampled: 0,
+      total: 0,
+      truncated: false,
+      categories: [],
+      error: 'POI 统计请求被取消'
+    }
+  }
+  if (first.error) {
+    return {
+      center: { name: resolvedName, longitude, latitude },
+      radiusMeters: radius,
+      types,
+      sampled: 0,
+      total: 0,
+      truncated: false,
+      categories: [],
+      error: first.error
+    }
+  }
+  const counts = new Map<string, number>()
+  let sampled = 0
+  const collect = (pois: AmapPoi[]): void => {
+    for (const poi of pois) {
+      const code = bigCategoryCode(parsePoiType(poi))
+      if (!code) continue
+      counts.set(code, (counts.get(code) ?? 0) + 1)
+      sampled += 1
+    }
+  }
+  collect(first.pois)
+  const reportedTotal = first.total > 0 ? first.total : first.pois.length
+  const maxPages = Math.ceil(Math.min(reportedTotal, POI_STATS_MAX_SAMPLES) / POI_STATS_PAGE_SIZE)
+  const pageCount = Math.min(POI_STATS_MAX_PAGES, maxPages)
+  let pagesFetched = 1
+  if (pageCount > 1) {
+    for (let page = 2; page <= pageCount; page += 1) {
+      const pageParams: Record<string, string> = { ...aroundParams, page: String(page) }
+      const pageUrl = requestUrl('https://restapi.amap.com/v3/place/around', pageParams, securityKey)
+      const pageResult = await amapThrottle.run(() => requestPois(pageUrl))
+      if (!pageResult || pageResult.error || pageResult.pois.length === 0) break
+      pagesFetched = page
+      collect(pageResult.pois)
+      if (pageResult.pois.length < POI_STATS_PAGE_SIZE) break
+    }
+  }
+  const truncated = reportedTotal > pagesFetched * POI_STATS_PAGE_SIZE
+  const categories = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([code, count]) => ({ code, label: POI_CATEGORY_LABELS[code] ?? code, count }))
+  const radiusNote = `以${resolvedName}为中心 ${radius} 米范围内的 POI 抽样统计（共 ${reportedTotal} 条，抽样 ${sampled} 条；受高德分页与配额限制，最多抽样 ${POI_STATS_MAX_SAMPLES} 条）`
+  return {
+    center: { name: resolvedName, longitude, latitude },
+    radiusMeters: radius,
+    city: request.city?.trim() || undefined,
+    types: types || '全部大类',
+    sampled,
+    total: reportedTotal,
+    truncated,
+    categories,
+    note: radiusNote
+  }
+}
 
 export async function searchPlaces(query: string, city?: string, requestId?: number): Promise<AmapSearchResult> {
   const keywords = query.trim().slice(0, 90)

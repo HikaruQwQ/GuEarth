@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 import { summerFactor, winterFactor } from '@renderer/thematic/windField'
 import type { EnsoPhase } from '@renderer/thematic/ensoPhases'
 
-export type ThematicLayerId = 'wind-particles' | 'pressure-belts' | 'koppen-zones' | 'frontal-cyclone' | 'rain-belt' | 'summer-monsoon' | 'winter-monsoon' | 'ocean-currents' | 'climate-zones' | 'coriolis-demo' | 'plate-tectonics' | 'temperature-zones' | 'typhoon' | 'enso' | 'province-population' | 'hu-line' | 'migration-flows'
+export type ThematicLayerId = 'wind-particles' | 'pressure-belts' | 'koppen-zones' | 'frontal-cyclone' | 'rain-belt' | 'summer-monsoon' | 'winter-monsoon' | 'ocean-currents' | 'climate-zones' | 'coriolis-demo' | 'plate-tectonics' | 'temperature-zones' | 'typhoon' | 'enso' | 'province-population' | 'hu-line' | 'migration-flows' | 'city-tiers' | 'functional-zones'
 
 export interface ThematicLayerMeta {
   id: ThematicLayerId
@@ -29,7 +29,9 @@ export const thematicLayerCatalog: ThematicLayerMeta[] = [
   { id: 'enso', name: 'ENSO（厄尔尼诺与拉尼娜）', description: '赤道太平洋海温距平三相位着色与沃克环流示意（可点击查看影响）' },
   { id: 'province-population', name: '省级人口密度', description: '第七次人口普查分省人口密度分级设色（可点击查看各省数据）' },
   { id: 'hu-line', name: '胡焕庸线', description: '黑河—腾冲线与东西两侧人口对比' },
-  { id: 'migration-flows', name: '人口迁移流动', description: '主要省际人口迁移流向示意（可点击查看）' }
+  { id: 'migration-flows', name: '人口迁移流动', description: '主要省际人口迁移流向示意（可点击查看）' },
+  { id: 'city-tiers', name: '中国城市等级', description: '全国/区域/省会/地级/县级五级城市与服务范围示意（可点击查看）' },
+  { id: 'functional-zones', name: '城市功能区模式', description: '商业区、住宅区、工业区分布模式示意（可点击查看成因）' }
 ]
 
 const MONTHS_PER_SECOND = 0.5
@@ -55,7 +57,9 @@ export const useClimateStore = defineStore('climate', () => {
     'enso': false,
     'province-population': false,
     'hu-line': false,
-    'migration-flows': false
+    'migration-flows': false,
+    'city-tiers': false,
+    'functional-zones': false
   })
   const ensoPhase = ref<EnsoPhase>('normal')
 

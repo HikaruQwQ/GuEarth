@@ -18,6 +18,7 @@ import { typhoonIntensityStyles, typhoonTracks } from '@renderer/thematic/typhoo
 import { ensoAnomalyColor, ensoPhaseMeta } from '@renderer/thematic/ensoPhases'
 import { subsolarPointDeg } from '@renderer/thematic/solarMath'
 import { densityColor, densityOf, fanMigrationEndpoints, huLineEndpoints, huLineFacts, huLinePath, migrationFacts, migrationFlows, provincePopulation, provinceSummary, smoothMigrationPath } from '@renderer/thematic/populationCensus'
+import { cityTierOf, FUNCTIONAL_ZONES, urbanCities } from '@renderer/thematic/urbanCities'
 
 const WARM_COLOR = '#f5222d'
 const COLD_COLOR = '#1677ff'
@@ -977,6 +978,133 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     }
   }
 
+  function circleRingDegrees(longitude: number, latitude: number, km: number, segments = 48): Array<[number, number]> {
+    const ring: Array<[number, number]> = []
+    const latRad = (latitude * Math.PI) / 180
+    const degPerKmLng = 111.32 * Math.cos(latRad)
+    for (let index = 0; index <= segments; index += 1) {
+      const angle = (index / segments) * 2 * Math.PI
+      ring.push([
+        Number((longitude + (km * Math.cos(angle)) / Math.max(degPerKmLng, 1e-6)).toFixed(4)),
+        Number((latitude + (km * Math.sin(angle)) / 110.57).toFixed(4))
+      ])
+    }
+    return ring
+  }
+
+  function buildCityTiers(dataSource: Cesium.CustomDataSource): void {
+    for (const city of urbanCities) {
+      const tier = cityTierOf(city.tier)
+      const color = Cesium.Color.fromCssColorString(tier.color)
+      const properties = new Cesium.PropertyBag({
+        name: `${city.name}（${tier.name}）`,
+        layerId: 'city-tiers',
+        summary: `${city.role}。常住人口 ${city.populationWan} 万${city.urbanizationPct !== null ? `，城镇化率 ${city.urbanizationPct}%` : ''}。${tier.description}。`
+      })
+      const pointSize = city.tier === 'national-center' ? 14 : city.tier === 'regional-center' ? 12 : city.tier === 'provincial-center' ? 10 : city.tier === 'prefecture' ? 8 : 6
+      dataSource.entities.add({
+        properties,
+        position: Cesium.Cartesian3.fromDegrees(city.longitude, city.latitude),
+        point: {
+          pixelSize: pointSize,
+          color,
+          outlineColor: Cesium.Color.WHITE,
+          outlineWidth: 1.6,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
+        },
+        label: {
+          text: city.name,
+          font: labelFont(12, city.tier === 'county' ? 400 : 600),
+          fillColor: Cesium.Color.fromCssColorString(city.tier === 'county' ? 'rgba(0,0,0,0.65)' : tier.color),
+          showBackground: true,
+          backgroundColor: Cesium.Color.WHITE.withAlpha(0.72),
+          backgroundPadding: new Cesium.Cartesian2(6, 3),
+          pixelOffset: new Cesium.Cartesian2(0, -(pointSize + 9)),
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, city.tier === 'county' ? 6500000 : 17000000)
+        }
+      })
+      const ring = circleRingDegrees(city.longitude, city.latitude, tier.serviceRadiusKm)
+      dataSource.entities.add({
+        properties,
+        polyline: {
+          positions: toCartesians(ring),
+          clampToGround: true,
+          width: 1.4,
+          material: color.withAlpha(0.45)
+        }
+      })
+    }
+  }
+
+  function buildFunctionalZones(dataSource: Cesium.CustomDataSource): void {
+    const CASE_LON = 119.4
+    const CASE_LAT = 38.3
+    const zoneSpecs: Array<{ center: [number, number]; radiusKm: number; spec: (typeof FUNCTIONAL_ZONES)[number]; showLabel: boolean }> = [
+      { center: [CASE_LON, CASE_LAT], radiusKm: 18, spec: FUNCTIONAL_ZONES[0], showLabel: true },
+      { center: [CASE_LON, CASE_LAT], radiusKm: 55, spec: FUNCTIONAL_ZONES[1], showLabel: false },
+      { center: [CASE_LON - 92, CASE_LAT - 34], radiusKm: 26, spec: FUNCTIONAL_ZONES[2], showLabel: true },
+      { center: [CASE_LON + 40, CASE_LAT + 78], radiusKm: 26, spec: FUNCTIONAL_ZONES[2], showLabel: false }
+    ]
+    for (const zone of zoneSpecs) {
+      const color = Cesium.Color.fromCssColorString(zone.spec.color)
+      const ringCartesians = toRingCartesians(circleRingDegrees(zone.center[0], zone.center[1], zone.radiusKm, 64))
+      const properties = new Cesium.PropertyBag({
+        name: `${zone.spec.name}（模式示意）`,
+        layerId: 'functional-zones',
+        summary: `${zone.spec.summary}（图为放大模式示意，不代表真实区位）`
+      })
+      dataSource.entities.add({
+        properties,
+        polygon: {
+          hierarchy: new Cesium.PolygonHierarchy(ringCartesians),
+          height: 0,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          material: color.withAlpha(0.22)
+        }
+      })
+      dataSource.entities.add({
+        properties,
+        polyline: {
+          positions: ringCartesians,
+          clampToGround: true,
+          width: 2.2,
+          material: color.withAlpha(0.9)
+        }
+      })
+      if (!zone.showLabel) continue
+      dataSource.entities.add({
+        properties,
+        position: Cesium.Cartesian3.fromDegrees(zone.center[0], zone.center[1] + zone.radiusKm / 110.57),
+        label: {
+          text: zone.spec.name,
+          font: labelFont(13, 600),
+          fillColor: color,
+          showBackground: true,
+          backgroundColor: Cesium.Color.WHITE.withAlpha(0.8),
+          backgroundPadding: new Cesium.Cartesian2(7, 4),
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
+        }
+      })
+    }
+    dataSource.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(CASE_LON, CASE_LAT),
+      label: {
+        text: '商业区 · 住宅区（放大模式示意）',
+        font: labelFont(12, 600),
+        fillColor: Cesium.Color.fromCssColorString('rgba(0,0,0,0.65)'),
+        showBackground: true,
+        backgroundColor: Cesium.Color.WHITE.withAlpha(0.75),
+        backgroundPadding: new Cesium.Cartesian2(8, 4),
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
+      }
+    })
+  }
+
   function provinceRingsToHierarchy(rings: number[][][]): Cesium.PolygonHierarchy | null {
     const [outer, ...holes] = rings.map((ring) => toRingCartesians(ring.map(([lon, lat]) => [lon, lat] as [number, number])))
     if (!outer || outer.length < 3) return null
@@ -1043,7 +1171,9 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     'enso': buildEnso,
     'province-population': buildProvincePopulation,
     'hu-line': buildHuLine,
-    'migration-flows': buildMigrationFlows
+    'migration-flows': buildMigrationFlows,
+    'city-tiers': buildCityTiers,
+    'functional-zones': buildFunctionalZones
   }
 
   const enableViews: Partial<Record<ThematicLayerId, LayerView>> = {
@@ -1061,7 +1191,9 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     'enso': { longitude: -155, latitude: 0, height: 9500000 },
     'province-population': { longitude: 104, latitude: 35, height: 11000000 },
     'hu-line': { longitude: 112, latitude: 36, height: 9000000 },
-    'migration-flows': { longitude: 110, latitude: 30, height: 10000000 }
+    'migration-flows': { longitude: 110, latitude: 30, height: 10000000 },
+    'city-tiers': { longitude: 108, latitude: 33, height: 10500000 },
+    'functional-zones': { longitude: 114.3, latitude: 30.55, height: 950000 }
   }
 
   function syncOverlays(): void {

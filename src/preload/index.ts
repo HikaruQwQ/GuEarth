@@ -279,6 +279,35 @@ export interface ProvinceGeoDocument {
 
 export type PlaceSearchProvider = 'amap' | 'baidu'
 
+export interface PoiCategoryCount {
+  code: string
+  label: string
+  count: number
+}
+
+export interface PoiStatisticsResult {
+  center: { name: string; longitude: number; latitude: number }
+  radiusMeters?: number
+  city?: string
+  types: string
+  sampled: number
+  total: number
+  truncated: boolean
+  categories: PoiCategoryCount[]
+  note?: string
+  error?: string
+}
+
+export interface PoiStatisticsRequest {
+  centerName?: string
+  longitude?: number
+  latitude?: number
+  city?: string
+  radiusMeters?: number
+  types?: string
+  keywords?: string
+}
+
 export interface SceneCamera {
   longitude: number
   latitude: number
@@ -377,7 +406,8 @@ const api = {
     copy: (rendererDump: string): Promise<void> => ipcRenderer.invoke('logging:copy-report', rendererDump)
   },
   places: {
-    search: (keyword: string, provider?: PlaceSearchProvider): Promise<PlaceSearchResult> => ipcRenderer.invoke('places:search', keyword, provider)
+    search: (keyword: string, provider?: PlaceSearchProvider): Promise<PlaceSearchResult> => ipcRenderer.invoke('places:search', keyword, provider),
+    poiStatistics: (request: PoiStatisticsRequest): Promise<PoiStatisticsResult> => ipcRenderer.invoke('places:poi-statistics', request)
   },
   datasets: {
     getEarthquakes: (): Promise<EarthquakeFeed> => ipcRenderer.invoke('datasets:earthquakes'),
