@@ -169,6 +169,7 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     const [lon, lat] = beltLabelPosition(month)
     entity.position = new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(lon, lat))
     entity.label.text = new Cesium.ConstantProperty(beltLabel(month))
+    entity.label.show = new Cesium.ConstantProperty(beltOpacity(month) > 0.05 && beltLabel(month) !== '')
   }
 
   function refreshSubsolarPoint(): void {
@@ -190,7 +191,7 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
       position: Cesium.Cartesian3.ZERO,
       label: {
         text: '',
-        show: new Cesium.CallbackProperty(() => beltOpacity(store.month) > 0.05 && beltLabel(store.month) !== '', false),
+        show: false,
         font: labelFont(15, 600),
         fillColor: Cesium.Color.WHITE,
         outlineColor: Cesium.Color.fromCssColorString(RAIN_BELT_COLOR),
@@ -1145,9 +1146,13 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     await addEarthquakeEntities(dataSource)
   })
   watch(() => Math.round(store.month * 4) / 4, refreshPressureBeltGeometry)
-  watch(() => Math.round(store.month * 20) / 20, refreshRainBelt)
-  watch([() => store.summerStrength > 0.5, () => store.winterStrength > 0.5], refreshSeasonalCurrents)
-  watch(() => solarStore.utcMs, refreshSubsolarPoint)
+  function requestRender(): void {
+    const current = viewer.value
+    if (current && !current.isDestroyed()) current.scene.requestRender()
+  }
+  watch(() => Math.round(store.month * 20) / 20, (month) => { refreshRainBelt(month); requestRender() })
+  watch([() => store.summerStrength > 0.5, () => store.winterStrength > 0.5], () => { refreshSeasonalCurrents(); requestRender() })
+  watch(() => solarStore.utcMs, () => { refreshSubsolarPoint(); requestRender() })
   watch(viewer, (_current, previous) => {
     clearSources(previous)
     syncOverlays()

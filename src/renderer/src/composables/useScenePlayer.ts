@@ -1,4 +1,4 @@
-import { reactive, type Ref } from 'vue'
+import { reactive, watch, type Ref } from 'vue'
 import * as Cesium from 'cesium'
 import type { RecordingSaveResult, SceneCamera, SceneSimTime, SceneSnapshot, TeachingScene } from '../../../preload'
 import { useGlobeStore } from '@renderer/stores/globe'
@@ -78,7 +78,7 @@ function sanitizeCamera(camera: SceneCamera): SceneCamera {
     longitude: clampNumber(camera.longitude, -180, 180, 105),
     latitude: clampNumber(camera.latitude, -90, 90, 35),
     height: clampNumber(camera.height, 1000, 20000000, 8000000),
-    heading: normalizedHeadingDegrees(camera.heading),
+    heading: Number.isFinite(camera.heading) ? ((camera.heading % 360) + 360) % 360 : 0,
     pitch: clampNumber(camera.pitch, -89.9, 89.9, -90)
   }
 }
@@ -102,14 +102,15 @@ function cameraOrientation(camera: SceneCamera): { heading: number; pitch: numbe
   }
 }
 
-function interpolateCamera(start: SceneCamera, end: SceneCamera, amount: number): SceneCamera {
+export function interpolateCamera(start: SceneCamera, end: SceneCamera, amount: number): SceneCamera {
   const normalizedAmount = Math.min(1, Math.max(0, amount))
   const lerp = (a: number, b: number): number => a + (b - a) * normalizedAmount
+  const lerpAngle = (a: number, b: number): number => a + (((b - a + 540) % 360) - 180) * normalizedAmount
   return sanitizeCamera({
-    longitude: lerp(start.longitude, end.longitude),
+    longitude: ((lerpAngle(start.longitude, end.longitude) + 540) % 360) - 180,
     latitude: lerp(start.latitude, end.latitude),
     height: Math.exp(lerp(Math.log(Math.max(1000, start.height)), Math.log(Math.max(1000, end.height)))),
-    heading: lerp(start.heading, end.heading),
+    heading: lerpAngle(start.heading, end.heading),
     pitch: lerp(start.pitch, end.pitch)
   })
 }
@@ -155,7 +156,7 @@ export function useScenePlayer(viewer: Ref<Cesium.Viewer | undefined>, switchBas
   })
 
   let aborted = false
-  let recordingOriginalScreenSpaceError: number | null = null
+  let recordingQualityRevision = 0
   let advanceResolver: (() => void) | null = null
   let advanceTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -282,13 +283,16 @@ export function useScenePlayer(viewer: Ref<Cesium.Viewer | undefined>, switchBas
     if (!enabled || !current || current.isDestroyed()) return task()
     const globe = current.scene.globe
     const originalMaximumScreenSpaceError = globe.maximumScreenSpaceError
-    recordingOriginalScreenSpaceError = originalMaximumScreenSpaceError
-    globe.maximumScreenSpaceError = Math.min(originalMaximumScreenSpaceError, recordingQualityConfig().screenSpaceError)
-    current.scene.requestRender()
+    const stopWatching = watch(() => scenesStore.recording.prewarmQuality, () => {
+      if (current.isDestroyed()) return
+      globe.maximumScreenSpaceError = recordingQualityConfig().screenSpaceError
+      recordingQualityRevision += 1
+      current.scene.requestRender()
+    }, { immediate: true, flush: 'sync' })
     return task().finally(() => {
+      stopWatching()
       if (!current.isDestroyed()) {
         globe.maximumScreenSpaceError = originalMaximumScreenSpaceError
-        recordingOriginalScreenSpaceError = null
         current.scene.requestRender()
       }
     })
@@ -297,23 +301,23 @@ export function useScenePlayer(viewer: Ref<Cesium.Viewer | undefined>, switchBas
   function visibleSurfaceReady(): boolean {
     const current = viewer.value
     if (!current || current.isDestroyed()) return false
-    const scene = current.scene
-    if (scene.mode !== Cesium.SceneMode.SCENE3D) return scene.globe.tilesLoaded
-    const canvas = scene.canvas
-    const ray = current.camera.getPickRay(new Cesium.Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2))
-    const surface = ray ? scene.globe.pick(ray, scene) : undefined
-    return Boolean(surface) && scene.globe.tilesLoaded
+    return current.scene.globe.tilesLoaded
   }
 
-  async function waitTilesLoaded(timeoutMs: number, isCancelled?: () => boolean): Promise<boolean> {
+  async function waitTilesLoaded(timeoutMs: number | (() => number), isCancelled?: () => boolean): Promise<boolean> {
     const current = viewer.value
     if (!current || current.isDestroyed()) return false
     const start = Date.now()
     let stableSince = 0
-    while (Date.now() - start < timeoutMs) {
+    let qualityRevision = recordingQualityRevision
+    while (typeof timeoutMs === 'function' ? timeoutMs() > 0 : Date.now() - start < timeoutMs) {
       if (isCancelled?.()) return false
       requestSceneRender()
       await delay(120)
+      if (qualityRevision !== recordingQualityRevision) {
+        qualityRevision = recordingQualityRevision
+        stableSince = 0
+      }
       if (visibleSurfaceReady()) {
         if (!stableSince) stableSince = Date.now()
         if (Date.now() - stableSince >= 500) return true
@@ -352,11 +356,6 @@ export function useScenePlayer(viewer: Ref<Cesium.Viewer | undefined>, switchBas
         for (let index = 0; index < views.length; index += 1) {
           if (aborted || runId !== id || scenesStore.recording.skipPrewarm) break
           const quality = recording ? recordingQualityConfig() : null
-          const current = viewer.value
-          if (recording && current && !current.isDestroyed()) {
-            current.scene.globe.maximumScreenSpaceError = Math.min(recordingOriginalScreenSpaceError ?? current.scene.globe.maximumScreenSpaceError, quality?.screenSpaceError ?? 1)
-            current.scene.requestRender()
-          }
           const timedOut = recording && Date.now() - totalStartedAt >= (quality?.totalTimeoutMs ?? 24_000)
           if (timedOut) {
             scenesStore.setRecording({ prewarmTimedOut: true, prewarmMessage: '高清预加载等待超时，正在继续录制准备…' })
@@ -371,10 +370,20 @@ export function useScenePlayer(viewer: Ref<Cesium.Viewer | undefined>, switchBas
           setCameraView(view.camera, centerTarget)
           requestSceneRender()
           if (recording) scenesStore.setRecording({ prewarmStep: index + 1, prewarmMessage: `正在预加载高清录制画面 ${index + 1}/${views.length}` })
-          const remaining = recording ? Math.max(600, (quality?.totalTimeoutMs ?? 24_000) - (Date.now() - totalStartedAt)) : PREWARM_TILE_TIMEOUT_MS
-          const loaded = await waitTilesLoaded(recording ? Math.min(quality?.viewTimeoutMs ?? 4_000, remaining) : PREWARM_TILE_TIMEOUT_MS, () => aborted || runId !== id || scenesStore.recording.skipPrewarm)
+          const viewStartedAt = Date.now()
+          const timeout = (): number => {
+            if (!recording) return PREWARM_TILE_TIMEOUT_MS
+            const selected = recordingQualityConfig()
+            return Math.min(selected.viewTimeoutMs, Math.max(0, selected.totalTimeoutMs - (viewStartedAt - totalStartedAt)))
+          }
+          let loaded = false
+          let qualityRevision: number
+          do {
+            qualityRevision = recordingQualityRevision
+            loaded = await waitTilesLoaded(() => Math.max(0, timeout() - (Date.now() - viewStartedAt)), () => aborted || runId !== id || scenesStore.recording.skipPrewarm)
+            await delay(PREWARM_HOLD_MS)
+          } while (recording && qualityRevision !== recordingQualityRevision && !aborted && runId === id && !scenesStore.recording.skipPrewarm && Date.now() - viewStartedAt < timeout())
           if (recording && !loaded) scenesStore.setRecording({ prewarmTimedOut: true, prewarmMessage: '网络较慢，部分高清地图细节可能在录制中继续加载…' })
-          await delay(PREWARM_HOLD_MS)
         }
       })
     } finally {

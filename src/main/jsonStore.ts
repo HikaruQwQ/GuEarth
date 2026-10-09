@@ -19,10 +19,13 @@ export async function readJson(path: string): Promise<unknown> {
 }
 
 export async function writeJson(path: string, value: unknown): Promise<void> {
-  const data = JSON.stringify(value)
+  await writeAtomic(path, JSON.stringify(value))
+}
+
+export async function writeAtomic(path: string, data: string | Buffer): Promise<void> {
   const temporaryPath = `${path}.${randomUUID()}.tmp`
   try {
-    await writeFile(temporaryPath, data, 'utf8')
+    await writeFile(temporaryPath, data)
     await rename(temporaryPath, path)
   } finally {
     await unlink(temporaryPath).catch(() => undefined)

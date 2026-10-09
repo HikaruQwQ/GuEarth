@@ -402,19 +402,28 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
 
   function hasRenderedInitialSurface(currentViewer: Cesium.Viewer): { terrain: boolean; imagery: boolean } {
     if (!hasVisibleGlobeSurface(currentViewer)) return { terrain: false, imagery: false }
-    const surface = (currentViewer.scene.globe as unknown as { _surface?: { _tilesToRender?: Array<{ data?: { renderedMesh?: unknown; terrainState?: number; imagery?: Array<{ readyImagery?: { imageryLayer?: Cesium.ImageryLayer; texture?: unknown } }> } }> } })._surface
-    const tiles = surface?._tilesToRender ?? []
     const activeLayer = imageryLayers.get(store.selectedLayerId)
-    let terrain = false
-    let imagery = false
-    for (const tile of tiles) {
-      const data = tile.data
-      if (!data?.renderedMesh || data.terrainState !== TERRAIN_READY_STATE) continue
-      terrain = true
-      if (activeLayer?.show && data.imagery?.some((item) => item.readyImagery?.imageryLayer === activeLayer && Boolean(item.readyImagery.texture))) imagery = true
-      if (terrain && imagery) break
+    const fallback = (): { terrain: boolean; imagery: boolean } => ({
+      terrain: currentViewer.scene.globe.tilesLoaded,
+      imagery: currentViewer.scene.globe.tilesLoaded && Boolean(activeLayer && !activeLayer.isDestroyed() && activeLayer.show && activeLayer.ready)
+    })
+    try {
+      const surface = (currentViewer.scene.globe as unknown as { _surface?: { _tilesToRender?: Array<{ data?: { renderedMesh?: unknown; terrainState?: number; imagery?: Array<{ readyImagery?: { imageryLayer?: Cesium.ImageryLayer; texture?: unknown } }> } }> } })._surface
+      const tiles = surface?._tilesToRender
+      if (!Array.isArray(tiles)) return fallback()
+      let terrain = false
+      let imagery = false
+      for (const tile of tiles) {
+        const data = tile?.data
+        if (!data?.renderedMesh || data.terrainState !== TERRAIN_READY_STATE) continue
+        terrain = true
+        if (activeLayer?.show && Array.isArray(data.imagery) && data.imagery.some((item) => item?.readyImagery?.imageryLayer === activeLayer && Boolean(item.readyImagery.texture))) imagery = true
+        if (terrain && imagery) break
+      }
+      return { terrain, imagery }
+    } catch {
+      return fallback()
     }
-    return { terrain, imagery }
   }
 
   function detachInitialSurfaceTracking(currentViewer?: Cesium.Viewer): void {
@@ -445,7 +454,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
         callback?.()
         return
       }
-      if (currentViewer.terrainProvider.constructor.name === 'EllipsoidTerrainProvider') {
+      if (currentViewer.terrainProvider instanceof Cesium.EllipsoidTerrainProvider) {
         if (!initialTerrainReady) return
         if (rendered.imagery) initialImageryReady = true
         if (initialImageryReady) {

@@ -14,9 +14,10 @@ Sentry.init({
 })
 import { execFileSync } from 'child_process'
 import { dirname, join } from 'path'
-import { flushJsonWrites, readJson, serialQueue, writeJson } from './jsonStore'
+import { flushJsonWrites, readJson, serialQueue, writeAtomic, writeJson } from './jsonStore'
+import { listTileFiles, pruneTileFiles } from './tileCacheFiles'
 import { storageChildPath } from './storagePath'
-import { access, constants, mkdir, open, readdir, readFile, rename as renameFile, stat, stat as statFile, rm, unlink, writeFile } from 'fs/promises'
+import { access, constants, mkdir, open, readFile, rename as renameFile, stat, rm, unlink } from 'fs/promises'
 import type { FileHandle } from 'fs/promises'
 import { createHash, randomUUID } from 'crypto'
 import icon from '../../resources/icon.png?asset'
@@ -134,9 +135,12 @@ async function readSettings(): Promise<PersistedSettings> {
 
 const enqueueSettings = serialQueue()
 
-function saveSettings(): Promise<void> {
-  const snapshot = structuredClone(settings)
-  return enqueueSettings(() => writeJson(settingsPath, snapshot))
+function saveSettings(update: (current: PersistedSettings) => PersistedSettings): Promise<void> {
+  return enqueueSettings(async () => {
+    const next = update(structuredClone(settings))
+    await writeJson(settingsPath, next)
+    settings = next
+  })
 }
 
 function proxyConfig(proxy: string): Parameters<Electron.Session['setProxy']>[0] {
@@ -227,54 +231,13 @@ async function cachedTileResponse(key: TileKey, allowExpired: boolean): Promise<
 let tilePruneAt = 0
 let tilePrunePromise: Promise<void> | undefined
 
-async function listTileFiles(): Promise<Array<{ path: string; size: number; mtimeMs: number }>> {
-  const files: Array<{ path: string; size: number; mtimeMs: number }> = []
-  const pending = [tileCachePath]
-  while (pending.length) {
-    const current = pending.pop()
-    if (!current) continue
-    let entries
-    try {
-      entries = await readdir(current, { withFileTypes: true })
-    } catch {
-      continue
-    }
-    for (const entry of entries) {
-      const entryPath = join(current, entry.name)
-      if (entry.isDirectory()) {
-        pending.push(entryPath)
-        continue
-      }
-      if (!entryPath.endsWith('.bin')) continue
-      try {
-        const info = await statFile(entryPath)
-        files.push({ path: entryPath, size: info.size, mtimeMs: info.mtimeMs })
-      } catch {
-        void 0
-      }
-    }
-  }
-  return files
-}
-
 async function enforceTileCacheLimit(): Promise<void> {
   if (tilePrunePromise) return tilePrunePromise
   const now = Date.now()
   if (now - tilePruneAt < TILE_CACHE_PRUNE_INTERVAL_MS) return
   tilePruneAt = now
   tilePrunePromise = (async () => {
-    const files = await listTileFiles()
-    let total = files.reduce((sum, file) => sum + file.size, 0)
-    if (total <= TILE_CACHE_MAX_BYTES) return
-    files.sort((a, b) => a.mtimeMs - b.mtimeMs)
-    for (const file of files) {
-      if (total <= TILE_CACHE_MAX_BYTES) break
-      await Promise.all([
-        unlink(file.path).catch(() => undefined),
-        unlink(file.path.replace(/\.bin$/, '.json')).catch(() => undefined)
-      ])
-      total -= file.size
-    }
+    await pruneTileFiles(tileCachePath, TILE_CACHE_MAX_BYTES)
   })().finally(() => {
     tilePrunePromise = undefined
   })
@@ -291,11 +254,9 @@ function writeTile(entry: TileCacheEntry): Promise<void> {
     const basePath = tileBasePath(key)
     try {
       await mkdir(dirname(basePath), { recursive: true })
-      await Promise.all([
-        writeFile(`${basePath}.bin`, Buffer.from(entry.data)),
-        writeFile(`${basePath}.json`, JSON.stringify({ contentType: entry.contentType, expiresAt: entry.expiresAt }), 'utf8')
-      ])
-      void enforceTileCacheLimit()
+      await writeAtomic(`${basePath}.bin`, Buffer.from(entry.data))
+      await writeJson(`${basePath}.json`, { contentType: entry.contentType, expiresAt: entry.expiresAt })
+      void enqueueTileMutation(enforceTileCacheLimit).catch(() => undefined)
     } catch {
       void 0
     }
@@ -303,9 +264,9 @@ function writeTile(entry: TileCacheEntry): Promise<void> {
 }
 
 async function cacheStats(): Promise<TileCacheStats> {
-  const files = await listTileFiles()
+  const files = await listTileFiles(tileCachePath)
   return files.reduce<TileCacheStats>((result, file) => {
-    result.files += 1
+    if (file.path.endsWith('.bin')) result.files += 1
     result.bytes += file.size
     return result
   }, { files: 0, bytes: 0 })
@@ -647,44 +608,45 @@ function registerIpcHandlers(): void {
   ipcMain.handle('settings:get', () => settingsSnapshot())
   ipcMain.handle('settings:update', async (_event, patch: GuEarthSettingsPatch): Promise<GuEarthSettings> => {
     if (!isRecord(patch)) throw new Error('无效的设置')
-    const nextSettings: PersistedSettings = {
-      ...settings,
-      providerCredentials: settings.providerCredentials
-    }
-    if (patch.selectedImageryProviderId !== undefined) nextSettings.selectedImageryProviderId = safeId(patch.selectedImageryProviderId)
-    if (patch.selectedTerrainProviderId !== undefined) nextSettings.selectedTerrainProviderId = safeId(patch.selectedTerrainProviderId)
-    if (patch.terrainExaggeration !== undefined) {
-      if (typeof patch.terrainExaggeration !== 'number' || !Number.isFinite(patch.terrainExaggeration)) throw new Error('无效的地形夸张设置')
-      nextSettings.terrainExaggeration = Math.min(5, Math.max(1, patch.terrainExaggeration))
-    }
-    if (patch.terrainLighting !== undefined) {
-      if (typeof patch.terrainLighting !== 'boolean') throw new Error('无效的光照设置')
-      nextSettings.terrainLighting = patch.terrainLighting
-    }
-    if (patch.tileCacheEnabled !== undefined) {
-      if (typeof patch.tileCacheEnabled !== 'boolean') throw new Error('无效的缓存设置')
-      nextSettings.tileCacheEnabled = patch.tileCacheEnabled
-    }
-    if (patch.networkProxy !== undefined) {
-      if (typeof patch.networkProxy !== 'string') throw new Error('无效的代理设置')
-      const normalized = normalizeNetworkProxy(patch.networkProxy)
-      if (normalized === '' && patch.networkProxy.trim() !== '') throw new Error('无效的代理地址')
-      nextSettings.networkProxy = normalized
-    }
-    if (patch.providerStyles !== undefined) {
-      if (!isRecord(patch.providerStyles)) throw new Error('无效的影像样式')
-      const providerStyles = { ...settings.providerStyles }
-      for (const [providerId, styleId] of Object.entries(patch.providerStyles)) {
-        providerStyles[safeId(providerId)] = safeId(styleId)
+    await saveSettings((settings) => {
+      const nextSettings: PersistedSettings = {
+        ...settings,
+        providerCredentials: settings.providerCredentials
       }
-      nextSettings.providerStyles = providerStyles
-    }
-    if (patch.setupGuideDismissed !== undefined) {
-      if (typeof patch.setupGuideDismissed !== 'boolean') throw new Error('无效的向导设置')
-      nextSettings.setupGuideDismissed = patch.setupGuideDismissed
-    }
-    settings = nextSettings
-    await saveSettings()
+      if (patch.selectedImageryProviderId !== undefined) nextSettings.selectedImageryProviderId = safeId(patch.selectedImageryProviderId)
+      if (patch.selectedTerrainProviderId !== undefined) nextSettings.selectedTerrainProviderId = safeId(patch.selectedTerrainProviderId)
+      if (patch.terrainExaggeration !== undefined) {
+        if (typeof patch.terrainExaggeration !== 'number' || !Number.isFinite(patch.terrainExaggeration)) throw new Error('无效的地形夸张设置')
+        nextSettings.terrainExaggeration = Math.min(5, Math.max(1, patch.terrainExaggeration))
+      }
+      if (patch.terrainLighting !== undefined) {
+        if (typeof patch.terrainLighting !== 'boolean') throw new Error('无效的光照设置')
+        nextSettings.terrainLighting = patch.terrainLighting
+      }
+      if (patch.tileCacheEnabled !== undefined) {
+        if (typeof patch.tileCacheEnabled !== 'boolean') throw new Error('无效的缓存设置')
+        nextSettings.tileCacheEnabled = patch.tileCacheEnabled
+      }
+      if (patch.networkProxy !== undefined) {
+        if (typeof patch.networkProxy !== 'string') throw new Error('无效的代理设置')
+        const normalized = normalizeNetworkProxy(patch.networkProxy)
+        if (normalized === '' && patch.networkProxy.trim() !== '') throw new Error('无效的代理地址')
+        nextSettings.networkProxy = normalized
+      }
+      if (patch.providerStyles !== undefined) {
+        if (!isRecord(patch.providerStyles)) throw new Error('无效的影像样式')
+        const providerStyles = { ...settings.providerStyles }
+        for (const [providerId, styleId] of Object.entries(patch.providerStyles)) {
+          providerStyles[safeId(providerId)] = safeId(styleId)
+        }
+        nextSettings.providerStyles = providerStyles
+      }
+      if (patch.setupGuideDismissed !== undefined) {
+        if (typeof patch.setupGuideDismissed !== 'boolean') throw new Error('无效的向导设置')
+        nextSettings.setupGuideDismissed = patch.setupGuideDismissed
+      }
+      return nextSettings
+    })
     if (patch.networkProxy !== undefined) void applyNetworkProxy()
     return settingsSnapshot()
   })
@@ -692,16 +654,14 @@ function registerIpcHandlers(): void {
     const id = safeId(providerId)
     writeProviderKey(id, apiKey)
     const status = { configured: true, updatedAt: Date.now() }
-    settings.providerCredentials[id] = status
-    await saveSettings()
+    await saveSettings((current) => ({ ...current, providerCredentials: { ...current.providerCredentials, [id]: status } }))
     return status
   })
   ipcMain.handle('settings:clear-provider-api-key', async (_event, providerId: string): Promise<ProviderCredentialStatus> => {
     const id = safeId(providerId)
     clearProviderKey(id)
     const status = { configured: false, updatedAt: null }
-    settings.providerCredentials[id] = status
-    await saveSettings()
+    await saveSettings((current) => ({ ...current, providerCredentials: { ...current.providerCredentials, [id]: status } }))
     return status
   })
   ipcMain.handle('settings:has-provider-api-key', (_event, providerId: string): ProviderCredentialStatus => credentialStatus(safeId(providerId)))
@@ -780,8 +740,7 @@ function registerIpcHandlers(): void {
     } catch {
       throw new Error('所选文件夹不可写，请选择其他文件夹')
     }
-    settings.recordingDirectory = directory
-    await saveSettings()
+    await saveSettings((current) => ({ ...current, recordingDirectory: directory }))
     return directory
   })
   ipcMain.handle('recordings:start', async (event, mimeType: unknown): Promise<string> => {
