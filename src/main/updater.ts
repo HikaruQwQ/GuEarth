@@ -1,9 +1,11 @@
 import { app, BrowserWindow, ipcMain, net } from 'electron'
 import { spawn } from 'child_process'
+import { createHash } from 'crypto'
 import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, type WriteStream } from 'fs'
 import { join } from 'path'
 import { logger } from '../common/logger'
 import type { UpdateState, UpdaterEvent } from '../preload'
+import { compareVersions, hashFile, parseSha256 } from './updateIntegrity'
 
 const DEFAULT_UPDATE_BASE_URL = 'https://guearth-updater.isla.fan'
 const CHECK_TIMEOUT_MS = 15000
@@ -19,6 +21,7 @@ let downloadUrl = ''
 let installerPath = ''
 let receivedBytes = 0
 let totalBytes = 0
+let expectedSha256 = ''
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -69,11 +72,17 @@ async function checkForUpdate(): Promise<void> {
     if (!isRecord(payload)) return
     const remoteVersion = typeof payload.name === 'string' ? payload.name.replace(/^v/, '').trim() : ''
     const url = typeof payload.url === 'string' ? payload.url.trim() : ''
-    if (!VERSION_PATTERN.test(remoteVersion) || remoteVersion === app.getVersion()) return
+    if (!VERSION_PATTERN.test(remoteVersion) || compareVersions(remoteVersion, app.getVersion()) <= 0) return
     if (!/^https?:\/\/\S+$/i.test(url)) return
+    const sha256 = parseSha256(payload.sha256)
+    if (!sha256) {
+      logger.warn('updater', '更新清单缺少有效的 sha256，已忽略该更新', { version: remoteVersion })
+      return
+    }
     version = remoteVersion
     notes = typeof payload.notes === 'string' ? payload.notes.slice(0, 2000) : ''
     downloadUrl = url
+    expectedSha256 = sha256
     status = 'available'
     emit({ type: 'available', version, notes })
   } catch {
@@ -88,14 +97,26 @@ function finishStream(stream: WriteStream): Promise<void> {
   })
 }
 
+async function cachedInstallerIsTrustworthy(path: string): Promise<boolean> {
+  if (!expectedSha256) return false
+  try {
+    return (await hashFile(path)) === expectedSha256
+  } catch {
+    return false
+  }
+}
+
 async function downloadUpdate(): Promise<void> {
   if (status !== 'available' || !downloadUrl) throw new Error('当前没有可用更新')
   const finalPath = installerPathFor(version)
   if (existsSync(finalPath)) {
-    installerPath = finalPath
-    status = 'ready'
-    emit({ type: 'downloaded', version })
-    return
+    if (await cachedInstallerIsTrustworthy(finalPath)) {
+      installerPath = finalPath
+      status = 'ready'
+      emit({ type: 'downloaded', version })
+      return
+    }
+    rmSync(finalPath, { force: true })
   }
   const tempPath = `${finalPath}.tmp`
   status = 'downloading'
@@ -104,6 +125,7 @@ async function downloadUpdate(): Promise<void> {
   emit({ type: 'progress', received: 0, total: 0 })
   const stream = createWriteStream(tempPath)
   stream.on('error', () => void 0)
+  const hash = createHash('sha256')
   try {
     mkdirSync(downloadsDir, { recursive: true })
     rmSync(tempPath, { force: true })
@@ -120,6 +142,7 @@ async function downloadUpdate(): Promise<void> {
       if (done) break
       if (!value?.byteLength) continue
       receivedBytes += value.byteLength
+      hash.update(value)
       if (!stream.write(Buffer.from(value))) await new Promise<void>((resolve) => stream.once('drain', () => resolve()))
       const now = Date.now()
       if (now - lastEmitAt >= PROGRESS_EMIT_INTERVAL_MS) {
@@ -129,6 +152,7 @@ async function downloadUpdate(): Promise<void> {
     }
     if (totalBytes > 0 && receivedBytes !== totalBytes) throw new Error('更新下载不完整')
     await finishStream(stream)
+    if (hash.digest('hex') !== expectedSha256) throw new Error('更新包校验失败，安装包可能与发布版本不一致')
     renameSync(tempPath, finalPath)
     installerPath = finalPath
     status = 'ready'
@@ -145,8 +169,15 @@ async function downloadUpdate(): Promise<void> {
   }
 }
 
-function installUpdate(): void {
+async function installUpdate(): Promise<void> {
   if (status !== 'ready' || !installerPath || !existsSync(installerPath)) throw new Error('更新尚未下载完成')
+  if (!(await cachedInstallerIsTrustworthy(installerPath))) {
+    rmSync(installerPath, { force: true })
+    status = 'available'
+    logger.error('updater', '安装前校验失败，已丢弃安装包', installerPath)
+    emit({ type: 'error', message: '安装包校验失败，已清除缓存，请重新下载更新' })
+    throw new Error('安装包校验失败，请重新下载更新')
+  }
   try {
     const installer = spawn(installerPath, [], { detached: true, stdio: 'ignore' })
     installer.once('error', () => void 0)

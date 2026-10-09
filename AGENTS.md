@@ -57,7 +57,7 @@ Core platform:
 | 2 | Multi-provider layers, API-key settings (encrypted), terrain providers, tile cache | Done |
 | 3 | Teaching tools: draw point/line/polygon, measure distance/area, annotations, persistence | Done |
 | 4 | EOQ agent: provider-agnostic AI settings, streaming chat, tool-calling bridge | Done |
-| 5 | Packaging, auto-update stub, offline groundwork, performance | Pending |
+| 5 | Packaging (CI-built NSIS + GitHub Release), hash-verified auto-updater, offline groundwork, performance | In progress (offline packs & perf open, see issue #33) |
 
 Teaching modules (人教版高中地理 mapping; thematic layers live in `src/renderer/src/thematic/`, registered in `useThematicLayers.ts`):
 
@@ -78,6 +78,7 @@ Teaching modules (人教版高中地理 mapping; thematic layers live in `src/re
 npm run dev        # electron-vite dev server + app
 npm run build      # production build
 npm run typecheck  # tsc (node) + vue-tsc (web)
+npm test           # node:test unit tests (tests/*.test.mjs), run by CI
 ```
 
 ## Docs
@@ -99,3 +100,8 @@ npm run typecheck  # tsc (node) + vue-tsc (web)
   backslash-separated segments.
 - Verify UI changes by running `npm run dev` and exercising the feature; report explicitly if a
   change could not be visually verified.
+- **Updater contract**: the update manifest at `GET {base}/update/win32/{currentVersion}` must
+  ship a `sha256` field (lowercase hex, or base64 with a `sha256-`/`sha256:` prefix) for the
+  installer it advertises; the client rejects updates without a valid digest, re-verifies cached
+  and about-to-launch installers, and ignores non-upgrade versions. Release tooling must publish
+  the digest alongside the artifact.

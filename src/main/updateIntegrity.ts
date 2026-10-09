@@ -1,0 +1,57 @@
+import { createHash } from 'crypto'
+import { createReadStream } from 'fs'
+
+const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/
+const SHA256_BASE64_PATTERN = /^[A-Za-z0-9+/]{43}=$/
+
+function stripSha256Prefix(value: string): { prefixed: boolean; value: string } {
+  const lowered = value.toLowerCase()
+  if (lowered.startsWith('sha256-')) return { prefixed: true, value: value.slice('sha256-'.length) }
+  if (lowered.startsWith('sha256:')) return { prefixed: true, value: value.slice('sha256:'.length) }
+  return { prefixed: false, value }
+}
+
+export function parseSha256(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const { prefixed, value } = stripSha256Prefix(raw.trim())
+  const lowered = value.toLowerCase()
+  if (SHA256_HEX_PATTERN.test(lowered)) return lowered
+  if (prefixed && SHA256_BASE64_PATTERN.test(value)) {
+    const decoded = Buffer.from(value, 'base64').toString('hex')
+    return SHA256_HEX_PATTERN.test(decoded) ? decoded : null
+  }
+  return null
+}
+
+export function hashFile(path: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256')
+    const stream = createReadStream(path)
+    stream.on('error', reject)
+    stream.on('data', (chunk) => hash.update(chunk))
+    stream.on('end', () => resolve(hash.digest('hex')))
+  })
+}
+
+function splitVersion(version: string): [number[], string] {
+  const withoutBuild = version.trim().replace(/^v/, '').split('+')[0]
+  const hyphen = withoutBuild.indexOf('-')
+  const core = hyphen >= 0 ? withoutBuild.slice(0, hyphen) : withoutBuild
+  const prerelease = hyphen >= 0 ? withoutBuild.slice(hyphen + 1) : ''
+  const numbers = core.split('.').map((part) => Number.parseInt(part, 10) || 0)
+  return [numbers, prerelease]
+}
+
+export function compareVersions(left: string, right: string): number {
+  const [leftCore, leftPre] = splitVersion(left)
+  const [rightCore, rightPre] = splitVersion(right)
+  const length = Math.max(leftCore.length, rightCore.length)
+  for (let index = 0; index < length; index += 1) {
+    const diff = (leftCore[index] ?? 0) - (rightCore[index] ?? 0)
+    if (diff !== 0) return diff < 0 ? -1 : 1
+  }
+  if (leftPre === rightPre) return 0
+  if (!leftPre) return 1
+  if (!rightPre) return -1
+  return leftPre < rightPre ? -1 : 1
+}
