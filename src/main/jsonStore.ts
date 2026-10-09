@@ -26,7 +26,16 @@ export async function writeAtomic(path: string, data: string | Buffer): Promise<
   const temporaryPath = `${path}.${randomUUID()}.tmp`
   try {
     await writeFile(temporaryPath, data)
-    await rename(temporaryPath, path)
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await rename(temporaryPath, path)
+        break
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        if (attempt >= 4 || !['EACCES', 'EBUSY', 'EEXIST', 'EPERM'].includes(code ?? '')) throw error
+        await new Promise((resolve) => setTimeout(resolve, 20 * (attempt + 1)))
+      }
+    }
   } finally {
     await unlink(temporaryPath).catch(() => undefined)
   }

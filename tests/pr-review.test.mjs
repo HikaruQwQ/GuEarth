@@ -87,6 +87,16 @@ test('atomic replacement exposes complete bytes and cleans failed temporary writ
   assert.equal((await readdir(dirname(path))).some((file) => file.endsWith('.tmp')), false)
 })
 
+test('atomic writes retry transient rename failures and clean the temporary file', async (t) => {
+  const path = join(await directory(t), 'retry.json')
+  const source = await readFile(new URL('../src/main/jsonStore.ts', import.meta.url), 'utf8')
+  assert.match(source, /attempt >= 4/)
+  assert.match(source, /EACCES.*EBUSY.*EEXIST.*EPERM/s)
+  await writeAtomic(path, '{"ok":true}')
+  assert.equal(await readFile(path, 'utf8'), '{"ok":true}')
+  assert.equal((await readdir(dirname(path))).some((file) => file.endsWith('.tmp')), false)
+})
+
 test('failed settings commits preserve memory and concurrent patches use the last committed state', async (t) => {
   const path = join(await directory(t), 'settings.json')
   const source = await readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8')

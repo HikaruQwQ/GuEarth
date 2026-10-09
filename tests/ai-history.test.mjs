@@ -14,7 +14,7 @@ const historyFsUrl = `data:text/javascript,${encodeURIComponent(`
       const remaining = failRenames.get(to)
       if (remaining === 0) {
         failRenames.delete(to)
-        throw Object.assign(new Error('locked'), { code: 'EACCES' })
+        throw Object.assign(new Error('locked'), { code: 'EIO' })
       }
       failRenames.set(to, remaining - 1)
     }
@@ -197,7 +197,7 @@ test('a failed recovery precommit preserves the committed index and body', async
   const indexPath = join(`${path}.d`, 'index.json')
   const committed = await readFile(indexPath, 'utf8')
   failRenames.set(join(`${path}.d`, 'recovery.json'), 0)
-  await assert.rejects(store.delete('retained'), { code: 'EACCES' })
+  await assert.rejects(store.delete('retained'), { code: 'EIO' })
   assert.equal(await readFile(indexPath, 'utf8'), committed)
   assert.deepEqual(await store.get('retained'), conversation('retained'))
   const reopened = new AiChatHistoryStore()

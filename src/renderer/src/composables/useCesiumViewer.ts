@@ -408,7 +408,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
       imagery: currentViewer.scene.globe.tilesLoaded && Boolean(activeLayer && !activeLayer.isDestroyed() && activeLayer.show && activeLayer.ready)
     })
     try {
-      const surface = (currentViewer.scene.globe as unknown as { _surface?: { _tilesToRender?: Array<{ data?: { renderedMesh?: unknown; terrainState?: number; imagery?: Array<{ readyImagery?: { imageryLayer?: Cesium.ImageryLayer; texture?: unknown } }> } }> } })._surface
+      const surface = (currentViewer.scene.globe as unknown as { _surface?: { _tilesToRender?: Array<{ data?: { renderedMesh?: unknown; terrainState?: number; imagery?: Array<{ useWebMercatorT?: boolean; readyImagery?: { imageryLayer?: Cesium.ImageryLayer; texture?: unknown; textureWebMercator?: unknown } }> } }> } })._surface
       const tiles = surface?._tilesToRender
       if (!Array.isArray(tiles)) return fallback()
       let terrain = false
@@ -417,7 +417,7 @@ export function useCesiumViewer(container: Ref<HTMLDivElement | undefined>) {
         const data = tile?.data
         if (!data?.renderedMesh || data.terrainState !== TERRAIN_READY_STATE) continue
         terrain = true
-        if (activeLayer?.show && Array.isArray(data.imagery) && data.imagery.some((item) => item?.readyImagery?.imageryLayer === activeLayer && Boolean(item.readyImagery.texture))) imagery = true
+        if (activeLayer?.show && Array.isArray(data.imagery) && data.imagery.some((item) => item?.readyImagery?.imageryLayer === activeLayer && Boolean(item.useWebMercatorT ? item.readyImagery.textureWebMercator : item.readyImagery.texture))) imagery = true
         if (terrain && imagery) break
       }
       return { terrain, imagery }

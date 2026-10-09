@@ -381,9 +381,10 @@ export function useScenePlayer(viewer: Ref<Cesium.Viewer | undefined>, switchBas
           do {
             qualityRevision = recordingQualityRevision
             loaded = await waitTilesLoaded(() => Math.max(0, timeout() - (Date.now() - viewStartedAt)), () => aborted || runId !== id || scenesStore.recording.skipPrewarm)
+            if (aborted || runId !== id || scenesStore.recording.skipPrewarm) break
             await delay(PREWARM_HOLD_MS)
           } while (recording && qualityRevision !== recordingQualityRevision && !aborted && runId === id && !scenesStore.recording.skipPrewarm && Date.now() - viewStartedAt < timeout())
-          if (recording && !loaded) scenesStore.setRecording({ prewarmTimedOut: true, prewarmMessage: '网络较慢，部分高清地图细节可能在录制中继续加载…' })
+          if (recording && !loaded && !aborted && runId === id && !scenesStore.recording.skipPrewarm) scenesStore.setRecording({ prewarmTimedOut: true, prewarmMessage: '网络较慢，部分高清地图细节可能在录制中继续加载…' })
         }
       })
     } finally {
