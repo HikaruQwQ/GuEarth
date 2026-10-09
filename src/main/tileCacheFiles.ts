@@ -1,5 +1,5 @@
 import { readdir, stat, unlink } from 'fs/promises'
-import { join } from 'path'
+import { sep } from 'path'
 
 interface TileFile {
   path: string
@@ -19,7 +19,8 @@ export async function listTileFiles(directory: string): Promise<TileFile[]> {
       continue
     }
     for (const entry of entries) {
-      const path = join(current, entry.name)
+      if (entry.name === '.' || entry.name === '..' || entry.name.includes('/') || entry.name.includes('\\')) continue
+      const path = `${current}${sep}${entry.name}`
       if (entry.isDirectory()) {
         pending.push(path)
       } else if (entry.isFile() && /\.(bin|json)$/.test(entry.name)) {
