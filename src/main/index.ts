@@ -29,7 +29,7 @@ import { registerAiIpcHandlers } from './ai/agent'
 import { searchPlaces } from './ai/amap'
 import { searchBaiduPlaces } from './ai/baidu'
 import { beginPlacesRequest } from './ai/searchThrottle'
-import { initDatasets, loadEarthquakeFeed } from './datasets'
+import { initDatasets, loadEarthquakeFeed, loadProvinceGeometry } from './datasets'
 import { initUpdater } from './updater'
 
 interface PersistedSettings {
@@ -726,6 +726,7 @@ function registerIpcHandlers(): void {
     return { ...fallback, source: alternative, fellBackFrom: preferred }
   })
   ipcMain.handle('datasets:earthquakes', () => loadEarthquakeFeed())
+  ipcMain.handle('datasets:provinces', () => loadProvinceGeometry())
   ipcMain.handle('tiles:get', (_event, key: TileKey) => readTile(key))
   ipcMain.handle('tiles:put', (_event, entry: TileCacheEntry) => writeTile(entry))
   ipcMain.handle('tiles:clear', (_event, providerId?: string) => {

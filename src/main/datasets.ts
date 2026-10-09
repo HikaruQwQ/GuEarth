@@ -1,13 +1,16 @@
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { net } from 'electron'
-import type { EarthquakeFeed } from '../preload'
+import type { EarthquakeFeed, ProvinceFeature, ProvinceGeoDocument } from '../preload'
+import { gcj02ToWgs84 } from './geo/gcj02'
+import provincesAssetPath from '../../resources/geo/china-provinces.geojson?asset'
 
 const EARTHQUAKE_FEED_URL = 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_month.geojson'
 const CACHE_TTL_MS = 6 * 3600 * 1000
 const FETCH_TIMEOUT_MS = 15000
 
 let earthquakesPath = ''
+let provinceGeometry: ProvinceGeoDocument | null = null
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -82,4 +85,61 @@ export async function loadEarthquakeFeed(): Promise<EarthquakeFeed> {
     if (cached) return cached
     throw error instanceof Error ? error : new Error('USGS request failed')
   }
+}
+
+function toLatLngPair(value: unknown): [number, number] | null {
+  if (!Array.isArray(value) || value.length < 2) return null
+  const [longitude, latitude] = value
+  if (typeof longitude !== 'number' || typeof latitude !== 'number') return null
+  return [longitude, latitude]
+}
+
+function normalizePolygons(geometry: unknown): number[][][][] {
+  if (!isRecord(geometry) || !Array.isArray(geometry.coordinates)) return []
+  const sets = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.type === 'MultiPolygon' ? geometry.coordinates : []
+  const polygons: number[][][][] = []
+  for (const set of sets) {
+    if (!Array.isArray(set)) continue
+    const rings = set
+      .filter((ring): ring is number[][] => Array.isArray(ring) && ring.length >= 3)
+      .map((ring) => ring.map((point) => gcj02ToWgs84(point[0], point[1])))
+    if (rings.length > 0) polygons.push(rings)
+  }
+  return polygons
+}
+
+function normalizeProvinceFeatures(json: unknown): ProvinceFeature[] {
+  if (!isRecord(json) || !Array.isArray(json.features)) return []
+  const features: ProvinceFeature[] = []
+  for (const feature of json.features) {
+    if (!isRecord(feature) || !isRecord(feature.properties)) continue
+    const name = feature.properties.name
+    const adcode = feature.properties.adcode
+    const center = toLatLngPair(feature.properties.center)
+    if (typeof name !== 'string' || !name || typeof adcode !== 'number' || !center) continue
+    const centroid = toLatLngPair(feature.properties.centroid) ?? center
+    const polygons = normalizePolygons(feature.geometry)
+    if (polygons.length === 0) continue
+    features.push({
+      name,
+      adcode,
+      center: gcj02ToWgs84(center[0], center[1]),
+      centroid: gcj02ToWgs84(centroid[0], centroid[1]),
+      polygons
+    })
+  }
+  return features
+}
+
+export function loadProvinceGeometry(): ProvinceGeoDocument {
+  if (provinceGeometry) return provinceGeometry
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(provincesAssetPath, 'utf8'))
+    const features = normalizeProvinceFeatures(parsed)
+    if (features.length === 0) throw new Error('省级行政区划数据为空')
+    provinceGeometry = { features }
+  } catch (error) {
+    throw error instanceof Error ? error : new Error(String(error))
+  }
+  return provinceGeometry
 }

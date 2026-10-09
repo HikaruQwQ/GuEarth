@@ -2,6 +2,7 @@ import entries from './entries.json'
 import expandedEntries from './entries-expanded.json'
 import curriculumEntries from './entries-curriculum.json'
 import finalEntries from './entries-final.json'
+import humanEntries from './entries-human.json'
 
 export interface KnowledgeSource {
   title: string
@@ -52,7 +53,7 @@ export interface KnowledgeMatch {
   matchedFields: string[]
 }
 
-const knowledgeEntries = [...entries, ...expandedEntries, ...curriculumEntries, ...finalEntries] as KnowledgeEntry[]
+const knowledgeEntries = [...entries, ...expandedEntries, ...curriculumEntries, ...finalEntries, ...humanEntries] as KnowledgeEntry[]
 const MAX_QUERY_LENGTH = 200
 const DEFAULT_TOP_K = 3
 const MAX_TOP_K = 5

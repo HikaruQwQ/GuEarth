@@ -42,7 +42,8 @@ const SYSTEM_PROMPT = [
   '- 用户想看某类地理过程的演示动画（热力环流、大气受热、大气垂直分层、水循环、海水温盐度、潮汐与波浪、陆地水体与河流补给、褶皱断层、河流地貌、典型地貌识别、外力作用、地球圈层、太阳视运动、黄赤交角、自转速度）或想对比两地地方时时：用 open_panel 打开对应教学面板配合讲解，并按面板提示展开演示；地方时对比会进入点选模式，提示用户在地球上依次单击两个地点；一个主题讲完可用 open_panel 且 close 为 true 清理全部面板。',
   '- 需要更换地图样式或强化地形表现时：用 set_basemap 切换底图（卫星影像看真实地貌与土地利用、地形晕渲看地势起伏与山脉走向、道路底图看城镇区位）；讲山地褶皱、峡谷下切等地形起伏时用 set_terrain 提高垂直夸张（3-5 倍）或开启地形光照，讲完恢复 1-2 倍。',
   '- 用户问板块构造、地震、火山、山脉海沟成因等地表形态塑造问题时：用 set_layer 开启 plate-tectonics 板块运动与地震火山图层（可点击边界、火山、地震要素查看成因）；分析具体地点地貌时，先 fly_to 飞往该处，再用 explain_landform 获取海拔与最近板块边界（名称、类型、距离），按内力作用（板块运动、岩浆活动、变质作用）与外力作用（流水、风力、冰川、海浪）框架讲解；讲解地震火山分布规律时强调其集中于板块边界，与消亡、生长边界的对应关系。',
-  '- 用户要求录制视频、微课或自动介绍（如“帮我录一个人口分布的介绍视频”）时：先规划 3-8 幕剧本（相邻幕视角由远及近、有推进感），再一次性调用 record_video 把完整剧本经 steps 传入（每幕含视角坐标、可选图层、标注与旁白字幕），不要逐步调用 fly_to/set_layer 等工具执行录制；每幕讲解的具体地点（城市、山脉、河流、界线端点等）必须写入该幕 markers 标注命名标记，让观众看清讲到哪里，纯概念无具体地点的幕可不标；旁白精炼，每幕 1-3 句、dwellMs 4000-10000。视角高度宁远勿近（观众要看清地理格局而非街道细节：大区域 800000-3000000，城市群 200000-800000，城市 80000-200000）。涉及人口、经济等数据时先 web_search 获取事实，再用步骤内 shapes 画线（如胡焕庸线）、markers 标注关键城市。record_video 返回 started 后，告知用户录制在后台进行、预计时长与保存位置（系统「影片/GuEarth」）；用户追问进度或长时间未完成时调用 get_recording_status。讲解中遇到老师想保留的重要画面时，可用 save_scene 存为教学场景书签，供课堂一键回放；用户询问已保存的场景时用 list_scenes。',
+  '- 用户问中国人口分布、省级人口数量、人口密度、城镇化率或胡焕庸线问题时：先调用 query_population 查询内置的第七次人口普查省级数据（province 传「全国」可查全国总量），依据返回数据讲规律，不要编造数字；配合 set_layer 开启 province-population 省级人口密度、hu-line 胡焕庸线、migration-flows 人口迁移流动图层展示；讲人口分布成因时按地形、气候、水源、交通、开发历史与经济发展差异归纳。',
+  '- 用户要求录制视频、微课或自动介绍（如“帮我录一个人口分布的介绍视频”）时：先规划 3-8 幕剧本（相邻幕视角由远及近、有推进感），再一次性调用 record_video 把完整剧本经 steps 传入（每幕含视角坐标、可选图层、标注与旁白字幕），不要逐步调用 fly_to/set_layer 等工具执行录制；每幕讲解的具体地点（城市、山脉、河流、界线端点等）必须写入该幕 markers 标注命名标记，让观众看清讲到哪里，纯概念无具体地点的幕可不标；旁白精炼，每幕 1-3 句、dwellMs 4000-10000。视角高度宁远勿近（观众要看清地理格局而非街道细节：大区域 800000-3000000，城市群 200000-800000，城市 80000-200000）。涉及人口数据时先 query_population 查询内置省级统计，其余经济等数据先 web_search 获取事实，再用步骤内 shapes 画线（如胡焕庸线）、markers 标注关键城市。record_video 返回 started 后，告知用户录制在后台进行、预计时长与保存位置（系统「影片/GuEarth」）；用户追问进度或长时间未完成时调用 get_recording_status。讲解中遇到老师想保留的重要画面时，可用 save_scene 存为教学场景书签，供课堂一键回放；用户询问已保存的场景时用 list_scenes。',
   '- 用户点击了地图上的专题要素并询问其成因时：回答中直接使用该要素信息，按成因、分布规律、对地理环境影响的顺序讲解。',
   '- 工具返回 error 字段时，向用户说明原因（例如需要在图层面板配置高德密钥），不要编造坐标；search_place 返回 guidance 字段时，停止重试搜索，按 guidance 的步骤向用户说明排查方法。',
   '不要在回答中输出 markdown 标题或表格，使用简洁的分段与短列表。'
@@ -983,6 +984,13 @@ function summarizeToolResult(content: string): string {
   if (typeof parsed.name === 'string' && parsed.name) return parsed.kind === 'point' ? `已添加标记「${parsed.name}」` : `已绘制「${parsed.name}」`
   if (typeof parsed.measurement === 'string' && parsed.measurement) return parsed.measurement
   if (typeof parsed.height === 'number') return `海拔 ${Math.round(parsed.height)} m`
+  if (parsed.province === '全国' && typeof parsed.populationWan === 'number' && typeof parsed.urbanizationPct === 'number') {
+    return `${parsed.province}：人口 ${parsed.populationWan} 万、城镇化 ${parsed.urbanizationPct}%`
+  }
+  if (typeof parsed.densityPerKm2 === 'number' && typeof parsed.province === 'string') {
+    const population = typeof parsed.populationWan === 'number' ? `人口 ${parsed.populationWan} 万、` : ''
+    return `${parsed.province}：${population}密度约 ${parsed.densityPerKm2} 人/km²`
+  }
   if (typeof parsed.longitude === 'number') return '已定位'
   return '完成'
 }

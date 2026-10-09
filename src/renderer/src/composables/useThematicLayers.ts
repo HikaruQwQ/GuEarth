@@ -1,6 +1,6 @@
 import { onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import * as Cesium from 'cesium'
-import type { EarthquakeEvent, EarthquakeFeed } from '../../../preload'
+import type { EarthquakeEvent, EarthquakeFeed, ProvinceGeoDocument } from '../../../preload'
 import { thematicLayerCatalog, useClimateStore, type ThematicLayerId } from '@renderer/stores/climate'
 import { useSolarStore } from '@renderer/stores/solar'
 import { useFailureStore } from '@renderer/stores/failure'
@@ -17,6 +17,7 @@ import { temperatureZoneBands, temperatureZoneLines } from '@renderer/thematic/t
 import { typhoonIntensityStyles, typhoonTracks } from '@renderer/thematic/typhoonTracks'
 import { ensoAnomalyColor, ensoPhaseMeta } from '@renderer/thematic/ensoPhases'
 import { subsolarPointDeg } from '@renderer/thematic/solarMath'
+import { densityColor, densityOf, fanMigrationEndpoints, huLineEndpoints, huLineFacts, huLinePath, migrationFacts, migrationFlows, provincePopulation, provinceSummary, smoothMigrationPath } from '@renderer/thematic/populationCensus'
 
 const WARM_COLOR = '#f5222d'
 const COLD_COLOR = '#1677ff'
@@ -41,6 +42,11 @@ const FRONTAL_CYCLONE_LAT = 34
 const BELT_LABEL_LON = 150
 const WIND_ARROW_LONS = [-150, -90, -30, 30, 90, 150]
 const LABEL_FONT_FAMILY = '"Microsoft YaHei", "PingFang SC", sans-serif'
+const HU_LINE_COLOR = '#531dab'
+const MIGRATION_FLOW_COLOR = '#fa8c16'
+const PROVINCE_BORDER_COLOR = 'rgba(0, 0, 0, 0.35)'
+const HU_LINE_MID_LON = 112.5
+const HU_LINE_MID_LAT = 36.5
 
 interface LayerView {
   longitude: number
@@ -81,7 +87,7 @@ function arrowHeadPositions(from: [number, number], to: [number, number], size: 
   ])
 }
 
-function arrowLabelAt(arrow: MonsoonArrow): [number, number] {
+function arrowLabelAt(arrow: MonsoonArrow, offset = 3.4): [number, number] {
   const latMidRad = (((arrow.from[1] + arrow.to[1]) / 2) * Math.PI) / 180
   const cosLat = Math.max(0.25, Math.cos(latMidRad))
   const dx = (arrow.to[0] - arrow.from[0]) * cosLat
@@ -90,8 +96,50 @@ function arrowLabelAt(arrow: MonsoonArrow): [number, number] {
   const perpX = dy / norm
   const perpY = -dx / norm
   return [
-    (arrow.from[0] + arrow.to[0]) / 2 + (perpX * 3.4) / cosLat,
-    (arrow.from[1] + arrow.to[1]) / 2 + perpY * 3.4
+    (arrow.from[0] + arrow.to[0]) / 2 + (perpX * offset) / cosLat,
+    (arrow.from[1] + arrow.to[1]) / 2 + perpY * offset
+  ]
+}
+
+function migrationPathLength(path: Array<[number, number]>): number {
+  let length = 0
+  for (let index = 1; index < path.length; index += 1) {
+    const [fromLon, fromLat] = path[index - 1]
+    const [toLon, toLat] = path[index]
+    const cosLat = Math.max(0.25, Math.cos(((fromLat + toLat) * 0.5 * Math.PI) / 180))
+    length += Math.hypot((toLon - fromLon) * cosLat, toLat - fromLat)
+  }
+  return length
+}
+
+function migrationArrowHeadPositions(path: Array<[number, number]>, size: number): Cesium.Cartesian3[] {
+  const tip = pathPointAt(path, 1)
+  const cosLat = Math.max(0.25, Math.cos((tip.position[1] * Math.PI) / 180))
+  const [dirX, dirY] = tip.direction
+  const baseDistance = size * 1.7
+  const halfWidth = size * 0.45
+  const baseLon = tip.position[0] - (dirX * baseDistance) / cosLat
+  const baseLat = tip.position[1] - dirY * baseDistance
+  const perpX = -dirY
+  const perpY = dirX
+  return Cesium.Cartesian3.fromDegreesArray([
+    tip.position[0], tip.position[1],
+    baseLon + (perpX * halfWidth) / cosLat, baseLat + perpY * halfWidth,
+    baseLon - (perpX * halfWidth) / cosLat, baseLat - perpY * halfWidth
+  ])
+}
+
+function migrationHeadSize(path: Array<[number, number]>): number {
+  return Math.min(0.4, Math.max(0.16, migrationPathLength(path) * 0.03))
+}
+
+function migrationLabelAt(path: Array<[number, number]>, offset: number): [number, number] {
+  const point = pathPointAt(path, 0.52)
+  const cosLat = Math.max(0.25, Math.cos((point.position[1] * Math.PI) / 180))
+  const [dirX, dirY] = point.direction
+  return [
+    point.position[0] + (dirY * offset) / cosLat,
+    point.position[1] - dirX * offset
   ]
 }
 
@@ -822,6 +870,164 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     })
   }
 
+  function buildHuLine(dataSource: Cesium.CustomDataSource): void {
+    const lineColor = Cesium.Color.fromCssColorString(HU_LINE_COLOR)
+    const properties = new Cesium.PropertyBag({
+      name: '胡焕庸线（黑河—腾冲线）',
+      layerId: 'hu-line',
+      summary: `${huLineFacts[1]}${huLineFacts[2]}${huLineFacts[3]}`
+    })
+    dataSource.entities.add({
+      properties,
+      polyline: {
+        positions: toCartesians(huLinePath),
+        clampToGround: true,
+        width: 2.5,
+        material: new Cesium.PolylineDashMaterialProperty({ color: lineColor })
+      }
+    })
+    for (const endpoint of huLineEndpoints) {
+      dataSource.entities.add({
+        properties,
+        position: Cesium.Cartesian3.fromDegrees(endpoint.longitude, endpoint.latitude),
+        label: {
+          text: endpoint.name,
+          font: labelFont(13, 600),
+          fillColor: lineColor,
+          showBackground: true,
+          backgroundColor: Cesium.Color.WHITE.withAlpha(0.78),
+          backgroundPadding: new Cesium.Cartesian2(7, 4),
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
+        }
+      })
+    }
+    dataSource.entities.add({
+      properties,
+      position: Cesium.Cartesian3.fromDegrees(HU_LINE_MID_LON, HU_LINE_MID_LAT),
+      label: {
+        text: '胡焕庸线',
+        font: labelFont(14, 600),
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: lineColor,
+        outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset: new Cesium.Cartesian2(0, -12),
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
+      }
+    })
+  }
+
+  function buildMigrationFlows(dataSource: Cesium.CustomDataSource): void {
+    const color = Cesium.Color.fromCssColorString(MIGRATION_FLOW_COLOR)
+    const overview = migrationFacts[0] + migrationFacts[3]
+    const fannedEndpoints = fanMigrationEndpoints(migrationFlows)
+    for (const flow of migrationFlows) {
+      const rawPath = flow.path ?? [flow.from, flow.to]
+      const endpoint = fannedEndpoints.get(flow) ?? flow.to
+      const adjustedPath: Array<[number, number]> = [...rawPath.slice(0, -1), endpoint]
+      const path = smoothMigrationPath(adjustedPath)
+      const label = `${flow.fromName}→${flow.toName}`
+      const properties = new Cesium.PropertyBag({
+        name: `人口迁移流向：${label}`,
+        layerId: 'migration-flows',
+        summary: `人口由${flow.fromName}流向${flow.toName}${flow.note ? `（${flow.note}）` : ''}。${overview}`
+      })
+      const lengthDeg = migrationPathLength(path)
+      const arcHeight = Math.min(380000, Math.max(40000, lengthDeg * 22000))
+      const baseHeight = 0
+      const heights = path.map((_, index) => {
+        const t = index / (path.length - 1)
+        return baseHeight + arcHeight * Math.sin(Math.PI * t)
+      })
+      dataSource.entities.add({
+        properties,
+        polyline: {
+          positions: Cesium.Cartesian3.fromDegreesArrayHeights(path.flatMap((point, index) => [point[0], point[1], heights[index]])),
+          arcType: Cesium.ArcType.NONE,
+          width: flow.weight === 'major' ? 3.5 : 2.2,
+          material: color.withAlpha(flow.weight === 'major' ? 0.9 : 0.72)
+        }
+      })
+      const headSize = migrationHeadSize(path)
+      dataSource.entities.add({
+        properties,
+        polygon: {
+          hierarchy: new Cesium.PolygonHierarchy(migrationArrowHeadPositions(path, headSize)),
+          height: 0,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          material: color.withAlpha(0.96)
+        }
+      })
+      const primaryLabel = flow.weight === 'major' || flow.fromName === '甘肃' || flow.fromName === '黑龙江'
+      const [lon, lat] = migrationLabelAt(path, primaryLabel ? 0.9 : 0.75)
+      dataSource.entities.add({
+        properties,
+        position: Cesium.Cartesian3.fromDegrees(lon, lat, arcHeight),
+        label: {
+          text: label,
+          font: labelFont(12, 600),
+          fillColor: color,
+          showBackground: true,
+          backgroundColor: Cesium.Color.WHITE.withAlpha(0.78),
+          backgroundPadding: new Cesium.Cartesian2(6, 3),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, primaryLabel ? 15000000 : 4200000)
+        }
+      })
+    }
+  }
+
+  function provinceRingsToHierarchy(rings: number[][][]): Cesium.PolygonHierarchy | null {
+    const [outer, ...holes] = rings.map((ring) => toRingCartesians(ring.map(([lon, lat]) => [lon, lat] as [number, number])))
+    if (!outer || outer.length < 3) return null
+    return new Cesium.PolygonHierarchy(
+      outer,
+      holes.filter((hole) => hole.length >= 3).map((hole) => new Cesium.PolygonHierarchy(hole))
+    )
+  }
+
+  async function addProvinceEntities(dataSource: Cesium.CustomDataSource): Promise<void> {
+    let document: ProvinceGeoDocument
+    try {
+      document = await window.guEarth.datasets.getProvinces()
+    } catch {
+      if (sources.get('province-population') === dataSource) {
+        failureStore.reportFailure({ scope: 'province-dataset', message: '省级行政区划数据加载失败，人口密度图层不完整', detail: '重启应用可重新加载内置数据', retryable: false })
+      }
+      return
+    }
+    if (sources.get('province-population') !== dataSource) return
+    failureStore.clearFailure('province-dataset')
+    for (const feature of document.features) {
+      const population = provincePopulation.find((item) => item.name === feature.name)
+      if (!population) continue
+      const fillColor = Cesium.Color.fromCssColorString(densityColor(densityOf(population)))
+      const borderColor = Cesium.Color.fromCssColorString(PROVINCE_BORDER_COLOR)
+      const properties = new Cesium.PropertyBag({
+        name: feature.name,
+        layerId: 'province-population',
+        summary: provinceSummary(feature.name) ?? ''
+      })
+      for (const rings of feature.polygons) {
+        const hierarchy = provinceRingsToHierarchy(rings)
+        if (!hierarchy) continue
+        dataSource.entities.add({
+          properties,
+          polygon: { hierarchy, material: new Cesium.ColorMaterialProperty(fillColor.withAlpha(0.65)) }
+        })
+        dataSource.entities.add({
+          polyline: { positions: hierarchy.positions, clampToGround: true, width: 1.2, material: borderColor }
+        })
+      }
+    }
+  }
+
+  function buildProvincePopulation(dataSource: Cesium.CustomDataSource): void {
+    void addProvinceEntities(dataSource)
+  }
+
   const builders: Record<ThematicLayerId, (dataSource: Cesium.CustomDataSource) => void> = {
     'wind-particles': () => undefined,
     'pressure-belts': buildPressureBelts,
@@ -836,7 +1042,10 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     'plate-tectonics': buildPlateTectonics,
     'temperature-zones': buildTemperatureZones,
     'typhoon': buildTyphoon,
-    'enso': buildEnso
+    'enso': buildEnso,
+    'province-population': buildProvincePopulation,
+    'hu-line': buildHuLine,
+    'migration-flows': buildMigrationFlows
   }
 
   const enableViews: Partial<Record<ThematicLayerId, LayerView>> = {
@@ -851,7 +1060,10 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     'plate-tectonics': { longitude: 180, latitude: 5, height: 17000000 },
     'temperature-zones': { longitude: 20, latitude: 0, height: 17000000 },
     'typhoon': { longitude: 132, latitude: 18, height: 10500000 },
-    'enso': { longitude: -155, latitude: 0, height: 9500000 }
+    'enso': { longitude: -155, latitude: 0, height: 9500000 },
+    'province-population': { longitude: 104, latitude: 35, height: 11000000 },
+    'hu-line': { longitude: 112, latitude: 36, height: 9000000 },
+    'migration-flows': { longitude: 110, latitude: 30, height: 10000000 }
   }
 
   function syncOverlays(): void {
