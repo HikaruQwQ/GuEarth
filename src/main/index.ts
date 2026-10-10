@@ -22,6 +22,8 @@ import icon from '../../resources/icon.png?asset'
 import type { AnnotationDocument, AnnotationEntry, GeoPosition, GuEarthSettings, GuEarthSettingsPatch, NetworkProxyTestResult, PlaceSearchProvider, ProviderCredentialStatus, RecordingSaveResult, SceneCamera, SceneDocument, SceneSnapshot, SceneSimTime, StoredShape, TeachingScene, TileCacheEntry, TileCacheStats, TileKey } from '../preload'
 import { assertEncryptionAvailable, assertSafeId, clearProviderKey, hasProviderKey, initKeyVault, readProviderKey, writeProviderKey } from './keyVault'
 import { baiduLngLatToTile, tileCenter, wgs84ToBd09 } from './geo'
+import { tileWgs84ShiftPixels, warpTileToWgs84 } from './tileWarp'
+import type { WarpSourceTile } from './tileWarp'
 import { AiSettingsStore } from './ai/settingsStore'
 import { AiChatHistoryStore } from './ai/chatHistoryStore'
 import { AiMemoryStore } from './ai/memoryStore'
@@ -296,6 +298,22 @@ const TILE_FETCH_HEADERS = {
   'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8'
 }
 
+const AMAP_FALLBACK_MAX_LEVEL = 18
+const amapFallbackSubdomains = ['01', '02', '03', '04']
+
+function amapFallbackTileUrl(kind: 'vector' | 'satellite', level: number, x: number, y: number): string | undefined {
+  if (level > AMAP_FALLBACK_MAX_LEVEL) return undefined
+  const subdomain = amapFallbackSubdomains[((x + y) % amapFallbackSubdomains.length + amapFallbackSubdomains.length) % amapFallbackSubdomains.length]
+  if (kind === 'satellite') return `https://webst${subdomain}.is.autonavi.com/appmaptile?style=6&x=${x}&y=${y}&z=${level}`
+  return `https://webrd${subdomain}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x=${x}&y=${y}&z=${level}`
+}
+
+const fallbackEligibleProviders: Record<string, 'vector' | 'satellite'> = {
+  osm: 'vector',
+  'esri-imagery': 'satellite',
+  opentopomap: 'vector'
+}
+
 async function fetchTileWithRetry(url: string): Promise<Response> {
   let lastError: unknown
   for (let attempt = 0; attempt < TILE_FETCH_ATTEMPTS; attempt++) {
@@ -306,6 +324,74 @@ async function fetchTileWithRetry(url: string): Promise<Response> {
     }
   }
   throw lastError
+}
+
+const fallbackLoggedProviders = new Set<string>()
+
+const amapSourceTileInFlight = new Map<string, Promise<WarpSourceTile | null>>()
+
+function fetchAmapSourceTile(kind: 'vector' | 'satellite', level: number, x: number, y: number): Promise<WarpSourceTile | null> {
+  const mapKey = `${kind}/${level}/${x}/${y}`
+  const inFlight = amapSourceTileInFlight.get(mapKey)
+  if (inFlight) return inFlight
+  const request = loadAmapSourceTile(kind, level, x, y).finally(() => {
+    amapSourceTileInFlight.delete(mapKey)
+  })
+  amapSourceTileInFlight.set(mapKey, request)
+  return request
+}
+
+async function loadAmapSourceTile(kind: 'vector' | 'satellite', level: number, x: number, y: number): Promise<WarpSourceTile | null> {
+  const key: TileKey = { providerId: `amap-${kind}`, styleId: 'raw', level, x, y }
+  const cached = cachedTileResponse(key, false)
+  if (cached) {
+    try {
+      return { buffer: await cached.arrayBuffer(), contentType: cached.headers.get('content-type') ?? 'image/png' }
+    } catch {
+      return null
+    }
+  }
+  const url = amapFallbackTileUrl(kind, level, x, y)
+  if (!url) return null
+  try {
+    const response = await fetchTileWithRetry(url)
+    if (!response.ok) return null
+    const buffer = await response.arrayBuffer()
+    const contentType = response.headers.get('content-type') ?? 'image/png'
+    if (settings.tileCacheEnabled) writeTile({ ...key, data: buffer, contentType, expiresAt: Date.now() + TILE_TTL_MS })
+    return { buffer, contentType }
+  } catch {
+    return null
+  }
+}
+
+async function fallbackTileResponse(providerId: string, key: TileKey): Promise<Response | null> {
+  const kind = fallbackEligibleProviders[providerId]
+  if (!kind) return null
+  const { level, x, y } = key
+  if (!fallbackLoggedProviders.has(providerId)) {
+    fallbackLoggedProviders.add(providerId)
+    logger.warn('tiles', `原始源直连失败，${providerId} 本次运行改用国内镜像瓦片`, 'GCJ-02 已纠偏回 WGS84')
+  }
+  const shift = tileWgs84ShiftPixels(level, x, y)
+  if (!shift) {
+    const fallbackUrl = amapFallbackTileUrl(kind, level, x, y)
+    if (!fallbackUrl) return null
+    try {
+      const response = await fetchTileWithRetry(fallbackUrl)
+      if (!response.ok) return null
+      const data = await response.arrayBuffer()
+      const contentType = response.headers.get('content-type') ?? 'image/png'
+      if (settings.tileCacheEnabled) writeTile({ ...key, data, contentType, expiresAt: Date.now() + TILE_TTL_MS })
+      return new Response(data, { headers: { 'content-type': contentType, 'x-guearth-cache': 'miss', 'x-guearth-fallback': 'amap' } })
+    } catch {
+      return null
+    }
+  }
+  const warped = await warpTileToWgs84(level, x, y, (sourceLevel, sourceX, sourceY) => fetchAmapSourceTile(kind, sourceLevel, sourceX, sourceY))
+  if (!warped) return null
+  if (settings.tileCacheEnabled) writeTile({ ...key, data: warped.data, contentType: warped.contentType, expiresAt: Date.now() + TILE_TTL_MS })
+  return new Response(warped.data, { headers: { 'content-type': warped.contentType, 'x-guearth-cache': 'miss', 'x-guearth-fallback': 'amap-warped' } })
 }
 
 async function handleTileProtocol(request: Request): Promise<Response> {
@@ -325,17 +411,16 @@ async function handleTileProtocol(request: Request): Promise<Response> {
   try {
     const response = await fetchTileWithRetry(remoteUrl)
     if (!response.ok) {
-      if (response.status === 429 || response.status >= 500) {
-        const stale = cachedTileResponse(key, true)
-        if (stale) return stale
-      }
-      return new Response(`Tile request failed: ${response.status}`, { status: response.status })
+      if (response.status !== 429 && response.status < 500) return new Response(`Tile request failed: ${response.status}`, { status: response.status })
+      throw new Error(`Tile upstream ${response.status}`)
     }
     const data = await response.arrayBuffer()
     const contentType = response.headers.get('content-type') ?? 'image/png'
     if (settings.tileCacheEnabled) writeTile({ ...key, data, contentType, expiresAt: Date.now() + TILE_TTL_MS })
     return new Response(data, { headers: { 'content-type': contentType, 'x-guearth-cache': 'miss' } })
   } catch {
+    const fallback = await fallbackTileResponse(providerId, key)
+    if (fallback) return fallback
     const stale = cachedTileResponse(key, true)
     if (stale) return stale
     return new Response('Tile unavailable', { status: 502 })
