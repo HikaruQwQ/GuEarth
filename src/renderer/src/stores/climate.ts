@@ -31,7 +31,7 @@ export const thematicLayerCatalog: ThematicLayerMeta[] = [
   { id: 'hu-line', name: '胡焕庸线', description: '黑河—腾冲线与东西两侧人口对比' },
   { id: 'migration-flows', name: '人口迁移流动', description: '主要省际人口迁移流向示意（可点击查看）' },
   { id: 'city-tiers', name: '中国城市等级', description: '全国/区域/省会/地级/县级五级城市与服务范围示意（可点击查看）' },
-  { id: 'functional-zones', name: '城市功能区模式', description: '商业区、住宅区、工业区分布模式示意（可点击查看成因）' }
+  { id: 'functional-zones', name: '城市功能分区（武汉）', description: '武汉真实功能分区锚定：江汉路商圈、武钢青山区、沌口汽车城、光谷等（可点击查看）' }
 ]
 
 const MONTHS_PER_SECOND = 0.5

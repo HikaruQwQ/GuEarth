@@ -91,6 +91,28 @@ export const FUNCTIONAL_ZONES: FunctionalZoneSpec[] = [
   { name: '工业区', kind: 'industrial', color: '#531dab', summary: '多分布于城市外缘、沿主要交通干线（铁路、公路、河流）布局，以降低地租与运输成本、保护城市环境；应布局于盛行风的下风向、与季风区垂直的郊外或最小风频的上风向，并在与居住区之间设置卫生防护带。' }
 ]
 
+export interface FunctionalDistrict {
+  name: string
+  kind: FunctionalZoneSpec['kind']
+  longitude: number
+  latitude: number
+  radiusKm: number
+  note: string
+}
+
+export const wuhanFunctionalDistricts: FunctionalDistrict[] = [
+  { name: '江汉路·中山大道商圈', kind: 'commercial', longitude: 114.289, latitude: 30.581, radiusKm: 1.5, note: '汉口传统商业核心（步行街），位于城市中心、交通最便捷处' },
+  { name: '武汉中央商务区（王家墩）', kind: 'commercial', longitude: 114.263, latitude: 30.603, radiusKm: 1.8, note: '武汉CBD：金融与总部办公集聚的现代中心商务区' },
+  { name: '中南路·楚河汉街商圈', kind: 'commercial', longitude: 114.345, latitude: 30.549, radiusKm: 1.8, note: '武昌商业核心：中南路—中北路商务带与楚河汉街' },
+  { name: '常青花园片区', kind: 'residential', longitude: 114.247, latitude: 30.628, radiusKm: 2.2, note: '汉口西北大型居住区，依托轨道交通与主干道扩展' },
+  { name: '后湖片区', kind: 'residential', longitude: 114.287, latitude: 30.648, radiusKm: 2.5, note: '汉口北部大型居住新区' },
+  { name: '南湖片区', kind: 'residential', longitude: 114.322, latitude: 30.48, radiusKm: 2.5, note: '武昌南部大型居住区，毗邻南湖' },
+  { name: '青山区（武钢）', kind: 'industrial', longitude: 114.392, latitude: 30.637, radiusKm: 3, note: '武钢主厂区：钢铁工业沿长江布局，位于主城区东北外缘' },
+  { name: '武汉经开区（沌口）', kind: 'industrial', longitude: 114.19, latitude: 30.489, radiusKm: 3, note: '汽车城：整车与零部件产业，位于主城区西南郊' },
+  { name: '东湖高新区（光谷）', kind: 'industrial', longitude: 114.43, latitude: 30.482, radiusKm: 3.5, note: '光电子等高新技术产业，位于主城区东南郊' },
+  { name: '阳逻开发区', kind: 'industrial', longitude: 114.558, latitude: 30.662, radiusKm: 2.5, note: '港口重工配套：依托长江深水港，位于主城区东北沿江' }
+]
+
 export interface CentralPlaceCase {
   name: string
   city: string

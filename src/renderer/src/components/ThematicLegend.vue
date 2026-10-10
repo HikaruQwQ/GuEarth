@@ -114,7 +114,7 @@ const functionalZoneEntries = FUNCTIONAL_ZONES.map((spec) => ({ name: spec.name,
       <div class="legend-item legend-hint"><span>圆圈为该等级典型服务范围示意</span></div>
     </div>
     <div v-if="store.overlays['functional-zones']" class="legend-group">
-      <div class="legend-heading">城市功能区（放大模式示意）</div>
+      <div class="legend-heading">武汉城市功能分区（真实区位）</div>
       <div v-for="zone in functionalZoneEntries" :key="zone.name" class="legend-item">
         <span class="swatch" :style="{ background: zone.color }"></span><span>{{ zone.name }}</span>
       </div>

@@ -18,7 +18,7 @@ import { typhoonIntensityStyles, typhoonTracks } from '@renderer/thematic/typhoo
 import { ensoAnomalyColor, ensoPhaseMeta } from '@renderer/thematic/ensoPhases'
 import { subsolarPointDeg } from '@renderer/thematic/solarMath'
 import { densityColor, densityOf, fanMigrationEndpoints, huLineEndpoints, huLineFacts, huLinePath, migrationFacts, migrationFlows, provincePopulation, provinceSummary, smoothMigrationPath } from '@renderer/thematic/populationCensus'
-import { cityTierOf, FUNCTIONAL_ZONES, urbanCities } from '@renderer/thematic/urbanCities'
+import { cityTierOf, FUNCTIONAL_ZONES, urbanCities, wuhanFunctionalDistricts } from '@renderer/thematic/urbanCities'
 
 const WARM_COLOR = '#f5222d'
 const COLD_COLOR = '#1677ff'
@@ -1040,33 +1040,22 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
   }
 
   function buildFunctionalZones(dataSource: Cesium.CustomDataSource): void {
-    const CASE_LON = 123.4
-    const CASE_LAT = 35.2
-    const LAT_DEG_PER_KM = 1 / 110.57
-    const LNG_DEG_PER_KM = 1 / (111.32 * Math.cos((CASE_LAT * Math.PI) / 180))
-    const INDUSTRIAL_OFFSET_KM = 72
-    const industrialOffsetDeg = INDUSTRIAL_OFFSET_KM * LNG_DEG_PER_KM
-    const zoneSpecs: Array<{ center: [number, number]; radiusKm: number; spec: (typeof FUNCTIONAL_ZONES)[number]; labelAt: [number, number] }> = [
-      { center: [CASE_LON, CASE_LAT], radiusKm: 16, spec: FUNCTIONAL_ZONES[0], labelAt: [CASE_LON, CASE_LAT + 16 * LAT_DEG_PER_KM] },
-      { center: [CASE_LON, CASE_LAT], radiusKm: 46, spec: FUNCTIONAL_ZONES[1], labelAt: [CASE_LON, CASE_LAT - 46 * LAT_DEG_PER_KM] },
-      { center: [CASE_LON + industrialOffsetDeg, CASE_LAT], radiusKm: 20, spec: FUNCTIONAL_ZONES[2], labelAt: [CASE_LON + industrialOffsetDeg, CASE_LAT + 20 * LAT_DEG_PER_KM] },
-      { center: [CASE_LON - industrialOffsetDeg, CASE_LAT], radiusKm: 20, spec: FUNCTIONAL_ZONES[2], labelAt: [CASE_LON - industrialOffsetDeg, CASE_LAT + 20 * LAT_DEG_PER_KM] }
-    ]
-    for (const zone of zoneSpecs) {
-      const color = Cesium.Color.fromCssColorString(zone.spec.color)
-      const ringCartesians = toRingCartesians(circleRingDegrees(zone.center[0], zone.center[1], zone.radiusKm, 64))
+    for (const district of wuhanFunctionalDistricts) {
+      const spec = FUNCTIONAL_ZONES.find((item) => item.kind === district.kind) ?? FUNCTIONAL_ZONES[0]
+      const color = Cesium.Color.fromCssColorString(spec.color)
       const properties = new Cesium.PropertyBag({
-        name: `${zone.spec.name}（模式示意）`,
+        name: `${district.name}（${spec.name}）`,
         layerId: 'functional-zones',
-        summary: `${zone.spec.summary}（图为放大模式示意，不代表真实区位）`
+        summary: `${district.note}。${spec.summary}`
       })
+      const ringCartesians = toRingCartesians(circleRingDegrees(district.longitude, district.latitude, district.radiusKm, 48))
       dataSource.entities.add({
         properties,
         polygon: {
           hierarchy: new Cesium.PolygonHierarchy(ringCartesians),
           height: 0,
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-          material: color.withAlpha(0.22)
+          material: color.withAlpha(0.25)
         }
       })
       dataSource.entities.add({
@@ -1080,34 +1069,29 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
       })
       dataSource.entities.add({
         properties,
-        position: Cesium.Cartesian3.fromDegrees(zone.labelAt[0], zone.labelAt[1]),
+        position: Cesium.Cartesian3.fromDegrees(district.longitude, district.latitude),
+        point: {
+          pixelSize: 9,
+          color,
+          outlineColor: Cesium.Color.WHITE,
+          outlineWidth: 1.6,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
+        },
         label: {
-          text: zone.spec.name,
-          font: labelFont(13, 600),
+          text: district.name,
+          font: labelFont(12, 600),
           fillColor: color,
           showBackground: true,
-          backgroundColor: Cesium.Color.WHITE.withAlpha(0.8),
-          backgroundPadding: new Cesium.Cartesian2(7, 4),
+          backgroundColor: Cesium.Color.WHITE.withAlpha(0.78),
+          backgroundPadding: new Cesium.Cartesian2(6, 3),
+          pixelOffset: new Cesium.Cartesian2(0, -18),
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
-          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1500000)
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 600000)
         }
       })
     }
-    dataSource.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(CASE_LON, CASE_LAT + 58 * LAT_DEG_PER_KM),
-      label: {
-        text: '城市功能分区（放大模式示意）',
-        font: labelFont(12, 600),
-        fillColor: Cesium.Color.fromCssColorString('rgba(0,0,0,0.65)'),
-        showBackground: true,
-        backgroundColor: Cesium.Color.WHITE.withAlpha(0.75),
-        backgroundPadding: new Cesium.Cartesian2(8, 4),
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1500000)
-      }
-    })
   }
 
   function provinceRingsToHierarchy(rings: number[][][]): Cesium.PolygonHierarchy | null {
@@ -1198,7 +1182,7 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     'hu-line': { longitude: 112, latitude: 36, height: 9000000 },
     'migration-flows': { longitude: 110, latitude: 30, height: 10000000 },
     'city-tiers': { longitude: 108, latitude: 33, height: 10500000 },
-    'functional-zones': { longitude: 123.4, latitude: 35.2, height: 400000 }
+    'functional-zones': { longitude: 114.34, latitude: 30.56, height: 130000 }
   }
 
   function syncOverlays(): void {
