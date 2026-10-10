@@ -171,6 +171,7 @@ export interface PoiStatisticsRequest {
   radiusMeters?: number
   types?: string
   keywords?: string
+  maxSamples?: number
 }
 
 const POI_STATS_MAX_SAMPLES = 900
@@ -228,7 +229,13 @@ export async function poiStatistics(request: PoiStatisticsRequest): Promise<PoiS
     }
   }
   const radius = Math.round(Math.min(50_000, Math.max(200, request.radiusMeters ?? 3_000)))
-  const types = request.types?.split('|').map((item) => item.trim()).filter(Boolean).join('|') ?? ''
+  const maxSamples = Math.min(POI_STATS_MAX_SAMPLES, Math.max(POI_STATS_PAGE_SIZE, request.maxSamples ?? POI_STATS_MAX_SAMPLES))
+  const types = request.types
+    ?.split('|')
+    .map((item) => item.trim())
+    .filter((item) => /^\d{2}$|^\d{4}$|^\d{6}$/.test(item))
+    .map((item) => item.padEnd(6, '0'))
+    .join('|') ?? ''
   const aroundParams: Record<string, string> = {
     key,
     location: `${roundCoordinate(longitude)},${roundCoordinate(latitude)}`,
@@ -278,11 +285,11 @@ export async function poiStatistics(request: PoiStatisticsRequest): Promise<PoiS
   }
   collect(first.pois)
   const reportedTotal = first.total > 0 ? first.total : first.pois.length
-  const maxPages = Math.ceil(Math.min(reportedTotal, POI_STATS_MAX_SAMPLES) / POI_STATS_PAGE_SIZE)
+  const maxPages = Math.ceil(Math.min(reportedTotal, maxSamples) / POI_STATS_PAGE_SIZE)
   const pageCount = Math.min(POI_STATS_MAX_PAGES, maxPages)
   let pagesFetched = 1
   if (pageCount > 1) {
-    for (let page = 2; page <= pageCount; page += 1) {
+    for (let page = 2; page <= pageCount && sampled < maxSamples; page += 1) {
       const pageParams: Record<string, string> = { ...aroundParams, page: String(page) }
       const pageUrl = requestUrl('https://restapi.amap.com/v3/place/around', pageParams, securityKey)
       const pageResult = await amapThrottle.run(() => requestPois(pageUrl))
@@ -296,7 +303,7 @@ export async function poiStatistics(request: PoiStatisticsRequest): Promise<PoiS
   const categories = [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([code, count]) => ({ code, label: POI_CATEGORY_LABELS[code] ?? code, count }))
-  const radiusNote = `以${resolvedName}为中心 ${radius} 米范围内的 POI 抽样统计（共 ${reportedTotal} 条，抽样 ${sampled} 条；受高德分页与配额限制，最多抽样 ${POI_STATS_MAX_SAMPLES} 条）`
+  const radiusNote = `以${resolvedName}为中心 ${radius} 米范围内的 POI 抽样统计（共 ${reportedTotal} 条，抽样 ${sampled} 条；受高德分页与配额限制，最多抽样 ${maxSamples} 条）`
   return {
     center: { name: resolvedName, longitude, latitude },
     radiusMeters: radius,

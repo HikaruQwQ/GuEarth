@@ -5,6 +5,7 @@ import { climateZones } from '@renderer/thematic/climateZones'
 import { koppenZones } from '@renderer/thematic/koppenZones'
 import { windRampStops } from '@renderer/thematic/windField'
 import { densityBins } from '@renderer/thematic/populationCensus'
+import { CITY_TIER_META, FUNCTIONAL_ZONES } from '@renderer/thematic/urbanCities'
 
 const store = useClimateStore()
 
@@ -12,6 +13,8 @@ const windGradient = computed(() => `linear-gradient(90deg, ${windRampStops.join
 const zoneEntries = climateZones.map((zone) => ({ name: zone.name, color: zone.color }))
 const koppenEntries = koppenZones.map((zone) => ({ name: zone.name, color: zone.borderColor ?? zone.color }))
 const densityEntries = densityBins.map((bin) => ({ label: bin.label, color: bin.color }))
+const tierEntries = CITY_TIER_META.map((meta) => ({ name: meta.name, color: meta.color }))
+const functionalZoneEntries = FUNCTIONAL_ZONES.map((spec) => ({ name: spec.name, color: spec.color }))
 </script>
 
 <template>
@@ -103,6 +106,19 @@ const densityEntries = densityBins.map((bin) => ({ label: bin.label, color: bin.
       <div class="legend-item"><span class="swatch" style="height: 3px; background: rgba(250, 140, 22, 0.72)"></span><span>次要迁移流向</span></div>
       <div class="legend-item legend-hint"><span>线宽表示规模，放大后显示次要路线标签</span></div>
     </div>
+    <div v-if="store.overlays['city-tiers']" class="legend-group">
+      <div class="legend-heading">城市等级（服务半径示意）</div>
+      <div v-for="tier in tierEntries" :key="tier.name" class="legend-item">
+        <span class="swatch swatch-dot" :style="{ background: tier.color }"></span><span>{{ tier.name }}</span>
+      </div>
+      <div class="legend-item legend-hint"><span>圆圈为该等级典型服务范围示意</span></div>
+    </div>
+    <div v-if="store.overlays['functional-zones']" class="legend-group">
+      <div class="legend-heading">城市功能区（放大模式示意）</div>
+      <div v-for="zone in functionalZoneEntries" :key="zone.name" class="legend-item">
+        <span class="swatch" :style="{ background: zone.color }"></span><span>{{ zone.name }}</span>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -170,6 +186,12 @@ const densityEntries = densityBins.map((bin) => ({ label: bin.label, color: bin.
   height: 0;
   border-radius: 0;
   border-top: 2px dashed rgba(0, 0, 0, 0.45);
+}
+
+.swatch-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
 }
 
 .wind-ramp {

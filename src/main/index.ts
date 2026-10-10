@@ -260,6 +260,11 @@ function computeBaiduSn(path: string, queryString: string, sk: string): string {
 
 function tileRemoteUrl(providerId: string, styleId: string, level: number, x: number, y: number): string | undefined {
   if (providerId === 'osm') return `https://tile.openstreetmap.org/${level}/${x}/${y}.png`
+  if (providerId === 'viirs-night') {
+    if (level > 8) return undefined
+    const date = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    return `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_SNPP_DayNightBand_AtSensor_M15/default/${date}/GoogleMapsCompatible_Level8/${level}/${y}/${x}.jpeg`
+  }
   if (providerId === 'esri-imagery') return `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${level}/${y}/${x}`
   if (providerId === 'opentopomap') return `https://${['a', 'b', 'c'][((x % 3) + 3) % 3]}.tile.opentopomap.org/${level}/${x}/${y}.png`
   if (providerId === 'baidu') {
@@ -687,7 +692,8 @@ function registerIpcHandlers(): void {
       city: stringArg(request.city),
       radiusMeters: numberArg(request.radiusMeters),
       types: stringArg(request.types),
-      keywords: stringArg(request.keywords)
+      keywords: stringArg(request.keywords),
+      maxSamples: numberArg(request.maxSamples)
     })
   })
   ipcMain.handle('datasets:earthquakes', () => loadEarthquakeFeed())

@@ -21,7 +21,8 @@ const layerRegistry: Record<string, LayerProvider> = {
   osm: { meta: providerMeta('osm'), createImageryProvider: async (styleId) => createBasemapImageryProvider('osm', styleId) },
   'esri-imagery': { meta: providerMeta('esri-imagery'), createImageryProvider: async (styleId) => createBasemapImageryProvider('esri-imagery', styleId) },
   opentopomap: { meta: providerMeta('opentopomap'), createImageryProvider: async (styleId) => createBasemapImageryProvider('opentopomap', styleId) },
-  baidu: { meta: providerMeta('baidu'), createImageryProvider: async (styleId) => createBasemapImageryProvider('baidu', styleId) }
+  baidu: { meta: providerMeta('baidu'), createImageryProvider: async (styleId) => createBasemapImageryProvider('baidu', styleId) },
+  'viirs-night': { meta: providerMeta('viirs-night'), createImageryProvider: async (styleId) => createBasemapImageryProvider('viirs-night', styleId) }
 }
 
 const terrainRegistry: Record<string, () => Promise<Cesium.TerrainProvider>> = {

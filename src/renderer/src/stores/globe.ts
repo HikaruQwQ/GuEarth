@@ -47,7 +47,8 @@ export type SceneMode = '2D' | '3D'
 export const providerCatalog: ProviderMeta[] = [
   { id: 'osm', name: 'OpenStreetMap', description: '道路与地名', region: 'global', coordinateSystem: 'WGS84', requiresKey: false, styles: [{ id: 'standard', name: '标准' }], defaultStyleId: 'standard' },
   { id: 'esri-imagery', name: 'Esri', description: '卫星影像', region: 'global', coordinateSystem: 'WGS84', requiresKey: false, styles: [{ id: 'satellite', name: '卫星' }], defaultStyleId: 'satellite' },
-  { id: 'opentopomap', name: 'OpenTopoMap', description: '地形晕渲', region: 'global', coordinateSystem: 'WGS84', requiresKey: false, styles: [{ id: 'topo', name: '地形' }], defaultStyleId: 'topo' }
+  { id: 'opentopomap', name: 'OpenTopoMap', description: '地形晕渲', region: 'global', coordinateSystem: 'WGS84', requiresKey: false, styles: [{ id: 'topo', name: '地形' }], defaultStyleId: 'topo' },
+  { id: 'viirs-night', name: 'NASA 夜光', description: 'VIIRS 夜间灯光（Black Marble）', region: 'global', coordinateSystem: 'WGS84', requiresKey: false, styles: [{ id: 'night', name: '夜光' }], defaultStyleId: 'night' }
 ]
 
 export interface BasemapCategoryMeta {
@@ -59,7 +60,8 @@ export interface BasemapCategoryMeta {
 export const basemapCategories: BasemapCategoryMeta[] = [
   { id: 'road', name: '道路', providerIds: ['osm'] },
   { id: 'satellite', name: '卫星', providerIds: ['esri-imagery'] },
-  { id: 'topo', name: '地形', providerIds: ['opentopomap'] }
+  { id: 'topo', name: '地形', providerIds: ['opentopomap'] },
+  { id: 'night', name: '夜光', providerIds: ['viirs-night'] }
 ]
 
 export const credentialOnlyProviders: ProviderMeta[] = [

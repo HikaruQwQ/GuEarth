@@ -57,6 +57,7 @@ import ExogenicPanel from '@renderer/components/ExogenicPanel.vue'
 import EarthLayersPanel from '@renderer/components/EarthLayersPanel.vue'
 import TimezonePanel from '@renderer/components/TimezonePanel.vue'
 import PopulationPanel from '@renderer/components/PopulationPanel.vue'
+import CitiesPanel from '@renderer/components/CitiesPanel.vue'
 import HuLineOverlay from '@renderer/components/HuLineOverlay.vue'
 import ThematicLegend from '@renderer/components/ThematicLegend.vue'
 import FrontalCyclone from '@renderer/components/FrontalCyclone.vue'
@@ -420,6 +421,18 @@ const teachingPanelCatalog: { id: string; name: string; hint: string; open: () =
   { id: 'exogenic', name: '外力作用过程', hint: '演示风化、侵蚀、搬运、堆积的外力作用链条', open: () => landformStore.setPanel('exogenic') },
   { id: 'earth-layers', name: '地球的圈层结构', hint: '展示地球内部圈层划分剖面', open: () => landformStore.setPanel('earth-layers') },
   {
+    id: 'population',
+    name: '人口数据面板',
+    hint: '展示人口金字塔、城镇化曲线与胡焕庸线对比',
+    open: () => populationStore.setPanel('population')
+  },
+  {
+    id: 'cities',
+    name: '城镇与中心地验证',
+    hint: '展示城市等级体系，并可用 POI 统计对比验证中心地理论（需配置高德密钥）',
+    open: () => populationStore.setPanel('cities')
+  },
+  {
     id: 'timezone-compare',
     name: '地方时对比',
     hint: '已进入地方时点选模式，请提示用户在地球上依次单击两个地点，出现「地方时对比」面板后即可讲解两地时差；按 Esc 退出点选模式',
@@ -431,7 +444,7 @@ aiStore.registerTool({
   label: '打开教学面板',
   definition: {
     name: 'open_panel',
-    description: '打开教学演示面板配合讲解：热力环流、大气受热过程、大气垂直分层、水循环、海水温度与盐度、潮汐与波浪、陆地水体与河流补给、褶皱与断层、河流地貌发育、典型地貌识别、外力作用过程、地球的圈层结构、太阳视运动轨迹、黄赤交角可调探究、自转速度与周期、地方时对比。close 为 true 时关闭全部教学面板。',
+    description: '打开教学演示面板配合讲解：热力环流、大气受热过程、大气垂直分层、水循环、海水温度与盐度、潮汐与波浪、陆地水体与河流补给、褶皱与断层、河流地貌发育、典型地貌识别、外力作用过程、地球的圈层结构、太阳视运动轨迹、黄赤交角可调探究、自转速度与周期、人口数据面板、城镇与中心地验证、地方时对比。close 为 true 时关闭全部教学面板。',
     parameters: {
       type: 'object',
       properties: {
@@ -1103,6 +1116,7 @@ function deleteSelectedShape(): void {
       <ExogenicPanel v-if="landformStore.panel === 'exogenic'" :viewer="viewer" @close="landformStore.setPanel(null)" />
       <EarthLayersPanel v-if="landformStore.panel === 'earth-layers'" @close="landformStore.setPanel(null)" />
       <PopulationPanel v-if="populationStore.panel === 'population'" @close="populationStore.setPanel(null)" />
+      <CitiesPanel v-if="populationStore.panel === 'cities'" @close="populationStore.setPanel(null)" />
       <TimezonePanel v-if="timezoneComparison" :comparison="timezoneComparison" @clear="clearTimezone" />
       <ThematicLegend />
       <ThematicInfoCard />

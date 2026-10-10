@@ -123,6 +123,20 @@ function populationPanelEntry(name: string, description: string): LabEntry {
   }
 }
 
+function citiesPanelEntry(name: string, description: string): LabEntry {
+  return {
+    key: 'cities',
+    name,
+    description,
+    active: () => populationStore.panel === 'cities',
+    toggle: () => {
+      const next = populationStore.panel !== 'cities'
+      closeAllPanels()
+      if (next) populationStore.setPanel('cities')
+    }
+  }
+}
+
 const chapters: LabChapter[] = [
   {
     id: 'earth-motion',
@@ -225,7 +239,10 @@ const chapters: LabChapter[] = [
       populationPanelEntry('人口数据面板', '人口金字塔、城镇化曲线与胡焕庸线对比'),
       layerEntry('province-population'),
       layerEntry('hu-line'),
-      layerEntry('migration-flows')
+      layerEntry('migration-flows'),
+      citiesPanelEntry('城镇与中心地验证', '城市等级体系、中心地理论 POI 对比验证'),
+      layerEntry('city-tiers'),
+      layerEntry('functional-zones')
     ]
   }
 ]

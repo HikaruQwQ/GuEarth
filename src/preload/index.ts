@@ -306,6 +306,7 @@ export interface PoiStatisticsRequest {
   radiusMeters?: number
   types?: string
   keywords?: string
+  maxSamples?: number
 }
 
 export interface SceneCamera {
