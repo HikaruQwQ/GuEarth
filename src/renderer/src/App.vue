@@ -127,7 +127,11 @@ const selectedShape = computed(() => shapes.value.find((shape) => shape.id === s
 const levelSwitcherVisible = computed(() => isGlobeReady.value && camera.value.height < 5000000)
 const showGlobeLoading = computed(() => !isGlobeReady.value && !globeError.value)
 const isLabOpen = ref(false)
+const nightBasemapActive = computed(() => store.selectedLayerId === 'viirs-night')
 const labActive = computed(() => climateStore.hasActiveOverlay || solarStore.active || solarStore.motionPanel !== null || atmosphereStore.panel !== null || hydrologyStore.panel !== null || landformStore.panel !== null || populationStore.panel !== null || activeTool.value === 'timezone')
+watch(nightBasemapActive, (active) => {
+  if (active) isLabOpen.value = false
+})
 const drawHint = computed(() => {
   if (!activeTool.value) return ''
   if (activeTool.value === 'timezone') return '单击选取两个地点对比地方时 · Esc 退出'
@@ -470,6 +474,7 @@ aiStore.registerTool({
     }
     const panel = teachingPanelCatalog.find((item) => item.id === args.panelId)
     if (!panel) return { error: `未知面板 ${String(args.panelId)}，可用面板：${teachingPanelCatalog.map((item) => `${item.id}（${item.name}）`).join('、')}` }
+    if (nightBasemapActive.value) return { error: '夜光模式下教学面板不可用，请先用 set_basemap 切回其他底图' }
     panel.open()
     return { status: 'ok', panelId: panel.id, name: panel.name, message: `已打开「${panel.name}」面板：${panel.hint}` }
   }
@@ -975,6 +980,10 @@ function handleUpdateClick(): void {
 }
 
 function handleToggleLab(): void {
+  if (nightBasemapActive.value) {
+    message.info('夜光模式下地理实验室不可用，切换回其他底图后恢复')
+    return
+  }
   isLabOpen.value = !isLabOpen.value
 }
 
@@ -1073,6 +1082,7 @@ function deleteSelectedShape(): void {
         :level-view-active="levelViewActive"
         :level-view-visible="levelSwitcherVisible"
         :lab-active="labActive"
+        :night-basemap-active="nightBasemapActive"
         :update-status="updaterStore.status"
         :update-version="updaterStore.version"
         :update-percent="updaterStore.percent"
