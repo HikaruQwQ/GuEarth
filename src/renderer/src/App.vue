@@ -124,7 +124,9 @@ const isAnnotationPanelOpen = ref(false)
 const systemFonts = ref(['Arial', 'Segoe UI', 'Microsoft YaHei'])
 const selectedShape = computed(() => shapes.value.find((shape) => shape.id === selectedShapeId.value) ?? null)
 const levelSwitcherVisible = computed(() => isGlobeReady.value && camera.value.height < 5000000)
-const showGlobeLoading = computed(() => !isGlobeReady.value && !globeError.value)
+const showGlobeLoading = computed(() => !isGlobeReady.value)
+const globeLoadingText = computed(() => globeError.value ? '地图尚未显示，请检查网络或重试' : globeLoadTimedOut.value ? '地图加载较慢，请检查网络' : '正在加载地图…')
+const globeLoadingRetryable = computed(() => globeLoadTimedOut.value || Boolean(globeError.value))
 const isLabOpen = ref(false)
 const labActive = computed(() => climateStore.hasActiveOverlay || solarStore.active || solarStore.motionPanel !== null || atmosphereStore.panel !== null || hydrologyStore.panel !== null || landformStore.panel !== null || populationStore.panel !== null || activeTool.value === 'timezone')
 const drawHint = computed(() => {
@@ -1041,10 +1043,10 @@ function deleteSelectedShape(): void {
         @update="(annotation) => updateSelectedShape({ annotation })"
       />
       <div v-if="showGlobeLoading" class="globe-loading">
-        <a-spin :spinning="!globeLoadTimedOut" size="small" />
-        <span class="globe-loading-text">{{ globeLoadTimedOut ? '地图加载较慢，请检查网络' : '正在加载地图…' }}</span>
+        <a-spin :spinning="!globeLoadTimedOut && !globeError" size="small" />
+        <span class="globe-loading-text">{{ globeLoadingText }}</span>
         <span v-if="globeLoadStage" class="globe-loading-stage">{{ globeLoadStage }}</span>
-        <a-button v-if="globeLoadTimedOut" type="text" size="small" @click="handleRetry"><ReloadOutlined />重试</a-button>
+        <a-button v-if="globeLoadingRetryable" type="text" size="small" @click="handleRetry"><ReloadOutlined />重试</a-button>
       </div>
       <FailureBanner />
       <CrashDialog />
@@ -1084,8 +1086,8 @@ function deleteSelectedShape(): void {
       />
       <TeachingLab :open="isLabOpen" @close="isLabOpen = false" />
       <PlaceSearchBox @select="flyToPlace" />
-      <MonthTimeline />
-      <SolarTimePanel />
+      <MonthTimeline :viewer="viewer" />
+      <SolarTimePanel :viewer="viewer" />
       <SolarPathPanel v-if="solarStore.motionPanel === 'solar-path'" @close="solarStore.setMotionPanel(null)" />
       <ObliquityPanel v-if="solarStore.motionPanel === 'obliquity'" @close="solarStore.setMotionPanel(null)" />
       <RotationSpeedPanel v-if="solarStore.motionPanel === 'rotation-speed'" @close="solarStore.setMotionPanel(null)" />
