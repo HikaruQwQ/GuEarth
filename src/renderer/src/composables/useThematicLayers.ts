@@ -1040,13 +1040,13 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
   }
 
   function buildFunctionalZones(dataSource: Cesium.CustomDataSource): void {
-    const CASE_LON = 119.4
-    const CASE_LAT = 38.3
-    const zoneSpecs: Array<{ center: [number, number]; radiusKm: number; spec: (typeof FUNCTIONAL_ZONES)[number]; showLabel: boolean }> = [
-      { center: [CASE_LON, CASE_LAT], radiusKm: 18, spec: FUNCTIONAL_ZONES[0], showLabel: true },
-      { center: [CASE_LON, CASE_LAT], radiusKm: 55, spec: FUNCTIONAL_ZONES[1], showLabel: false },
-      { center: [CASE_LON - 92, CASE_LAT - 34], radiusKm: 26, spec: FUNCTIONAL_ZONES[2], showLabel: true },
-      { center: [CASE_LON + 40, CASE_LAT + 78], radiusKm: 26, spec: FUNCTIONAL_ZONES[2], showLabel: false }
+    const CASE_LON = 123.4
+    const CASE_LAT = 35.2
+    const zoneSpecs: Array<{ center: [number, number]; radiusKm: number; spec: (typeof FUNCTIONAL_ZONES)[number]; labelAt: [number, number] }> = [
+      { center: [CASE_LON, CASE_LAT], radiusKm: 16, spec: FUNCTIONAL_ZONES[0], labelAt: [CASE_LON, CASE_LAT + 16 / 110.57] },
+      { center: [CASE_LON, CASE_LAT], radiusKm: 46, spec: FUNCTIONAL_ZONES[1], labelAt: [CASE_LON, CASE_LAT - 46 / 110.57] },
+      { center: [CASE_LON + 72, CASE_LAT], radiusKm: 20, spec: FUNCTIONAL_ZONES[2], labelAt: [CASE_LON + 72, CASE_LAT + 20 / 110.57] },
+      { center: [CASE_LON - 72, CASE_LAT], radiusKm: 20, spec: FUNCTIONAL_ZONES[2], labelAt: [CASE_LON - 72, CASE_LAT + 20 / 110.57] }
     ]
     for (const zone of zoneSpecs) {
       const color = Cesium.Color.fromCssColorString(zone.spec.color)
@@ -1074,10 +1074,9 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
           material: color.withAlpha(0.9)
         }
       })
-      if (!zone.showLabel) continue
       dataSource.entities.add({
         properties,
-        position: Cesium.Cartesian3.fromDegrees(zone.center[0], zone.center[1] + zone.radiusKm / 110.57),
+        position: Cesium.Cartesian3.fromDegrees(zone.labelAt[0], zone.labelAt[1]),
         label: {
           text: zone.spec.name,
           font: labelFont(13, 600),
@@ -1093,7 +1092,7 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     dataSource.entities.add({
       position: Cesium.Cartesian3.fromDegrees(CASE_LON, CASE_LAT),
       label: {
-        text: '商业区 · 住宅区（放大模式示意）',
+        text: '城市功能分区（放大模式示意）',
         font: labelFont(12, 600),
         fillColor: Cesium.Color.fromCssColorString('rgba(0,0,0,0.65)'),
         showBackground: true,
@@ -1193,7 +1192,7 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     'hu-line': { longitude: 112, latitude: 36, height: 9000000 },
     'migration-flows': { longitude: 110, latitude: 30, height: 10000000 },
     'city-tiers': { longitude: 108, latitude: 33, height: 10500000 },
-    'functional-zones': { longitude: 114.3, latitude: 30.55, height: 950000 }
+    'functional-zones': { longitude: 123.4, latitude: 35.2, height: 2200000 }
   }
 
   function syncOverlays(): void {
