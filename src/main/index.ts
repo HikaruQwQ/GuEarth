@@ -12,7 +12,7 @@ Sentry.init({
     return event
   }
 })
-import { execFileSync } from 'child_process'
+import { execFileSync, spawn } from 'child_process'
 import { dirname, join } from 'path'
 import { flushJsonWrites, readJson, serialQueue, writeAtomic, writeJson } from './jsonStore'
 import { listTileFiles, pruneTileFiles } from './tileCacheFiles'
@@ -21,6 +21,7 @@ import { access, constants, mkdir, open, readFile, rename as renameFile, stat, r
 import type { FileHandle } from 'fs/promises'
 import { createHash, randomUUID } from 'crypto'
 import icon from '../../resources/icon.png?asset'
+import ffmpegInstaller from '@ffmpeg-installer/ffmpeg'
 import type { AnnotationDocument, AnnotationEntry, GeoPosition, GuEarthSettings, GuEarthSettingsPatch, NetworkProxyTestResult, PlaceSearchProvider, ProviderCredentialStatus, RecordingSaveResult, SceneCamera, SceneDocument, SceneSnapshot, SceneSimTime, StoredShape, TeachingScene, TileCacheEntry, TileCacheStats, TileKey } from '../preload'
 import { assertEncryptionAvailable, assertSafeId, clearProviderKey, hasProviderKey, initKeyVault, readProviderKey, writeProviderKey } from './keyVault'
 import { baiduLngLatToTile, tileCenter, wgs84ToBd09 } from './geo'
@@ -552,6 +553,17 @@ function recordingExtension(mimeType: unknown): string {
   return extension
 }
 
+function finalizeMp4Recording(inputPath: string, outputPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const process = spawn(ffmpegInstaller.path, ['-hide_banner', '-loglevel', 'error', '-y', '-i', inputPath, '-map', '0', '-c', 'copy', '-movflags', '+faststart', outputPath], { windowsHide: true, stdio: 'ignore' })
+    process.once('error', reject)
+    process.once('close', (code) => {
+      if (code === 0) resolve()
+      else reject(new Error(`视频容器最终化失败（FFmpeg 退出码 ${code ?? '未知'}）`))
+    })
+  })
+}
+
 function getRecordingWriter(recordingId: unknown, senderId: number): RecordingWriter {
   if (typeof recordingId !== 'string') throw new Error('无效的录制会话')
   const writer = recordingWriters.get(recordingId)
@@ -788,7 +800,16 @@ function registerIpcHandlers(): void {
       await writer.queue
       if (writer.bytes === 0) throw new Error('未能生成视频数据')
       await writer.handle.close()
-      await renameFile(writer.temporaryPath, writer.path)
+      const finalizedPath = `${writer.path}.final.part`
+      await unlink(finalizedPath).catch(() => undefined)
+      try {
+        await finalizeMp4Recording(writer.temporaryPath, finalizedPath)
+        await renameFile(finalizedPath, writer.path)
+        await unlink(writer.temporaryPath).catch(() => undefined)
+      } catch (error) {
+        await unlink(finalizedPath).catch(() => undefined)
+        throw error
+      }
       recordingWriters.delete(recordingId as string)
       shell.showItemInFolder(writer.path)
       return { path: writer.path, bytes: writer.bytes }

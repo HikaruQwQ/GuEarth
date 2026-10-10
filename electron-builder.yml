@@ -8,8 +8,10 @@ files:
   - package.json
   - resources/geo/**
   - '!node_modules/**'
+  - node_modules/@ffmpeg-installer/**
 asarUnpack:
   - out/renderer/cesium/**
+  - node_modules/@ffmpeg-installer/**
 mac:
   category: public.app-category.education
   target:

@@ -42,5 +42,8 @@
     "vue": "^3.5.43",
     "vue-echarts": "^8.3.1",
     "vue-tsc": "^3.3.11"
+  },
+  "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0"
   }
 }
