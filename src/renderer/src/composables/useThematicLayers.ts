@@ -1042,11 +1042,15 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
   function buildFunctionalZones(dataSource: Cesium.CustomDataSource): void {
     const CASE_LON = 123.4
     const CASE_LAT = 35.2
+    const LAT_DEG_PER_KM = 1 / 110.57
+    const LNG_DEG_PER_KM = 1 / (111.32 * Math.cos((CASE_LAT * Math.PI) / 180))
+    const INDUSTRIAL_OFFSET_KM = 72
+    const industrialOffsetDeg = INDUSTRIAL_OFFSET_KM * LNG_DEG_PER_KM
     const zoneSpecs: Array<{ center: [number, number]; radiusKm: number; spec: (typeof FUNCTIONAL_ZONES)[number]; labelAt: [number, number] }> = [
-      { center: [CASE_LON, CASE_LAT], radiusKm: 16, spec: FUNCTIONAL_ZONES[0], labelAt: [CASE_LON, CASE_LAT + 16 / 110.57] },
-      { center: [CASE_LON, CASE_LAT], radiusKm: 46, spec: FUNCTIONAL_ZONES[1], labelAt: [CASE_LON, CASE_LAT - 46 / 110.57] },
-      { center: [CASE_LON + 72, CASE_LAT], radiusKm: 20, spec: FUNCTIONAL_ZONES[2], labelAt: [CASE_LON + 72, CASE_LAT + 20 / 110.57] },
-      { center: [CASE_LON - 72, CASE_LAT], radiusKm: 20, spec: FUNCTIONAL_ZONES[2], labelAt: [CASE_LON - 72, CASE_LAT + 20 / 110.57] }
+      { center: [CASE_LON, CASE_LAT], radiusKm: 16, spec: FUNCTIONAL_ZONES[0], labelAt: [CASE_LON, CASE_LAT + 16 * LAT_DEG_PER_KM] },
+      { center: [CASE_LON, CASE_LAT], radiusKm: 46, spec: FUNCTIONAL_ZONES[1], labelAt: [CASE_LON, CASE_LAT - 46 * LAT_DEG_PER_KM] },
+      { center: [CASE_LON + industrialOffsetDeg, CASE_LAT], radiusKm: 20, spec: FUNCTIONAL_ZONES[2], labelAt: [CASE_LON + industrialOffsetDeg, CASE_LAT + 20 * LAT_DEG_PER_KM] },
+      { center: [CASE_LON - industrialOffsetDeg, CASE_LAT], radiusKm: 20, spec: FUNCTIONAL_ZONES[2], labelAt: [CASE_LON - industrialOffsetDeg, CASE_LAT + 20 * LAT_DEG_PER_KM] }
     ]
     for (const zone of zoneSpecs) {
       const color = Cesium.Color.fromCssColorString(zone.spec.color)
@@ -1085,12 +1089,13 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
           backgroundColor: Cesium.Color.WHITE.withAlpha(0.8),
           backgroundPadding: new Cesium.Cartesian2(7, 4),
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1500000)
         }
       })
     }
     dataSource.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(CASE_LON, CASE_LAT),
+      position: Cesium.Cartesian3.fromDegrees(CASE_LON, CASE_LAT + 58 * LAT_DEG_PER_KM),
       label: {
         text: '城市功能分区（放大模式示意）',
         font: labelFont(12, 600),
@@ -1099,7 +1104,8 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
         backgroundColor: Cesium.Color.WHITE.withAlpha(0.75),
         backgroundPadding: new Cesium.Cartesian2(8, 4),
         heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1500000)
       }
     })
   }
@@ -1192,7 +1198,7 @@ export function useThematicLayers(viewer: Ref<Cesium.Viewer | undefined>): void 
     'hu-line': { longitude: 112, latitude: 36, height: 9000000 },
     'migration-flows': { longitude: 110, latitude: 30, height: 10000000 },
     'city-tiers': { longitude: 108, latitude: 33, height: 10500000 },
-    'functional-zones': { longitude: 123.4, latitude: 35.2, height: 2200000 }
+    'functional-zones': { longitude: 123.4, latitude: 35.2, height: 400000 }
   }
 
   function syncOverlays(): void {
