@@ -4,7 +4,7 @@ import { CloseOutlined, ReloadOutlined } from '@ant-design/icons-vue'
 import { useClimateStore } from '@renderer/stores/climate'
 import { useGlobeStore } from '@renderer/stores/globe'
 import type { PoiStatisticsResult } from '../../../preload'
-import { CENTRAL_PLACE_CASES, CITY_TIER_META, centralPlaceFacts, cityTierOf, urbanCities, type CentralPlaceCase } from '@renderer/thematic/urbanCities'
+import { CENTRAL_PLACE_CASES, CITY_TIER_META, centralPlaceFacts, urbanCities, type CentralPlaceCase } from '@renderer/thematic/urbanCities'
 import BarChart, { type BarSeries } from '@renderer/components/charts/BarChart.vue'
 
 const emit = defineEmits<{ close: [] }>()
@@ -13,7 +13,6 @@ const climateStore = useClimateStore()
 const globeStore = useGlobeStore()
 
 const VERIFICATION_RADIUS_KM = 3
-const PALETTE = ['#1677ff', '#fa8c16', '#52c41a', '#722ed1', '#eb2f96', '#13c2c2', '#fa541c', '#2f54eb']
 
 const verificationCases = CENTRAL_PLACE_CASES.filter((item) => item.level !== 'low')
 const highCase = verificationCases.find((item) => item.level === 'high') ?? verificationCases[0]
@@ -126,7 +125,7 @@ const series = computed<BarSeries[]>(() => [
     </div>
     <div v-if="missingKey" class="panel-note">需要先在「图层管理 → 供应商密钥」配置高德 Web 服务 Key 才能进行 POI 统计。</div>
     <a-button class="panel-action" size="small" block :disabled="running || missingKey" @click="runVerification">
-      <ReloadOutlined spin :disabled="false" /> {{ running ? '统计中…' : '开始 POI 统计对比' }}
+      <ReloadOutlined :spin="running" /> {{ running ? '统计中…' : '开始 POI 统计对比' }}
     </a-button>
     <p v-if="statusText" class="fact">{{ statusText }}</p>
     <template v-if="highResult && lowResult && !highResult.error && !lowResult.error">
